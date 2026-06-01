@@ -23,30 +23,6 @@
 
 namespace duckdb {
 
-// Test-only hook: when sf_mock_token_status != 0, the OAuth exchange uses a
-// MockHttpClient returning that status + sf_mock_token_body instead of the live
-// transport. This lets sqllogictest exercise the exchange without contacting
-// Salesforce. It injects a canned RESPONSE only — it cannot read or exfiltrate
-// the request secrets.
-static unique_ptr<SalesforceHttpClient> BuildHttpClient(ClientContext &context) {
-    Value status_v;
-    if (context.TryGetCurrentSetting("sf_mock_token_status", status_v) &&
-        !status_v.IsNull()) {
-        auto status = status_v.GetValue<int64_t>();
-        if (status != 0) {
-            Value body_v;
-            string body;
-            if (context.TryGetCurrentSetting("sf_mock_token_body", body_v) &&
-                !body_v.IsNull()) {
-                body = body_v.ToString();
-            }
-            return make_uniq_base<SalesforceHttpClient, MockHttpClient>(
-                static_cast<int>(status), std::move(body));
-        }
-    }
-    return CreateLiveHttpClient();
-}
-
 static unique_ptr<Catalog>
 SalesforceAttach(optional_ptr<StorageExtensionInfo> /*info*/,
                  ClientContext &context,
@@ -61,7 +37,7 @@ SalesforceAttach(optional_ptr<StorageExtensionInfo> /*info*/,
 
     // #3: OAuth 2.0 refresh-token exchange. Held in memory only; the request
     // body (with secrets) is never logged, and errors never echo secrets.
-    auto http = BuildHttpClient(context);
+    auto http = BuildHttpClientForContext(context);
     SalesforceTokenSet token = SalesforceAuth::ExchangeRefreshToken(config, *http);
 
     // Authentication succeeded. The catalog/scanner (#5-#9) will consume

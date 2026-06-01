@@ -1,0 +1,140 @@
+# name: test/sql/salesforce_describe.test
+# description: v0.1 #5 — sObject describe -> schema, type mapping, 401 refresh
+#              (mocked HTTP, no network)
+# group: [salesforce]
+
+require salesforce
+
+# Token endpoint mock (POST exchange) — valid for every case below.
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT.SECRET","instance_url":"https://x.my.salesforce.com"}';
+
+# --- describe 200: type mapping across the main Salesforce field types -------
+statement ok
+SET sf_mock_describe_status = 200;
+
+statement ok
+SET sf_mock_describe_first401 = false;
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[
+  {"name":"f_string","type":"string","nillable":true,"length":255,"filterable":true,"sortable":true},
+  {"name":"f_textarea","type":"textarea","nillable":true},
+  {"name":"f_id","type":"id","nillable":false},
+  {"name":"f_boolean","type":"boolean","nillable":false},
+  {"name":"f_int","type":"int","nillable":true},
+  {"name":"f_double","type":"double","nillable":true},
+  {"name":"f_currency","type":"currency","nillable":true,"precision":18,"scale":2},
+  {"name":"f_percent","type":"percent","nillable":true,"precision":5,"scale":2},
+  {"name":"f_date","type":"date","nillable":true},
+  {"name":"f_datetime","type":"datetime","nillable":true},
+  {"name":"f_time","type":"time","nillable":true},
+  {"name":"f_picklist","type":"picklist","nillable":true},
+  {"name":"f_multipicklist","type":"multipicklist","nillable":true},
+  {"name":"f_reference","type":"reference","nillable":true},
+  {"name":"f_base64","type":"base64","nillable":true},
+  {"name":"f_unknown","type":"weirdtype","nillable":true}
+]}';
+
+# 16 fields described.
+query I
+SELECT COUNT(*) FROM salesforce_describe('Account', client_id := 'c', client_secret := 's', refresh_token := 'r');
+----
+16
+
+# Type mapping (ordered by field name for determinism).
+query II
+SELECT name, duckdb_type FROM salesforce_describe('Account', client_id := 'c', client_secret := 's', refresh_token := 'r') ORDER BY name;
+----
+f_base64	BLOB
+f_boolean	BOOLEAN
+f_currency	DECIMAL(18,2)
+f_date	DATE
+f_datetime	TIMESTAMP
+f_double	DOUBLE
+f_id	VARCHAR
+f_int	BIGINT
+f_multipicklist	VARCHAR
+f_percent	DECIMAL(5,2)
+f_picklist	VARCHAR
+f_reference	VARCHAR
+f_string	VARCHAR
+f_textarea	VARCHAR
+f_time	TIME
+f_unknown	VARCHAR
+
+# Unknown type degrades to VARCHAR and is flagged.
+query I
+SELECT unknown_type FROM salesforce_describe('Account', client_id := 'c', client_secret := 's', refresh_token := 'r') WHERE name = 'f_unknown';
+----
+true
+
+# Known types are not flagged unknown.
+query I
+SELECT COUNT(*) FROM salesforce_describe('Account', client_id := 'c', client_secret := 's', refresh_token := 'r') WHERE unknown_type AND name <> 'f_unknown';
+----
+0
+
+# nillable propagates.
+query I
+SELECT nullable FROM salesforce_describe('Account', client_id := 'c', client_secret := 's', refresh_token := 'r') WHERE name = 'f_id';
+----
+false
+
+# --- 401 -> refresh -> retry once (success on retry) -------------------------
+statement ok
+SET sf_mock_describe_first401 = true;
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id","nillable":false}]}';
+
+# First GET returns 401, session re-auths and retries, second GET returns 200.
+query II
+SELECT name, duckdb_type FROM salesforce_describe('Account', client_id := 'c', client_secret := 's', refresh_token := 'r');
+----
+Id	VARCHAR
+
+# --- 401 twice -> clear failure, no secret -----------------------------------
+statement ok
+SET sf_mock_describe_first401 = false;
+
+statement ok
+SET sf_mock_describe_status = 401;
+
+statement error
+SELECT * FROM salesforce_describe('Account', client_id := 'c', client_secret := 'TOPSECRET', refresh_token := 'REFRESHSECRET');
+----
+authentication failed (HTTP 401) after refreshing the token
+
+# --- 404 -> clear failure surfacing the SF errorCode, no secret --------------
+statement ok
+SET sf_mock_describe_status = 404;
+
+statement ok
+SET sf_mock_describe_body = '[{"errorCode":"NOT_FOUND","message":"The requested resource does not exist"}]';
+
+statement error
+SELECT * FROM salesforce_describe('Nope', client_id := 'c', client_secret := 'TOPSECRET', refresh_token := 'REFRESHSECRET');
+----
+HTTP 404): NOT_FOUND - The requested resource does not exist
+
+# --- 403 -> clear failure, no secret -----------------------------------------
+statement ok
+SET sf_mock_describe_status = 403;
+
+statement ok
+SET sf_mock_describe_body = '[{"errorCode":"INSUFFICIENT_ACCESS","message":"insufficient access rights"}]';
+
+statement error
+SELECT * FROM salesforce_describe('Account', client_id := 'c', client_secret := 'TOPSECRET', refresh_token := 'REFRESHSECRET');
+----
+HTTP 403): INSUFFICIENT_ACCESS
+
+# --- missing required named parameter -> clear bind error --------------------
+statement error
+SELECT * FROM salesforce_describe('Account', client_secret := 's', refresh_token := 'r');
+----
+missing required named parameter 'client_id'

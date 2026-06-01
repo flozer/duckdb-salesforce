@@ -1,0 +1,24 @@
+# name: test/sql/salesforce_describe_live.test
+# description: GATED manual test — real sObject describe over HTTPS. Skipped in
+#              normal CI (requires SF_LIVE_* env vars). Never set these in CI.
+# group: [salesforce]
+
+require salesforce
+
+require-env SF_LIVE_CLIENT_ID
+
+require-env SF_LIVE_CLIENT_SECRET
+
+require-env SF_LIVE_REFRESH_TOKEN
+
+# Real describe of the standard Account object (login.salesforce.com by
+# default; for a sandbox set login_url to https://test.salesforce.com). Every
+# org has Account with at least Id + Name, so these must be present.
+query I
+SELECT COUNT(*) >= 2 FROM salesforce_describe('Account',
+    client_id := '${SF_LIVE_CLIENT_ID}',
+    client_secret := '${SF_LIVE_CLIENT_SECRET}',
+    refresh_token := '${SF_LIVE_REFRESH_TOKEN}')
+WHERE name IN ('Id', 'Name');
+----
+true

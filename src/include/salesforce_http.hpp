@@ -29,6 +29,7 @@ class SalesforceHttpClient {
 public:
     virtual ~SalesforceHttpClient() = default;
     virtual HttpResponse Post(const HttpRequest &request) = 0;
+    virtual HttpResponse Get(const HttpRequest &request) = 0;
 };
 
 // Test double: returns a canned status+body without any network. Header-only
@@ -38,17 +39,27 @@ public:
     MockHttpClient(int status, string body) : status_(status), body_(std::move(body)) {
     }
     HttpResponse Post(const HttpRequest & /*request*/) override {
+        return Make();
+    }
+    HttpResponse Get(const HttpRequest & /*request*/) override {
+        return Make();
+    }
+
+private:
+    HttpResponse Make() const {
         HttpResponse r;
         r.transport_ok = true;
         r.status = status_;
         r.body = body_;
         return r;
     }
-
-private:
     int status_;
     string body_;
 };
+
+// Build the HTTP client for an ATTACH / function call: the live transport, or
+// a scripted mock when the sf_mock_* test settings are active.
+unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &context);
 
 // Live HTTPS client factory (#4): httplib + OpenSSL transport with TLS
 // server-certificate verification always ON (no insecure bypass), transient

@@ -24,6 +24,9 @@ set(EXTENSION_SOURCES
     src/salesforce_config.cpp
     src/salesforce_auth.cpp
     src/salesforce_http_client.cpp
+    src/salesforce_session.cpp
+    src/salesforce_types.cpp
+    src/salesforce_describe.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

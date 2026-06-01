@@ -1,27 +1,25 @@
-// Live HTTPS transport (issue #4).
+// Live HTTPS transport (issue #4) + client factory / scripted mock (issue #5).
 //
-// Real network client behind the SalesforceHttpClient interface, built on the
-// vendored httplib + OpenSSL. Guarantees:
-//   - HTTPS only; TLS server-certificate verification is ALWAYS on. There is
-//     no insecure / verify=false build flag.
-//   - the request body (which may carry secrets) is never logged;
-//   - transient failures (connection/TLS-handshake transport errors, HTTP 429
-//     and 5xx) are retried with capped backoff; non-transient failures
-//     (including TLS certificate verification failure) are not retried;
-//   - transport error text is generic (httplib error category) and never
-//     contains the request body.
+// LiveHttpClient: real network client on vendored httplib + OpenSSL.
+//   - HTTPS only; TLS server-certificate verification ALWAYS on (no insecure
+//     build flag).
+//   - transient retry with capped backoff for HTTP 429, 5xx, and connection
+//     failures; certificate-verification failure is permanent (not retried).
+//   - request body never logged; transport errors are generic and carry no
+//     request data/secrets.
 //
-// CI never reaches this code: tests inject MockHttpClient through the ATTACH
-// mock hook. A real exchange is exercised only by the gated manual test.
+// ScriptedMockHttpClient: test double driven by the sf_mock_* settings so
+// sqllogictest can exercise the token exchange (POST) and authenticated GET
+// (describe), including the 401 -> refresh -> retry path, with no network.
 
-// httplib pulls in platform socket + (on Windows) <windows.h>; include it
-// first and keep NOMINMAX so it cannot clobber std::min/std::max used by duckdb.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include "httplib.h"
 
 #include "salesforce_http.hpp"
+
+#include "duckdb/main/client_context.hpp"
 
 #include <chrono>
 #include <thread>
@@ -63,8 +61,6 @@ static bool ParseUrl(const string &url, ParsedUrl &out) {
     return !out.host.empty();
 }
 
-// Load trusted CA roots into the client so verification has an anchor set.
-// Windows: the system ROOT store. Elsewhere: OpenSSL's default verify paths.
 static void ApplyTrustStore(httplib::SSLClient &cli) {
 #ifdef _WIN32
     HCERTSTORE h = CertOpenSystemStoreW(0, L"ROOT");
@@ -92,18 +88,35 @@ static bool IsTransientStatus(int status) {
     return status == 429 || status >= 500;
 }
 
+enum class Method { GET, POST };
+
 class LiveHttpClient final : public SalesforceHttpClient {
 public:
     HttpResponse Post(const HttpRequest &request) override {
+        return Send(Method::POST, request);
+    }
+    HttpResponse Get(const HttpRequest &request) override {
+        return Send(Method::GET, request);
+    }
+
+private:
+    static void Backoff(int attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200 * attempt));
+    }
+
+    static HttpResponse TransportError(const string &msg) {
+        HttpResponse r;
+        r.transport_ok = false;
+        r.transport_error = msg;
+        return r;
+    }
+
+    HttpResponse Send(Method method, const HttpRequest &request) {
         ParsedUrl url;
         if (!ParseUrl(request.url, url) || !url.https) {
-            HttpResponse r;
-            r.transport_ok = false;
-            r.transport_error = "URL must be an absolute https:// endpoint";
-            return r;
+            return TransportError("URL must be an absolute https:// endpoint");
         }
 
-        // Split out Content-Type (httplib takes it as a separate argument).
         httplib::Headers headers;
         string content_type = "application/x-www-form-urlencoded";
         for (const auto &h : request.headers) {
@@ -123,7 +136,10 @@ public:
             cli.enable_server_certificate_verification(true); // never disabled
             ApplyTrustStore(cli);
 
-            auto res = cli.Post(url.path, headers, request.body, content_type);
+            httplib::Result res =
+                (method == Method::POST)
+                    ? cli.Post(url.path, headers, request.body, content_type)
+                    : cli.Get(url.path, headers);
 
             if (res) {
                 if (IsTransientStatus(res->status) && attempt < kMaxAttempts) {
@@ -137,44 +153,102 @@ public:
                 return r;
             }
 
-            // No HTTP response produced. Certificate-verification failures are
-            // permanent — do not retry or mask them as transient.
             auto err = res.error();
             if (err == httplib::Error::SSLServerVerification) {
-                HttpResponse r;
-                r.transport_ok = false;
-                r.transport_error = "TLS certificate verification failed";
-                return r;
+                return TransportError("TLS certificate verification failed");
             }
             if (attempt < kMaxAttempts) {
                 Backoff(attempt);
                 continue;
             }
-            HttpResponse r;
-            r.transport_ok = false;
-            // httplib error category text is generic (e.g. "Connection") and
-            // contains no request data.
-            r.transport_error = httplib::to_string(err);
-            return r;
+            return TransportError(httplib::to_string(err));
         }
+        return TransportError("exhausted retries");
+    }
+};
 
+// Test double. Post() returns the mocked token-endpoint response; Get() returns
+// the mocked describe response, optionally forcing a 401 on the first GET to
+// drive the 401 -> refresh -> retry path.
+class ScriptedMockHttpClient final : public SalesforceHttpClient {
+public:
+    ScriptedMockHttpClient(int token_status, string token_body, int describe_status,
+                           string describe_body, bool first_get_401)
+        : token_status_(token_status), token_body_(std::move(token_body)),
+          describe_status_(describe_status), describe_body_(std::move(describe_body)),
+          first_get_401_(first_get_401) {
+    }
+
+    HttpResponse Post(const HttpRequest & /*request*/) override {
         HttpResponse r;
-        r.transport_ok = false;
-        r.transport_error = "exhausted retries";
+        r.transport_ok = true;
+        r.status = token_status_;
+        r.body = token_body_;
+        return r;
+    }
+
+    HttpResponse Get(const HttpRequest & /*request*/) override {
+        HttpResponse r;
+        r.transport_ok = true;
+        if (first_get_401_ && get_count_ == 0) {
+            r.status = 401;
+        } else {
+            r.status = describe_status_;
+            r.body = describe_body_;
+        }
+        get_count_++;
         return r;
     }
 
 private:
-    static void Backoff(int attempt) {
-        // 200ms, 400ms, ... — bounded, only for transient failures.
-        std::this_thread::sleep_for(std::chrono::milliseconds(200 * attempt));
-    }
+    int token_status_;
+    string token_body_;
+    int describe_status_;
+    string describe_body_;
+    bool first_get_401_;
+    int get_count_ = 0;
 };
+
+static int64_t SettingInt(ClientContext &ctx, const char *key, int64_t dflt) {
+    Value v;
+    if (ctx.TryGetCurrentSetting(key, v) && !v.IsNull()) {
+        return v.GetValue<int64_t>();
+    }
+    return dflt;
+}
+
+static string SettingStr(ClientContext &ctx, const char *key) {
+    Value v;
+    if (ctx.TryGetCurrentSetting(key, v) && !v.IsNull()) {
+        return v.ToString();
+    }
+    return "";
+}
+
+static bool SettingBool(ClientContext &ctx, const char *key, bool dflt) {
+    Value v;
+    if (ctx.TryGetCurrentSetting(key, v) && !v.IsNull()) {
+        return v.GetValue<bool>();
+    }
+    return dflt;
+}
 
 } // namespace
 
 unique_ptr<SalesforceHttpClient> CreateLiveHttpClient() {
     return make_uniq_base<SalesforceHttpClient, LiveHttpClient>();
+}
+
+unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &context) {
+    auto token_status = SettingInt(context, "sf_mock_token_status", 0);
+    if (token_status != 0) {
+        return make_uniq_base<SalesforceHttpClient, ScriptedMockHttpClient>(
+            static_cast<int>(token_status), SettingStr(context, "sf_mock_token_body"),
+            static_cast<int>(SettingInt(context, "sf_mock_describe_status", 200)),
+            SettingStr(context, "sf_mock_describe_body"),
+            SettingBool(context, "sf_mock_describe_first401", false));
+    }
+    return CreateLiveHttpClient();
 }
 
 } // namespace duckdb

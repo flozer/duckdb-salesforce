@@ -13,6 +13,7 @@
 #include "salesforce_auth.hpp"
 #include "salesforce_config.hpp"
 #include "salesforce_http.hpp"
+#include "salesforce_json.hpp"
 
 #include "duckdb/common/exception.hpp"
 
@@ -36,58 +37,6 @@ static string FormEncode(const string &s) {
         }
     }
     return out;
-}
-
-// Extract a top-level JSON string value by key. Sufficient for Salesforce
-// token-endpoint responses (flat objects of string values). Handles standard
-// backslash escapes inside the value. Returns "" if the key is absent.
-// NOTE: intentionally tiny — a full JSON parser can replace this later without
-// changing the public contract.
-static string ExtractJsonString(const string &json, const string &key) {
-    const string needle = "\"" + key + "\"";
-    size_t k = json.find(needle);
-    if (k == string::npos) {
-        return "";
-    }
-    size_t i = k + needle.size();
-    // skip whitespace + ':'
-    while (i < json.size() && (json[i] == ' ' || json[i] == '\t' || json[i] == '\n' ||
-                               json[i] == '\r')) {
-        i++;
-    }
-    if (i >= json.size() || json[i] != ':') {
-        return "";
-    }
-    i++;
-    while (i < json.size() && (json[i] == ' ' || json[i] == '\t' || json[i] == '\n' ||
-                               json[i] == '\r')) {
-        i++;
-    }
-    if (i >= json.size() || json[i] != '"') {
-        return ""; // not a string value
-    }
-    i++; // opening quote
-    string out;
-    while (i < json.size()) {
-        char c = json[i++];
-        if (c == '\\' && i < json.size()) {
-            char e = json[i++];
-            switch (e) {
-            case 'n': out.push_back('\n'); break;
-            case 't': out.push_back('\t'); break;
-            case 'r': out.push_back('\r'); break;
-            case '/': out.push_back('/'); break;
-            case '\\': out.push_back('\\'); break;
-            case '"': out.push_back('"'); break;
-            default: out.push_back(e); break; // includes \uXXXX left raw
-            }
-        } else if (c == '"') {
-            return out; // closing quote
-        } else {
-            out.push_back(c);
-        }
-    }
-    return ""; // unterminated string
 }
 
 static string TrimTrailingSlash(const string &s) {
@@ -121,8 +70,8 @@ SalesforceTokenSet SalesforceAuth::ExchangeRefreshToken(const SalesforceConfig &
     if (resp.status != 200) {
         // Surface only Salesforce's error code/description — never the body
         // wholesale and never the request secrets.
-        string err = ExtractJsonString(resp.body, "error");
-        string desc = ExtractJsonString(resp.body, "error_description");
+        string err = sfjson::GetString(resp.body, "error");
+        string desc = sfjson::GetString(resp.body, "error_description");
         if (err.empty()) {
             err = "unknown_error";
         }
@@ -132,8 +81,8 @@ SalesforceTokenSet SalesforceAuth::ExchangeRefreshToken(const SalesforceConfig &
     }
 
     SalesforceTokenSet ts;
-    ts.access_token = ExtractJsonString(resp.body, "access_token");
-    ts.instance_url = ExtractJsonString(resp.body, "instance_url");
+    ts.access_token = sfjson::GetString(resp.body, "access_token");
+    ts.instance_url = sfjson::GetString(resp.body, "instance_url");
 
     if (ts.access_token.empty()) {
         throw IOException(
