@@ -41,6 +41,19 @@ make release        # or: make debug
 make test_debug     # runs test/sql/*.test against the debug build
 ```
 
+The live HTTPS transport uses vendored [httplib](third_party/httplib) (MIT) +
+**OpenSSL**, pulled via vcpkg manifest mode (`vcpkg.json`). On Windows without
+GNU `make`, configure DuckDB directly inside a VS dev shell with the vcpkg
+toolchain (`-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake`,
+`-DVCPKG_TARGET_TRIPLET=x64-windows-static-md`) — OpenSSL is built on first
+configure. TLS certificate verification is always on; there is no insecure
+build flag.
+
+Tests run fully offline (mocked HTTP). The real OAuth exchange is exercised
+only by the gated `test/sql/salesforce_oauth_live.test`, which is skipped
+unless `SF_LIVE_CLIENT_ID` / `SF_LIVE_CLIENT_SECRET` / `SF_LIVE_REFRESH_TOKEN`
+are set — never set these in CI.
+
 Pinned via the `duckdb` and `extension-ci-tools` submodules to the commits
 the v0.1 scaffold was built and tested against:
 

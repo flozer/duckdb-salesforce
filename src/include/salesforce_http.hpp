@@ -50,9 +50,10 @@ private:
     string body_;
 };
 
-// Live HTTPS client factory. In #3 the returned client throws a clear
-// not-implemented error on Post(): the real httplib+OpenSSL transport (with
-// TLS verification ON and no insecure bypass) is delivered in issue #4.
+// Live HTTPS client factory (#4): httplib + OpenSSL transport with TLS
+// server-certificate verification always ON (no insecure bypass), transient
+// retry/backoff, and no request-body logging. CI uses MockHttpClient instead;
+// the live path is exercised only by the gated salesforce_oauth_live.test.
 unique_ptr<SalesforceHttpClient> CreateLiveHttpClient();
 
 } // namespace duckdb

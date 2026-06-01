@@ -4,16 +4,10 @@
 
 require salesforce
 
-# Valid ATTACH options reused across cases.
+# All cases below MUST set the mock before ATTACH so CI never opens a network
+# connection. The live transport is exercised only by the gated
+# salesforce_oauth_live.test (require-env).
 # (client_id/client_secret/refresh_token are dummy test values.)
-
-# --- live transport seam (no mock) ------------------------------------------
-# With the mock disabled, the exchange routes to the live client, which is
-# implemented in #4. Clear, secret-free message.
-statement error
-ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
-----
-live HTTPS transport is implemented in issue #4
 
 # --- successful exchange (mocked 200) ---------------------------------------
 statement ok

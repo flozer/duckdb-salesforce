@@ -1,0 +1,22 @@
+# name: test/sql/salesforce_oauth_live.test
+# description: GATED manual test — real OAuth2 exchange over HTTPS. Skipped in
+#              normal CI (requires SF_LIVE_* env vars). Never set these in CI.
+# group: [salesforce]
+
+require salesforce
+
+require-env SF_LIVE_CLIENT_ID
+
+require-env SF_LIVE_CLIENT_SECRET
+
+require-env SF_LIVE_REFRESH_TOKEN
+
+# Real refresh-token exchange against Salesforce (login.salesforce.com by
+# default; for a sandbox set login_url to https://test.salesforce.com). On
+# success the exchange returns an access_token + instance_url and ATTACH then
+# stops at the not-yet-implemented scanner — proving the live HTTPS transport,
+# TLS verification, and token parsing all work end to end.
+statement error
+ATTACH 'salesforce://live' AS sf (TYPE salesforce, client_id '${SF_LIVE_CLIENT_ID}', client_secret '${SF_LIVE_CLIENT_SECRET}', refresh_token '${SF_LIVE_REFRESH_TOKEN}');
+----
+authenticated org 'live'

@@ -29,6 +29,24 @@ set(EXTENSION_SOURCES
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
+# --- HTTPS transport: vendored httplib + OpenSSL (issue #4) ------------------
+# httplib is header-only and vendored under third_party/httplib. TLS is provided
+# by OpenSSL (pulled via vcpkg manifest mode — see vcpkg.json). Certificate
+# verification is always ON in the client; there is no insecure build flag.
+find_package(OpenSSL REQUIRED)
+
+set(SF_HTTPLIB_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/httplib")
+
+foreach(_t ${EXTENSION_NAME} ${LOADABLE_EXTENSION_NAME})
+    target_include_directories(${_t} PRIVATE ${SF_HTTPLIB_INCLUDE})
+    target_compile_definitions(${_t} PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+    target_link_libraries(${_t} OpenSSL::SSL OpenSSL::Crypto)
+    if(WIN32)
+        # CryptoAPI (system ROOT cert store) + sockets.
+        target_link_libraries(${_t} crypt32 ws2_32)
+    endif()
+endforeach()
+
 install(TARGETS ${EXTENSION_NAME}
     EXPORT  "${DUCKDB_EXPORT_SET}"
     LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
