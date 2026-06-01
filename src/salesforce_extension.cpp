@@ -5,6 +5,7 @@
 #include "salesforce_describe.hpp"
 #include "salesforce_query.hpp"
 #include "salesforce_value.hpp"
+#include "salesforce_soql.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
@@ -41,6 +42,10 @@ static void LoadInternal(ExtensionLoader &loader) {
     // salesforce_decode(fields_json, records_json) — JSON record -> typed
     // DuckDB vectors (#7). Test/utility surface; the scan wires it in at #8.
     loader.RegisterFunction(GetSalesforceDecodeFunction());
+
+    // salesforce_last_soql() — diagnostic: the SOQL the most recent scan
+    // generated (projection + predicate pushdown). Used by tests.
+    loader.RegisterFunction(GetSalesforceLastSoqlFunction());
 
     // Test-only hooks for the OAuth exchange (#3). When sf_mock_token_status is
     // non-zero, ATTACH uses a mock HTTP client returning that status and

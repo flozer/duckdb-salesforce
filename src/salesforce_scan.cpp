@@ -9,10 +9,13 @@
 #include "salesforce_scan.hpp"
 #include "salesforce_http.hpp"
 #include "salesforce_session.hpp"
+#include "salesforce_soql.hpp"
 #include "salesforce_value.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/planner/expression.hpp"
+#include "duckdb/planner/operator/logical_get.hpp"
 
 namespace duckdb {
 
@@ -24,6 +27,7 @@ unique_ptr<FunctionData> SalesforceScanBindData::Copy() const {
     r->fields = fields;
     r->column_names = column_names;
     r->column_types = column_types;
+    r->pushed_where = pushed_where;
     return std::move(r);
 }
 
@@ -54,22 +58,33 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
                                                            TableFunctionInitInput &input) {
     auto &bind = input.bind_data->Cast<SalesforceScanBindData>();
     auto gstate = make_uniq<ScanGlobalState>();
+    gstate->column_ids = input.column_ids; // DuckDB-level projection
 
-    // SELECT <all queryable fields> FROM <object>.
-    string field_list;
-    for (idx_t i = 0; i < bind.fields.size(); i++) {
-        if (i > 0) {
-            field_list += ", ";
+    // Projection pushdown: SELECT only the referenced fields. Fall back to the
+    // first field when nothing is projected (e.g. COUNT(*)).
+    vector<string> select_fields;
+    for (auto col : input.column_ids) {
+        if (col < bind.fields.size()) {
+            select_fields.push_back(bind.fields[col].name);
         }
-        field_list += bind.fields[i].name;
     }
-    string soql = "SELECT " + field_list + " FROM " + bind.object;
+    if (select_fields.empty() && !bind.fields.empty()) {
+        select_fields.push_back(bind.fields[0].name);
+    }
+
+    // Predicate pushdown: the WHERE was translated in pushdown_complex_filter
+    // (#9); untranslated predicates remain in the plan and DuckDB applies them
+    // residually, so results are always correct.
+    //
+    // LIMIT pushdown is not wired: this DuckDB build does not expose the query
+    // LIMIT to a table function, so LIMIT is applied residually by DuckDB.
+    string soql = BuildSelectSoql(bind.object, select_fields, bind.pushed_where, optional_idx());
+    SetLastSoql(soql);
 
     auto client = BuildHttpClientForContext(context);
     SalesforceSession session(bind.config, *client);
     session.SetToken(bind.token); // reuse ATTACH token (refreshes on 401)
     gstate->records = session.Query(soql).records;
-    gstate->column_ids = input.column_ids; // DuckDB-level projection
     return std::move(gstate);
 }
 
@@ -96,11 +111,29 @@ static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &o
     output.SetChildCardinality(row);
 }
 
+// Predicate pushdown: translate the safe subset of the conjunctive filter list
+// into a SOQL WHERE on the bind data; DuckDB keeps the rest as a residual
+// Filter operator. (#9)
+static void ScanPushdownComplexFilter(ClientContext &, LogicalGet &get, FunctionData *bind_data,
+                                      vector<unique_ptr<Expression>> &filters) {
+    if (!bind_data) {
+        return;
+    }
+    auto &bind = bind_data->Cast<SalesforceScanBindData>();
+    // Map the GET's projection-relative column refs to field indices.
+    vector<idx_t> projection_to_field;
+    for (auto &ci : get.GetColumnIds()) {
+        projection_to_field.push_back(ci.GetPrimaryIndex());
+    }
+    PushdownToSoql(bind.fields, projection_to_field, bind.pushed_where, filters);
+}
+
 } // namespace
 
 TableFunction GetSalesforceScanFunction() {
     TableFunction fn("salesforce_scan", {}, ScanFunction, ScanBind, ScanInitGlobal);
-    fn.projection_pushdown = true; // DuckDB-level column projection (not SOQL)
+    fn.projection_pushdown = true; // DuckDB-level column projection
+    fn.pushdown_complex_filter = ScanPushdownComplexFilter; // SOQL WHERE, residual-safe
     return fn;
 }
 

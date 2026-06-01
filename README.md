@@ -26,6 +26,22 @@ SELECT Id, Name FROM salesforce.Opportunity
 WHERE LastModifiedDate >= '2025-01-01';
 ```
 
+## Pushdown (v0.1)
+
+Pushdown to SOQL is a best-effort over-fetch optimisation; anything not pushed is
+applied by DuckDB residually, so results are always correct.
+
+| Operation | v0.1 |
+| --- | --- |
+| Projection (`SELECT a, b`) | ✅ pushed to SOQL |
+| Predicate `=, <>, <, <=, >, >=` (filterable field, constant) | ✅ pushed |
+| `IS NULL` / `IS NOT NULL` | ✅ pushed (`= null` / `!= null`) |
+| `AND` of pushable predicates | ✅ pushed |
+| `OR`, `IN`, `LIKE`, functions, casts, nested expr | ⛔ residual (DuckDB) |
+| Predicate on a non-filterable field | ⛔ residual |
+| `WHERE` longer than 4000 chars | ⛔ residualised (guard) |
+| `LIMIT n` | ⛔ residual — this DuckDB build does not expose the query LIMIT to a table function (applied by DuckDB after the scan) |
+
 ## Architecture
 
 The full design (22 deliverables: auth flow, query flow, REST/Bulk/Tooling/

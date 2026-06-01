@@ -1,0 +1,99 @@
+# name: test/sql/salesforce_pushdown.test
+# description: v0.1 #9 — SOQL projection + predicate pushdown, residual-safe (mocked)
+# group: [salesforce]
+#
+# Note: pushed-down predicates are translated to SOQL and removed from the plan,
+# so the mock (which ignores the query string and returns fixed rows) cannot
+# filter them — these cases assert the GENERATED SOQL. Predicates that are NOT
+# pushed (LIKE, non-filterable field) stay residual and ARE applied by DuckDB,
+# so those assert the filtered RESULT.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id","nillable":false,"filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"AnnualRevenue","type":"currency","precision":18,"scale":2,"filterable":true},{"name":"Secret","type":"string","filterable":false}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"001","Name":"Acme","AnnualRevenue":1000000.00,"Secret":"s1"},{"Id":"002","Name":"Globex","AnnualRevenue":50.00,"Secret":"s2"}]}';
+
+statement ok
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- projection pushdown: only referenced fields in the SOQL -----------------
+query II
+SELECT Id, Name FROM sf.Account ORDER BY Id;
+----
+001	Acme
+002	Globex
+
+query I
+SELECT soql LIKE 'SELECT Id, Name FROM Account%' AND soql NOT LIKE '%AnnualRevenue%' FROM salesforce_last_soql();
+----
+true
+
+# --- predicate: equality on a string (pushed -> assert SOQL) -----------------
+statement ok
+SELECT Name FROM sf.Account WHERE Name = 'Acme';
+
+query I
+SELECT soql LIKE '%WHERE Name = ''Acme''%' FROM salesforce_last_soql();
+----
+true
+
+# --- predicate: numeric comparison (pushed) ----------------------------------
+statement ok
+SELECT Id FROM sf.Account WHERE AnnualRevenue > 100;
+
+query I
+SELECT soql LIKE '%AnnualRevenue > 100%' FROM salesforce_last_soql();
+----
+true
+
+# --- predicate: IS NULL (pushed) ---------------------------------------------
+statement ok
+SELECT Id FROM sf.Account WHERE Name IS NULL;
+
+query I
+SELECT soql LIKE '%Name = null%' FROM salesforce_last_soql();
+----
+true
+
+# --- predicate: AND of two pushable filters (pushed) -------------------------
+statement ok
+SELECT Id FROM sf.Account WHERE Name = 'Acme' AND AnnualRevenue > 100;
+
+query I
+SELECT soql LIKE '%Name = ''Acme''%' AND soql LIKE '%AnnualRevenue > 100%' AND soql LIKE '% AND %' FROM salesforce_last_soql();
+----
+true
+
+# --- unsupported predicate (LIKE) -> residual: correct result, NOT in SOQL ---
+query I
+SELECT Name FROM sf.Account WHERE Name LIKE 'A%' ORDER BY Name;
+----
+Acme
+
+query I
+SELECT soql NOT LIKE '%LIKE%' AND soql NOT LIKE '%WHERE%' FROM salesforce_last_soql();
+----
+true
+
+# --- non-filterable field -> not pushed, still correct via residual ----------
+query I
+SELECT Id FROM sf.Account WHERE Secret = 's1';
+----
+001
+
+query I
+SELECT soql NOT LIKE '%WHERE%' FROM salesforce_last_soql();
+----
+true
+
+statement ok
+DETACH sf;

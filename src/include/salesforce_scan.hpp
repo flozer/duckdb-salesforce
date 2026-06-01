@@ -19,6 +19,8 @@ struct SalesforceScanBindData : public FunctionData {
     vector<SalesforceField> fields; // queryable fields, in column order
     vector<string> column_names;
     vector<LogicalType> column_types;
+    // Pushed-down SOQL WHERE (set by pushdown_complex_filter; #9). Empty => none.
+    string pushed_where;
 
     unique_ptr<FunctionData> Copy() const override;
     bool Equals(const FunctionData &other) const override;
