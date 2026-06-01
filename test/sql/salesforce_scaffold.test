@@ -1,0 +1,19 @@
+# name: test/sql/salesforce_scaffold.test
+# description: v0.1 scaffold — extension loads, type registers, attach fails clearly
+# group: [salesforce]
+
+require salesforce
+
+# The extension loads and registers the "salesforce" storage type. ATTACH with
+# (TYPE salesforce) resolves to a known type and then fails with a clear,
+# actionable not-implemented message (auth/scan land in later v0.1 issues).
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce);
+----
+not implemented yet
+
+# A bare unknown type still errors (sanity: we did not accidentally register a
+# catch-all).
+statement error
+ATTACH 'whatever://x' AS bogus (TYPE no_such_storage_type);
+----

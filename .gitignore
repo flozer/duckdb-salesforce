@@ -21,6 +21,12 @@ venv/
 *.parquet
 *.json.gz
 
+# Build output
+build/
+cmake-build-*/
+*.duckdb_extension
+duckdb_unittest_tempdir/
+
 # OS / editor
 .DS_Store
 Thumbs.db
