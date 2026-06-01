@@ -1,0 +1,83 @@
+# name: test/sql/salesforce_attach.test
+# description: v0.1 #2 — ATTACH path/option parsing + validation (no network)
+# group: [salesforce]
+
+require salesforce
+
+# --- path validation --------------------------------------------------------
+
+# Path must use the salesforce:// scheme.
+statement error
+ATTACH 'production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+----
+must start with 'salesforce://'
+
+# Empty org after the scheme.
+statement error
+ATTACH 'salesforce://' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+----
+missing org in path
+
+# --- required options --------------------------------------------------------
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_secret 's', refresh_token 'r');
+----
+missing required option 'client_id'
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', refresh_token 'r');
+----
+missing required option 'client_secret'
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's');
+----
+missing required option 'refresh_token'
+
+# Empty value counts as missing.
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id '', client_secret 's', refresh_token 'r');
+----
+missing required option 'client_id'
+
+# --- optional option validation ---------------------------------------------
+
+# login_url must be absolute https://
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', login_url 'http://login.salesforce.com');
+----
+must be an absolute https:// URL
+
+# api_version must look like vNN.N / NN.N
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', api_version 'sixty');
+----
+'api_version' must look like
+
+# Unknown option rejected (typo guard).
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', client_secrets 'oops');
+----
+unknown option 'client_secrets'
+
+# --- valid configs reach the (not-yet-implemented) auth stage ---------------
+
+# Minimal valid config: parse + validation pass, then the OAuth stub stops us.
+# The org name is echoed (non-secret); secrets are never echoed.
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+----
+config for org 'production' parsed and validated
+
+# Valid config with both optional fields (login_url + api_version forms).
+statement error
+ATTACH 'salesforce://mysandbox' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', login_url 'https://test.salesforce.com', api_version '60.0');
+----
+config for org 'mysandbox' parsed and validated
+
+# Secret values must never leak into the error text.
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 'TOPSECRET', refresh_token 'REFRESHSECRET');
+----
+not implemented yet

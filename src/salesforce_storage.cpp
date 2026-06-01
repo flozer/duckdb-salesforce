@@ -10,6 +10,7 @@
 // scanning are tracked by separate issues and must not be faked here.
 
 #include "salesforce_storage.hpp"
+#include "salesforce_config.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/attached_database.hpp"
@@ -25,13 +26,23 @@ SalesforceAttach(optional_ptr<StorageExtensionInfo> /*info*/,
                  ClientContext & /*context*/,
                  AttachedDatabase & /*db*/,
                  const string & /*name*/,
-                 AttachInfo & /*attach_info*/,
+                 AttachInfo &attach_info,
                  AttachOptions & /*options*/) {
+    // #2: parse + validate the connection config. Throws a clear,
+    // secret-free BinderException on any missing/invalid field.
+    SalesforceConfig config =
+        SalesforceConfig::ParseAndValidate(attach_info.path, attach_info);
+
+    // Config is valid and held in memory only (no logging, no persistence).
+    // #3 (OAuth) consumes `config` to obtain an access token + instance_url;
+    // until then we stop here. Reference a non-secret field so the validated
+    // config is observably used.
     throw NotImplementedException(
-        "duckdb-salesforce v0.1 is a scaffold: ATTACH, OAuth authentication "
-        "and table scanning are not implemented yet. The extension loaded "
-        "correctly. Progress is tracked in the v0.1-readonly-rest milestone "
-        "(ATTACH parser #2, OAuth #3, HTTP transport #4, scan #5-#9).");
+        "duckdb-salesforce v0.1: connection config for org '%s' parsed and "
+        "validated, but OAuth authentication and table scanning are not "
+        "implemented yet. Tracked in v0.1-readonly-rest (OAuth #3, HTTP "
+        "transport #4, scan #5-#9).",
+        config.org);
 }
 
 static unique_ptr<TransactionManager>

@@ -21,6 +21,7 @@ include_directories(src/include)
 set(EXTENSION_SOURCES
     src/salesforce_extension.cpp
     src/salesforce_storage.cpp
+    src/salesforce_config.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
