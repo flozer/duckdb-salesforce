@@ -1,0 +1,28 @@
+# DuckDB
+*.duckdb
+*.duckdb.wal
+*.db
+
+# Secrets / creds
+.env
+*.env
+secrets.*
+credentials.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Data dumps
+*.csv
+*.parquet
+*.json.gz
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
