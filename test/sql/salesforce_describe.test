@@ -14,13 +14,10 @@ SET sf_mock_token_body = '{"access_token":"AT.SECRET","instance_url":"https://x.
 
 # --- describe 200: type mapping across the main Salesforce field types -------
 statement ok
-SET sf_mock_describe_status = 200;
+SET sf_mock_get_status = '200';
 
 statement ok
-SET sf_mock_describe_first401 = false;
-
-statement ok
-SET sf_mock_describe_body = '{"name":"Account","fields":[
+SET sf_mock_get_body = '{"name":"Account","fields":[
   {"name":"f_string","type":"string","nillable":true,"length":255,"filterable":true,"sortable":true},
   {"name":"f_textarea","type":"textarea","nillable":true},
   {"name":"f_id","type":"id","nillable":false},
@@ -85,11 +82,12 @@ SELECT nullable FROM salesforce_describe('Account', client_id := 'c', client_sec
 false
 
 # --- 401 -> refresh -> retry once (success on retry) -------------------------
+# First GET returns 401, second returns 200 (body repeats for the retry).
 statement ok
-SET sf_mock_describe_first401 = true;
+SET sf_mock_get_status = '401,200';
 
 statement ok
-SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id","nillable":false}]}';
+SET sf_mock_get_body = '{"name":"Account","fields":[{"name":"Id","type":"id","nillable":false}]}';
 
 # First GET returns 401, session re-auths and retries, second GET returns 200.
 query II
@@ -99,10 +97,7 @@ Id	VARCHAR
 
 # --- 401 twice -> clear failure, no secret -----------------------------------
 statement ok
-SET sf_mock_describe_first401 = false;
-
-statement ok
-SET sf_mock_describe_status = 401;
+SET sf_mock_get_status = '401,401';
 
 statement error
 SELECT * FROM salesforce_describe('Account', client_id := 'c', client_secret := 'TOPSECRET', refresh_token := 'REFRESHSECRET');
@@ -111,10 +106,10 @@ authentication failed (HTTP 401) after refreshing the token
 
 # --- 404 -> clear failure surfacing the SF errorCode, no secret --------------
 statement ok
-SET sf_mock_describe_status = 404;
+SET sf_mock_get_status = '404';
 
 statement ok
-SET sf_mock_describe_body = '[{"errorCode":"NOT_FOUND","message":"The requested resource does not exist"}]';
+SET sf_mock_get_body = '[{"errorCode":"NOT_FOUND","message":"The requested resource does not exist"}]';
 
 statement error
 SELECT * FROM salesforce_describe('Nope', client_id := 'c', client_secret := 'TOPSECRET', refresh_token := 'REFRESHSECRET');
@@ -123,10 +118,10 @@ HTTP 404): NOT_FOUND - The requested resource does not exist
 
 # --- 403 -> clear failure, no secret -----------------------------------------
 statement ok
-SET sf_mock_describe_status = 403;
+SET sf_mock_get_status = '403';
 
 statement ok
-SET sf_mock_describe_body = '[{"errorCode":"INSUFFICIENT_ACCESS","message":"insufficient access rights"}]';
+SET sf_mock_get_body = '[{"errorCode":"INSUFFICIENT_ACCESS","message":"insufficient access rights"}]';
 
 statement error
 SELECT * FROM salesforce_describe('Account', client_id := 'c', client_secret := 'TOPSECRET', refresh_token := 'REFRESHSECRET');

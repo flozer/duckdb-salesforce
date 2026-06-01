@@ -11,7 +11,11 @@
 #include "salesforce_http.hpp"
 #include "salesforce_json.hpp"
 
+#include "salesforce_url.hpp"
+
 #include "duckdb/common/exception.hpp"
+
+#include <unordered_set>
 
 namespace duckdb {
 
@@ -81,6 +85,44 @@ SalesforceDescribe SalesforceSession::Describe(const string &object) {
         "/services/data/" + config_.api_version + "/sobjects/" + object + "/describe";
     string body = AuthorizedGet(path);
     return ParseDescribe(body, object);
+}
+
+SalesforceQueryResult SalesforceSession::Query(const string &soql) {
+    // Defensive ceiling: at the default 2,000 records/page this is ~2 billion
+    // rows — far beyond any real query, but bounds a misbehaving cursor.
+    constexpr idx_t kMaxPages = 1000000;
+
+    SalesforceQueryResult result;
+    string path =
+        "/services/data/" + config_.api_version + "/query?q=" + UrlEncodeComponent(soql);
+
+    std::unordered_set<string> seen_cursors;
+    while (true) {
+        string body = AuthorizedGet(path);
+        for (auto &rec : sfjson::GetObjectArray(body, "records")) {
+            result.records.push_back(std::move(rec));
+        }
+        result.page_count++;
+
+        bool done = sfjson::GetBool(body, "done", true);
+        string next = sfjson::GetString(body, "nextRecordsUrl");
+        if (done || next.empty()) {
+            break;
+        }
+        if (result.page_count >= kMaxPages) {
+            throw IOException(
+                "salesforce query aborted: exceeded the maximum page count (%llu).",
+                static_cast<unsigned long long>(kMaxPages));
+        }
+        if (!seen_cursors.insert(next).second) {
+            throw IOException(
+                "salesforce query aborted: pagination loop detected (nextRecordsUrl "
+                "repeated).");
+        }
+        // nextRecordsUrl is an opaque server-provided path — used verbatim.
+        path = next;
+    }
+    return result;
 }
 
 } // namespace duckdb

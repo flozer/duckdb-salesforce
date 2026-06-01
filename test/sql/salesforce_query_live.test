@@ -1,0 +1,23 @@
+# name: test/sql/salesforce_query_live.test
+# description: GATED manual test — real SOQL /query over HTTPS. Skipped in
+#              normal CI (requires SF_LIVE_* env vars). Never set these in CI.
+# group: [salesforce]
+
+require salesforce
+
+require-env SF_LIVE_CLIENT_ID
+
+require-env SF_LIVE_CLIENT_SECRET
+
+require-env SF_LIVE_REFRESH_TOKEN
+
+# Real query against the org (login.salesforce.com by default; for a sandbox set
+# login_url to https://test.salesforce.com). Every org has an Account; LIMIT
+# keeps it to a single page.
+query I
+SELECT COUNT(*) >= 0 FROM salesforce_query('SELECT Id, Name FROM Account LIMIT 5',
+    client_id := '${SF_LIVE_CLIENT_ID}',
+    client_secret := '${SF_LIVE_CLIENT_SECRET}',
+    refresh_token := '${SF_LIVE_REFRESH_TOKEN}');
+----
+true

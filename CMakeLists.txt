@@ -27,6 +27,7 @@ set(EXTENSION_SOURCES
     src/salesforce_session.cpp
     src/salesforce_types.cpp
     src/salesforce_describe.cpp
+    src/salesforce_query.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

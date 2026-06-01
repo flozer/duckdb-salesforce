@@ -167,16 +167,17 @@ private:
     }
 };
 
-// Test double. Post() returns the mocked token-endpoint response; Get() returns
-// the mocked describe response, optionally forcing a 401 on the first GET to
-// drive the 401 -> refresh -> retry path.
+// Test double. Post() returns the mocked token-endpoint response (used for the
+// initial exchange and every 401 refresh). Get() walks a scripted sequence of
+// (status, body) responses — one per GET call — so tests can drive describe,
+// multi-page query pagination, and a 401 injected on any page. When the
+// sequence is exhausted the last entry repeats.
 class ScriptedMockHttpClient final : public SalesforceHttpClient {
 public:
-    ScriptedMockHttpClient(int token_status, string token_body, int describe_status,
-                           string describe_body, bool first_get_401)
+    ScriptedMockHttpClient(int token_status, string token_body, vector<int> get_statuses,
+                           vector<string> get_bodies)
         : token_status_(token_status), token_body_(std::move(token_body)),
-          describe_status_(describe_status), describe_body_(std::move(describe_body)),
-          first_get_401_(first_get_401) {
+          get_statuses_(std::move(get_statuses)), get_bodies_(std::move(get_bodies)) {
     }
 
     HttpResponse Post(const HttpRequest & /*request*/) override {
@@ -190,24 +191,63 @@ public:
     HttpResponse Get(const HttpRequest & /*request*/) override {
         HttpResponse r;
         r.transport_ok = true;
-        if (first_get_401_ && get_count_ == 0) {
-            r.status = 401;
-        } else {
-            r.status = describe_status_;
-            r.body = describe_body_;
-        }
-        get_count_++;
+        r.status = Pick(get_statuses_, get_index_, 200);
+        r.body = get_bodies_.empty()
+                     ? string()
+                     : get_bodies_[get_index_ < get_bodies_.size() ? get_index_
+                                                                   : get_bodies_.size() - 1];
+        get_index_++;
         return r;
     }
 
 private:
+    template <class T>
+    static T Pick(const vector<T> &v, size_t i, T dflt) {
+        if (v.empty()) {
+            return dflt;
+        }
+        return v[i < v.size() ? i : v.size() - 1];
+    }
+
     int token_status_;
     string token_body_;
-    int describe_status_;
-    string describe_body_;
-    bool first_get_401_;
-    int get_count_ = 0;
+    vector<int> get_statuses_;
+    vector<string> get_bodies_;
+    size_t get_index_ = 0;
 };
+
+// Split a string on a multi-char sentinel. An empty input yields one empty
+// element (a single empty response body).
+static vector<string> SplitOn(const string &s, const string &sep) {
+    vector<string> out;
+    size_t prev = 0, pos;
+    while ((pos = s.find(sep, prev)) != string::npos) {
+        out.push_back(s.substr(prev, pos - prev));
+        prev = pos + sep.size();
+    }
+    out.push_back(s.substr(prev));
+    return out;
+}
+
+// Parse a comma-separated list of integers (e.g. "200,401,200").
+static vector<int> ParseIntCsv(const string &s) {
+    vector<int> out;
+    for (auto &part : SplitOn(s, ",")) {
+        string t;
+        for (char c : part) {
+            if (c != ' ') {
+                t.push_back(c);
+            }
+        }
+        if (!t.empty()) {
+            try {
+                out.push_back(std::stoi(t));
+            } catch (...) {
+            }
+        }
+    }
+    return out;
+}
 
 static int64_t SettingInt(ClientContext &ctx, const char *key, int64_t dflt) {
     Value v;
@@ -225,14 +265,6 @@ static string SettingStr(ClientContext &ctx, const char *key) {
     return "";
 }
 
-static bool SettingBool(ClientContext &ctx, const char *key, bool dflt) {
-    Value v;
-    if (ctx.TryGetCurrentSetting(key, v) && !v.IsNull()) {
-        return v.GetValue<bool>();
-    }
-    return dflt;
-}
-
 } // namespace
 
 unique_ptr<SalesforceHttpClient> CreateLiveHttpClient() {
@@ -242,11 +274,16 @@ unique_ptr<SalesforceHttpClient> CreateLiveHttpClient() {
 unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &context) {
     auto token_status = SettingInt(context, "sf_mock_token_status", 0);
     if (token_status != 0) {
+        string status_csv = SettingStr(context, "sf_mock_get_status");
+        vector<int> statuses = ParseIntCsv(status_csv);
+        if (statuses.empty()) {
+            statuses.push_back(200);
+        }
+        // "|~|" separates page bodies; chosen to never occur in JSON fixtures.
+        vector<string> bodies = SplitOn(SettingStr(context, "sf_mock_get_body"), "|~|");
         return make_uniq_base<SalesforceHttpClient, ScriptedMockHttpClient>(
             static_cast<int>(token_status), SettingStr(context, "sf_mock_token_body"),
-            static_cast<int>(SettingInt(context, "sf_mock_describe_status", 200)),
-            SettingStr(context, "sf_mock_describe_body"),
-            SettingBool(context, "sf_mock_describe_first401", false));
+            std::move(statuses), std::move(bodies));
     }
     return CreateLiveHttpClient();
 }

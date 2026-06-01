@@ -3,6 +3,7 @@
 #include "salesforce_extension.hpp"
 #include "salesforce_storage.hpp"
 #include "salesforce_describe.hpp"
+#include "salesforce_query.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
@@ -31,6 +32,11 @@ static void LoadInternal(ExtensionLoader &loader) {
     //   login_url:=, api_version:=) — introspect a single sObject's schema (#5).
     loader.RegisterFunction(GetSalesforceDescribeFunction());
 
+    // salesforce_query(soql, client_id:=, ...) — paginated SOQL fetcher (#6),
+    // returns raw JSON records. Typed scanning lands in #7/#8.
+    loader.RegisterFunction(GetSalesforceQueryFunction());
+    loader.RegisterFunction(GetSalesforceUrlEncodeFunction());
+
     // Test-only hooks for the OAuth exchange (#3). When sf_mock_token_status is
     // non-zero, ATTACH uses a mock HTTP client returning that status and
     // sf_mock_token_body instead of the live transport, so sqllogictest can
@@ -47,20 +53,17 @@ static void LoadInternal(ExtensionLoader &loader) {
         "TEST ONLY. Response body paired with sf_mock_token_status.",
         LogicalType::VARCHAR, Value(""));
     config.AddExtensionOption(
-        "sf_mock_describe_status",
-        "TEST ONLY. HTTP status for a mocked authenticated GET (describe). "
-        "Active only when sf_mock_token_status != 0. Default 200.",
-        LogicalType::BIGINT, Value::BIGINT(200));
+        "sf_mock_get_status",
+        "TEST ONLY. Comma-separated HTTP statuses returned by successive mocked "
+        "authenticated GETs (e.g. '200', or '401,200', or '200,200'). Active only "
+        "when sf_mock_token_status != 0. The last value repeats once exhausted. "
+        "Default '200'.",
+        LogicalType::VARCHAR, Value("200"));
     config.AddExtensionOption(
-        "sf_mock_describe_body",
-        "TEST ONLY. Response body for a mocked authenticated GET (describe).",
+        "sf_mock_get_body",
+        "TEST ONLY. Response bodies for successive mocked GETs, separated by the "
+        "sentinel '|~|' (one per page). The last value repeats once exhausted.",
         LogicalType::VARCHAR, Value(""));
-    config.AddExtensionOption(
-        "sf_mock_describe_first401",
-        "TEST ONLY. When true, the first mocked GET returns HTTP 401 to exercise "
-        "the 401 -> refresh -> retry path; subsequent GETs use "
-        "sf_mock_describe_status/body. Default false.",
-        LogicalType::BOOLEAN, Value::BOOLEAN(false));
 }
 
 void SalesforceExtension::Load(ExtensionLoader &loader) {
