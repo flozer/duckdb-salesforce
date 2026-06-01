@@ -990,3 +990,16 @@ No functional v0.1 code merges to `main` until **all** are satisfied:
 - A short `SECURITY.md` note states the v0.1 secret-handling policy and the dev/sandbox-only boundary.
 
 This gate exists because the architecture doc describes OAuth but does not yet make secret-handling an enforced, reviewable checklist — v0.1 makes it one.
+
+### C.5 Community Repository Publication Gate
+
+No developer, agent, automation, or CI job may push branches, tags, commits, releases, or pull requests to `duckdb/community-extensions` without explicit human approval.
+
+The only allowed default workflow is:
+
+- Work in `flozer/duckdb-salesforce`.
+- Run the agreed local, mocked, sandbox, packaging, and compatibility tests.
+- Produce evidence for human review.
+- Wait for a human maintainer to approve any publication action toward `duckdb/community-extensions`.
+
+This is a hard governance gate. Community publication happens only after multiple test passes and an explicit human go/no-go decision.
