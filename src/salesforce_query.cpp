@@ -110,7 +110,7 @@ static void QueryFunction(ClientContext &, TableFunctionInput &data, DataChunk &
         gstate.cursor++;
         row++;
     }
-    output.SetCardinality(row);
+    output.SetChildCardinality(row);
 }
 
 } // namespace

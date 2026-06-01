@@ -154,7 +154,7 @@ static void DescribeFunction(ClientContext &, TableFunctionInput &data, DataChun
         FlatVector::GetDataMutable<bool>(output.data[9])[row] = f.unknown_type;
         row++;
     }
-    output.SetCardinality(row);
+    output.SetChildCardinality(row);
 }
 
 } // namespace

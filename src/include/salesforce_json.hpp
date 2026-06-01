@@ -35,14 +35,11 @@ inline size_t FindValue(const string &json, const string &key) {
     return i;
 }
 
-// Top-level string value for `key`. "" if absent or not a string.
-inline string GetString(const string &json, const string &key) {
-    size_t i = FindValue(json, key);
-    if (i == string::npos || i >= json.size() || json[i] != '"') {
-        return "";
-    }
-    i++;
+// Parse a JSON string whose opening quote is at json[pos]. Returns the
+// unescaped content; advances nothing (pos is the quote index).
+inline string ReadStringAt(const string &json, size_t pos) {
     string out;
+    size_t i = pos + 1; // past opening quote
     while (i < json.size()) {
         char c = json[i++];
         if (c == '\\' && i < json.size()) {
@@ -62,7 +59,48 @@ inline string GetString(const string &json, const string &key) {
             out.push_back(c);
         }
     }
-    return "";
+    return out;
+}
+
+// Top-level string value for `key`. "" if absent or not a string.
+inline string GetString(const string &json, const string &key) {
+    size_t i = FindValue(json, key);
+    if (i == string::npos || i >= json.size() || json[i] != '"') {
+        return "";
+    }
+    return ReadStringAt(json, i);
+}
+
+// Read the raw value for `key`. found=false if the key is absent. is_null=true
+// if the value is JSON null. Otherwise `out` holds the unescaped string content
+// (for string values) or the literal token (numbers/booleans). Compound
+// values (objects/arrays) are returned as their raw substring is not parsed —
+// out is left empty.
+inline void GetValue(const string &json, const string &key, string &out, bool &found,
+                     bool &is_null) {
+    out.clear();
+    found = false;
+    is_null = false;
+    size_t i = FindValue(json, key);
+    if (i == string::npos || i >= json.size()) {
+        return;
+    }
+    found = true;
+    if (json.compare(i, 4, "null") == 0) {
+        is_null = true;
+        return;
+    }
+    if (json[i] == '"') {
+        out = ReadStringAt(json, i);
+        return;
+    }
+    // Literal token (number / true / false): read until a value terminator.
+    size_t j = i;
+    while (j < json.size() && json[j] != ',' && json[j] != '}' && json[j] != ']' &&
+           json[j] != ' ' && json[j] != '\t' && json[j] != '\n' && json[j] != '\r') {
+        j++;
+    }
+    out = json.substr(i, j - i);
 }
 
 // Bool value for `key`. Returns `dflt` if absent/null/not a bool.
@@ -114,6 +152,48 @@ inline vector<string> GetObjectArray(const string &json, const string &arrayKey)
         return out;
     }
     size_t i = v + 1;
+    int depth = 0;
+    bool in_obj = false, in_str = false;
+    size_t obj_start = 0;
+    for (; i < json.size(); i++) {
+        char c = json[i];
+        if (in_str) {
+            if (c == '\\') {
+                i++;
+            } else if (c == '"') {
+                in_str = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_str = true;
+        } else if (c == '{') {
+            if (depth == 0) {
+                in_obj = true;
+                obj_start = i;
+            }
+            depth++;
+        } else if (c == '}') {
+            depth--;
+            if (depth == 0 && in_obj) {
+                out.push_back(json.substr(obj_start, i - obj_start + 1));
+                in_obj = false;
+            }
+        } else if (c == ']' && depth == 0) {
+            break;
+        }
+    }
+    return out;
+}
+
+// Split each top-level object inside a bare JSON array string ("[ {...}, ... ]").
+inline vector<string> SplitArrayObjects(const string &json) {
+    vector<string> out;
+    size_t i = json.find('[');
+    if (i == string::npos) {
+        return out;
+    }
+    i++;
     int depth = 0;
     bool in_obj = false, in_str = false;
     size_t obj_start = 0;

@@ -1,0 +1,83 @@
+# name: test/sql/salesforce_decode.test
+# description: v0.1 #7 — JSON record -> typed DuckDB vectors (no HTTP, no scan)
+# group: [salesforce]
+
+require salesforce
+
+# Field schema (shape of an sObject describe "fields" array) + 3 records.
+# r1 has nulls, r2 (003) omits everything but Id (missing -> null).
+
+# --- row count + order preserved --------------------------------------------
+query I
+SELECT COUNT(*) FROM salesforce_decode(
+  '{"fields":[{"name":"Id","type":"id"},{"name":"Active","type":"boolean"},{"name":"Count","type":"int"},{"name":"Score","type":"double"},{"name":"Amount","type":"currency","precision":18,"scale":2},{"name":"Created","type":"date"},{"name":"Modified","type":"datetime"},{"name":"StartTime","type":"time"},{"name":"Blob","type":"base64"},{"name":"Weird","type":"weirdtype"}]}',
+  '[{"Id":"001","Active":true,"Count":42,"Score":3.5,"Amount":1234.56,"Created":"2024-01-15","Modified":"2024-01-15T10:20:30.000+0000","StartTime":"08:30:00.000Z","Blob":"aGVsbG8=","Weird":"x"},{"Id":"002","Active":false,"Count":null,"Score":null,"Amount":0,"Created":"2024-02-29","Modified":"2024-03-01T00:00:00.000Z","StartTime":"23:59:59.000Z","Blob":"","Weird":"y"},{"Id":"003"}]');
+----
+3
+
+query I
+SELECT Id FROM salesforce_decode(
+  '{"fields":[{"name":"Id","type":"id"}]}',
+  '[{"Id":"001"},{"Id":"002"},{"Id":"003"}]');
+----
+001
+002
+003
+
+# --- full typed decode of record 0 (all assertions in one boolean) ----------
+query I
+SELECT Id = '001'
+   AND Active = true
+   AND Count = 42
+   AND Score = 3.5
+   AND Amount = 1234.56
+   AND Created = DATE '2024-01-15'
+   AND Modified = TIMESTAMP '2024-01-15 10:20:30'
+   AND StartTime = TIME '08:30:00'
+   AND Blob = 'hello'::BLOB
+   AND Weird = 'x'
+FROM salesforce_decode(
+  '{"fields":[{"name":"Id","type":"id"},{"name":"Active","type":"boolean"},{"name":"Count","type":"int"},{"name":"Score","type":"double"},{"name":"Amount","type":"currency","precision":18,"scale":2},{"name":"Created","type":"date"},{"name":"Modified","type":"datetime"},{"name":"StartTime","type":"time"},{"name":"Blob","type":"base64"},{"name":"Weird","type":"weirdtype"}]}',
+  '[{"Id":"001","Active":true,"Count":42,"Score":3.5,"Amount":1234.56,"Created":"2024-01-15","Modified":"2024-01-15T10:20:30.000+0000","StartTime":"08:30:00.000Z","Blob":"aGVsbG8=","Weird":"x"}]');
+----
+true
+
+# --- column types are the mapped DuckDB types --------------------------------
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM salesforce_decode(
+  '{"fields":[{"name":"Amount","type":"currency","precision":18,"scale":2},{"name":"Count","type":"int"},{"name":"Blob","type":"base64"}]}',
+  '[{"Amount":1,"Count":1,"Blob":"AA=="}]')) ORDER BY column_name;
+----
+Amount	DECIMAL(18,2)
+Blob	BLOB
+Count	BIGINT
+
+# --- JSON null -> NULL, and absent key -> NULL (no crash) --------------------
+query I
+SELECT Count IS NULL AND Score IS NULL
+FROM salesforce_decode(
+  '{"fields":[{"name":"Id","type":"id"},{"name":"Count","type":"int"},{"name":"Score","type":"double"}]}',
+  '[{"Id":"002","Count":null,"Score":null}]');
+----
+true
+
+query I
+SELECT Count IS NULL AND Amount IS NULL AND Created IS NULL
+FROM salesforce_decode(
+  '{"fields":[{"name":"Id","type":"id"},{"name":"Count","type":"int"},{"name":"Amount","type":"currency","precision":9,"scale":2},{"name":"Created","type":"date"}]}',
+  '[{"Id":"003"}]');
+----
+true
+
+# --- base64 decodes to the real bytes ----------------------------------------
+query II
+SELECT octet_length(Blob), Blob = 'hello'::BLOB
+FROM salesforce_decode('{"fields":[{"name":"Blob","type":"base64"}]}', '[{"Blob":"aGVsbG8="}]');
+----
+5	true
+
+# --- incompatible value fails clearly, naming the field, no value dumped -----
+statement error
+SELECT * FROM salesforce_decode('{"fields":[{"name":"Count","type":"int"}]}', '[{"Count":"notanumber"}]');
+----
+field 'Count' (Salesforce type 'int') could not be decoded as BIGINT
