@@ -11,6 +11,8 @@
 
 #include "salesforce_storage.hpp"
 #include "salesforce_config.hpp"
+#include "salesforce_auth.hpp"
+#include "salesforce_http.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/attached_database.hpp"
@@ -21,9 +23,33 @@
 
 namespace duckdb {
 
+// Test-only hook: when sf_mock_token_status != 0, the OAuth exchange uses a
+// MockHttpClient returning that status + sf_mock_token_body instead of the live
+// transport. This lets sqllogictest exercise the exchange without contacting
+// Salesforce. It injects a canned RESPONSE only — it cannot read or exfiltrate
+// the request secrets.
+static unique_ptr<SalesforceHttpClient> BuildHttpClient(ClientContext &context) {
+    Value status_v;
+    if (context.TryGetCurrentSetting("sf_mock_token_status", status_v) &&
+        !status_v.IsNull()) {
+        auto status = status_v.GetValue<int64_t>();
+        if (status != 0) {
+            Value body_v;
+            string body;
+            if (context.TryGetCurrentSetting("sf_mock_token_body", body_v) &&
+                !body_v.IsNull()) {
+                body = body_v.ToString();
+            }
+            return make_uniq_base<SalesforceHttpClient, MockHttpClient>(
+                static_cast<int>(status), std::move(body));
+        }
+    }
+    return CreateLiveHttpClient();
+}
+
 static unique_ptr<Catalog>
 SalesforceAttach(optional_ptr<StorageExtensionInfo> /*info*/,
-                 ClientContext & /*context*/,
+                 ClientContext &context,
                  AttachedDatabase & /*db*/,
                  const string & /*name*/,
                  AttachInfo &attach_info,
@@ -33,16 +59,19 @@ SalesforceAttach(optional_ptr<StorageExtensionInfo> /*info*/,
     SalesforceConfig config =
         SalesforceConfig::ParseAndValidate(attach_info.path, attach_info);
 
-    // Config is valid and held in memory only (no logging, no persistence).
-    // #3 (OAuth) consumes `config` to obtain an access token + instance_url;
-    // until then we stop here. Reference a non-secret field so the validated
-    // config is observably used.
+    // #3: OAuth 2.0 refresh-token exchange. Held in memory only; the request
+    // body (with secrets) is never logged, and errors never echo secrets.
+    auto http = BuildHttpClient(context);
+    SalesforceTokenSet token = SalesforceAuth::ExchangeRefreshToken(config, *http);
+
+    // Authentication succeeded. The catalog/scanner (#5-#9) will consume
+    // `token` to issue SOQL queries; until then we stop here. We echo only the
+    // non-secret instance_url to confirm the exchange — never the access_token.
     throw NotImplementedException(
-        "duckdb-salesforce v0.1: connection config for org '%s' parsed and "
-        "validated, but OAuth authentication and table scanning are not "
-        "implemented yet. Tracked in v0.1-readonly-rest (OAuth #3, HTTP "
-        "transport #4, scan #5-#9).",
-        config.org);
+        "duckdb-salesforce v0.1: authenticated org '%s' (instance_url '%s'), "
+        "but table scanning is not implemented yet. Tracked in v0.1-readonly-rest "
+        "(scan #5-#9).",
+        config.org, token.instance_url);
 }
 
 static unique_ptr<TransactionManager>

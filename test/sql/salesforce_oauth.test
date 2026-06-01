@@ -1,0 +1,66 @@
+# name: test/sql/salesforce_oauth.test
+# description: v0.1 #3 — OAuth2 refresh-token exchange (mocked HTTP, no network)
+# group: [salesforce]
+
+require salesforce
+
+# Valid ATTACH options reused across cases.
+# (client_id/client_secret/refresh_token are dummy test values.)
+
+# --- live transport seam (no mock) ------------------------------------------
+# With the mock disabled, the exchange routes to the live client, which is
+# implemented in #4. Clear, secret-free message.
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+----
+live HTTPS transport is implemented in issue #4
+
+# --- successful exchange (mocked 200) ---------------------------------------
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"00Dxx.SECRETTOKEN","instance_url":"https://myorg.my.salesforce.com","token_type":"Bearer"}';
+
+# Exchange succeeds; ATTACH then stops at the not-yet-implemented scanner.
+# The non-secret instance_url is echoed to prove the exchange worked.
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+----
+authenticated org 'production' (instance_url 'https://myorg.my.salesforce.com')
+
+# The access_token value must NOT leak into the message.
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+----
+table scanning is not implemented yet
+
+# --- response missing instance_url ------------------------------------------
+statement ok
+SET sf_mock_token_body = '{"access_token":"00Dxx.SECRETTOKEN"}';
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+----
+did not contain an instance_url
+
+# --- response missing access_token ------------------------------------------
+statement ok
+SET sf_mock_token_body = '{"instance_url":"https://myorg.my.salesforce.com"}';
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+----
+did not contain an access_token
+
+# --- non-200 error surfaces SF error code, never the secrets ----------------
+statement ok
+SET sf_mock_token_status = 400;
+
+statement ok
+SET sf_mock_token_body = '{"error":"invalid_grant","error_description":"expired access/refresh token"}';
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 'TOPSECRET', refresh_token 'REFRESHSECRET');
+----
+OAuth token exchange failed (HTTP 400): invalid_grant - expired access/refresh token

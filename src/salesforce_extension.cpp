@@ -25,6 +25,22 @@ static void LoadInternal(ExtensionLoader &loader) {
     auto storage_ext = GetSalesforceStorageExtension();
     StorageExtension::Register(config, "salesforce",
                                shared_ptr<StorageExtension>(storage_ext.release()));
+
+    // Test-only hooks for the OAuth exchange (#3). When sf_mock_token_status is
+    // non-zero, ATTACH uses a mock HTTP client returning that status and
+    // sf_mock_token_body instead of the live transport, so sqllogictest can
+    // exercise token exchange without contacting Salesforce. These inject a
+    // canned RESPONSE only and never touch request secrets. Default (0)
+    // disables the hook.
+    config.AddExtensionOption(
+        "sf_mock_token_status",
+        "TEST ONLY. HTTP status for a mocked Salesforce token-endpoint "
+        "response. 0 disables the mock and uses the live transport (default).",
+        LogicalType::BIGINT, Value::BIGINT(0));
+    config.AddExtensionOption(
+        "sf_mock_token_body",
+        "TEST ONLY. Response body paired with sf_mock_token_status.",
+        LogicalType::VARCHAR, Value(""));
 }
 
 void SalesforceExtension::Load(ExtensionLoader &loader) {
