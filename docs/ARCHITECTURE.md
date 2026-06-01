@@ -939,3 +939,54 @@ Salesforce ──(Bulk API 2.0 export)──▶ CSV pages ──▶ DuckDB COPY 
 - **`PartitionSpec`** — partition keys (`Id`/`LastModifiedDate` ranges) double as **incremental-export watermarks** (export only rows with `LastModifiedDate > last_snapshot`), enabling incremental Vault refreshes.
 
 These six are flagged now so v0.1–v0.7 implementations avoid baking in live-only or in-memory-only assumptions that would force a rewrite when Vault Mode lands in v0.8–v0.9.
+
+---
+
+## Appendix C: v0.1 Delivery Track (`v0.1-readonly-rest`)
+
+> PM scope lock. The architecture above is the *target*; this appendix defines the **first vertical slice only**. Everything not listed under "In scope" is explicitly a non-goal for v0.1 to prevent scope creep. v0.1 is **dev / sandbox-only** and must not be presented as production-ready.
+
+### C.1 Scope (the v0.1 vertical slice)
+
+One thin end-to-end path, REST-only, read-only:
+
+`ATTACH 'salesforce://...'` → OAuth2 refresh-token exchange → `instance_url` discovery → sObject **Describe** → DuckDB schema → REST `/query` + `queryMore` cursor → JSON → DuckDB vectors → `SELECT` over a single sObject with **projection + basic WHERE + LIMIT pushdown**.
+
+### C.2 Non-goals (deferred, by design)
+
+| Deferred | Lands in |
+| --- | --- |
+| Bulk API 2.0 (async jobs, CSV locators, PK chunking) | v0.3+ |
+| GraphQL / UI API backend | later / maybe |
+| Tooling API fast schema discovery (uses REST Describe in v0.1) | v0.2 |
+| Quota governor (`/limits` budgeting, full backoff) | v0.2–v0.3 |
+| REST-vs-Bulk auto-selection threshold | after benchmark (v0.3) |
+| Generic SaaS-connector abstraction layer | only after SF v0.1 proves the contracts |
+| Vault Mode | v0.8–v0.9 |
+| Advanced parallelism / partitioned scan | v0.2+ |
+| Full community-extension packaging & submission | v0.x release prep |
+
+### C.3 Definition of Done (v0.1)
+
+- `ATTACH 'salesforce://<org>' (client_id, client_secret, refresh_token)` parses, validates required options, and fails with a clear error on missing/invalid config.
+- OAuth2 refresh-token exchange succeeds against a sandbox org; `access_token` + `instance_url` captured; transparent re-exchange on `401`.
+- `SELECT * FROM sf.<Object>` returns correct typed rows for at least one standard sObject (e.g. `Account`).
+- Projection pushdown: only selected columns appear in the generated SOQL `SELECT`.
+- Predicate pushdown: simple `WHERE col = 'x'` / comparison / `AND` translated to SOQL; unsupported predicates fall back to DuckDB residual filtering (correctness preserved).
+- `LIMIT n` pushed to SOQL; pagination via `queryMore`/`nextRecordsUrl` beyond the 2,000-row page works.
+- JSON → DuckDB vector mapping covers the common Salesforce field types (id, string, boolean, int, double, date, datetime).
+- Mocked-HTTP unit tests pass in CI (no live org required to run the suite).
+- README documents the dev/sandbox-only status and the ATTACH usage.
+
+### C.4 Security Gate (hard merge-blocker for any functional v0.1 PR)
+
+No functional v0.1 code merges to `main` until **all** are satisfied:
+
+- `client_secret` and `refresh_token` are **never** logged, never echoed in error messages, never serialized into the catalog/metadata cache in plaintext.
+- HTTP transport applies **log masking**: auth headers (`Authorization: Bearer …`) and token fields redacted in any debug/trace output.
+- Tokens held **in memory only** for v0.1; no on-disk token persistence until a reviewed secure-storage design exists.
+- No Salesforce password / username-password OAuth flow anywhere — refresh-token (and later JWT bearer) only.
+- TLS verification enabled (no `verify=false` escape hatch shipped).
+- A short `SECURITY.md` note states the v0.1 secret-handling policy and the dev/sandbox-only boundary.
+
+This gate exists because the architecture doc describes OAuth but does not yet make secret-handling an enforced, reviewable checklist — v0.1 makes it one.
