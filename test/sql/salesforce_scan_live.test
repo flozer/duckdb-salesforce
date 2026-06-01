@@ -1,0 +1,27 @@
+# name: test/sql/salesforce_scan_live.test
+# description: GATED manual test — real ATTACH + SELECT * FROM sf.Account over
+#              HTTPS. Skipped in normal CI (requires SF_LIVE_* env vars).
+# group: [salesforce]
+
+require salesforce
+
+require-env SF_LIVE_CLIENT_ID
+
+require-env SF_LIVE_CLIENT_SECRET
+
+require-env SF_LIVE_REFRESH_TOKEN
+
+statement ok
+ATTACH 'salesforce://live' AS sf (TYPE salesforce,
+    client_id '${SF_LIVE_CLIENT_ID}',
+    client_secret '${SF_LIVE_CLIENT_SECRET}',
+    refresh_token '${SF_LIVE_REFRESH_TOKEN}');
+
+# Every org has Account with at least Id + Name.
+query I
+SELECT COUNT(*) >= 0 FROM (SELECT Id, Name FROM sf.Account LIMIT 5);
+----
+true
+
+statement ok
+DETACH sf;

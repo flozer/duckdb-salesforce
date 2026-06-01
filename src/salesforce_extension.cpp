@@ -57,18 +57,22 @@ static void LoadInternal(ExtensionLoader &loader) {
         "sf_mock_token_body",
         "TEST ONLY. Response body paired with sf_mock_token_status.",
         LogicalType::VARCHAR, Value(""));
-    config.AddExtensionOption(
-        "sf_mock_get_status",
-        "TEST ONLY. Comma-separated HTTP statuses returned by successive mocked "
-        "authenticated GETs (e.g. '200', or '401,200', or '200,200'). Active only "
-        "when sf_mock_token_status != 0. The last value repeats once exhausted. "
-        "Default '200'.",
-        LogicalType::VARCHAR, Value("200"));
-    config.AddExtensionOption(
-        "sf_mock_get_body",
-        "TEST ONLY. Response bodies for successive mocked GETs, separated by the "
-        "sentinel '|~|' (one per page). The last value repeats once exhausted.",
-        LogicalType::VARCHAR, Value(""));
+    // Mocked authenticated GETs are routed by URL into two scripted sequences:
+    // describe (.../describe) and query (.../query). Each is a comma-separated
+    // status list + '|~|'-separated bodies; the last entry repeats. Active only
+    // when sf_mock_token_status != 0.
+    config.AddExtensionOption("sf_mock_describe_status",
+                              "TEST ONLY. Statuses for mocked describe GETs (e.g. '200', '401,200').",
+                              LogicalType::VARCHAR, Value("200"));
+    config.AddExtensionOption("sf_mock_describe_body",
+                              "TEST ONLY. Bodies for mocked describe GETs ('|~|'-separated).",
+                              LogicalType::VARCHAR, Value(""));
+    config.AddExtensionOption("sf_mock_query_status",
+                              "TEST ONLY. Statuses for mocked query GETs (e.g. '200,200').",
+                              LogicalType::VARCHAR, Value("200"));
+    config.AddExtensionOption("sf_mock_query_body",
+                              "TEST ONLY. Bodies for mocked query GET pages ('|~|'-separated).",
+                              LogicalType::VARCHAR, Value(""));
 }
 
 void SalesforceExtension::Load(ExtensionLoader &loader) {

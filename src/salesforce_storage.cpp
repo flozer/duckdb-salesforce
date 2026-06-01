@@ -1,67 +1,331 @@
-// Salesforce ATTACH support — v0.1 scaffold stub.
+// Salesforce ATTACH support — federated read-only catalog (issue #8).
 //
-// This file will eventually host the federated read-only catalog
-// (SalesforceCatalog / SchemaEntry / TableEntry / TransactionManager),
-// mirroring the structure of duckdb-firebird's firebird_storage.cpp.
+// Mirrors duckdb-firebird's storage.cpp structure:
+//   SalesforceCatalog            : Catalog
+//   SalesforceSchemaEntry        : SchemaCatalogEntry  (one "main" schema)
+//   SalesforceTableEntry         : TableCatalogEntry
+//   SalesforceTransactionManager : TransactionManager  (no-op, read-only)
 //
-// For the v0.1 scaffold cut (issue #1) it provides ONLY the StorageExtension
-// registration so that `ATTACH '...' (TYPE salesforce)` resolves to a known
-// type. The attach callback intentionally throws: real authentication and
-// scanning are tracked by separate issues and must not be faked here.
+// ATTACH authenticates (OAuth refresh-token exchange, #3) and keeps the config
+// + token in memory. Objects are resolved LAZILY by name: the first reference
+// to sf.<Object> runs an sObject describe (#5) to build the DuckDB schema, then
+// SELECT * scans via the query fetcher (#6) + JSON decoder (#7). Everything is
+// read-only; all mutating catalog ops throw. No global object listing (v0.1
+// limitation): SHOW TABLES reflects only objects resolved this session.
 
 #include "salesforce_storage.hpp"
 #include "salesforce_config.hpp"
 #include "salesforce_auth.hpp"
 #include "salesforce_http.hpp"
+#include "salesforce_describe.hpp"
+#include "salesforce_scan.hpp"
+#include "salesforce_session.hpp"
 
+#include <mutex>
+#include <unordered_map>
+
+#include "duckdb/catalog/catalog.hpp"
+#include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/catalog/entry_lookup_info.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/main/attached_database.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/parser/parsed_data/attach_info.hpp"
+#include "duckdb/parser/parsed_data/create_schema_info.hpp"
+#include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/storage/storage_extension.hpp"
+#include "duckdb/storage/table_storage_info.hpp"
+#include "duckdb/transaction/transaction.hpp"
 #include "duckdb/transaction/transaction_manager.hpp"
 
 namespace duckdb {
 
-static unique_ptr<Catalog>
-SalesforceAttach(optional_ptr<StorageExtensionInfo> /*info*/,
-                 ClientContext &context,
-                 AttachedDatabase & /*db*/,
-                 const string & /*name*/,
-                 AttachInfo &attach_info,
-                 AttachOptions & /*options*/) {
-    // #2: parse + validate the connection config. Throws a clear,
-    // secret-free BinderException on any missing/invalid field.
-    SalesforceConfig config =
-        SalesforceConfig::ParseAndValidate(attach_info.path, attach_info);
+static const char *const SALESFORCE_MAIN_SCHEMA = "main";
 
-    // #3: OAuth 2.0 refresh-token exchange. Held in memory only; the request
-    // body (with secrets) is never logged, and errors never echo secrets.
+// Salesforce compound fields are not directly selectable in SOQL; their
+// components appear as separate scalar fields, so we drop them from the table.
+static bool IsQueryableField(const SalesforceField &f) {
+    string t = StringUtil::Lower(f.sf_type);
+    return t != "address" && t != "location";
+}
+
+// ---------------------------------------------------------------------------
+//  SalesforceTableEntry
+// ---------------------------------------------------------------------------
+
+class SalesforceTableEntry final : public TableCatalogEntry {
+public:
+    SalesforceTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info,
+                         SalesforceConfig config, SalesforceTokenSet token,
+                         vector<SalesforceField> fields)
+        : TableCatalogEntry(catalog, schema, info), config_(std::move(config)),
+          token_(std::move(token)), fields_(std::move(fields)) {
+        for (auto &col : columns.Logical()) {
+            column_names_.push_back(col.Name());
+            column_types_.push_back(col.Type());
+        }
+    }
+
+    unique_ptr<BaseStatistics> GetStatistics(ClientContext &, column_t) override {
+        return nullptr;
+    }
+
+    TableStorageInfo GetStorageInfo(ClientContext &) override {
+        return TableStorageInfo();
+    }
+
+    TableFunction GetScanFunction(ClientContext &, unique_ptr<FunctionData> &bind_data) override {
+        auto data = make_uniq<SalesforceScanBindData>();
+        data->config = config_;
+        data->token = token_;
+        data->object = name;
+        data->fields = fields_;
+        data->column_names = column_names_;
+        data->column_types = column_types_;
+        bind_data = std::move(data);
+        return GetSalesforceScanFunction();
+    }
+
+private:
+    SalesforceConfig config_;
+    SalesforceTokenSet token_;
+    vector<SalesforceField> fields_;
+    vector<string> column_names_;
+    vector<LogicalType> column_types_;
+};
+
+// ---------------------------------------------------------------------------
+//  SalesforceSchemaEntry
+// ---------------------------------------------------------------------------
+
+class SalesforceSchemaEntry final : public SchemaCatalogEntry {
+public:
+    SalesforceSchemaEntry(Catalog &catalog, CreateSchemaInfo &info, SalesforceConfig config,
+                          SalesforceTokenSet token)
+        : SchemaCatalogEntry(catalog, info), config_(std::move(config)),
+          token_(std::move(token)) {}
+
+    void Scan(ClientContext &, CatalogType type,
+              const std::function<void(CatalogEntry &)> &callback) override {
+        EmitResolved(type, callback);
+    }
+    void Scan(CatalogType type, const std::function<void(CatalogEntry &)> &callback) override {
+        EmitResolved(type, callback);
+    }
+
+    optional_ptr<CatalogEntry> LookupEntry(CatalogTransaction transaction,
+                                           const EntryLookupInfo &lookup_info) override {
+        if (lookup_info.GetCatalogType() != CatalogType::TABLE_ENTRY) {
+            return nullptr;
+        }
+        if (!transaction.HasContext()) {
+            return nullptr; // no context to issue the describe call
+        }
+        const string object = lookup_info.GetEntryName();
+        const string key = StringUtil::Lower(object);
+
+        std::lock_guard<std::mutex> g(lock_);
+        auto it = tables_.find(key);
+        if (it != tables_.end()) {
+            return it->second.get();
+        }
+
+        // Lazily describe this sObject and build its DuckDB schema.
+        auto client = BuildHttpClientForContext(transaction.GetContext());
+        SalesforceSession session(config_, *client);
+        session.SetToken(token_);
+        SalesforceDescribe describe = session.Describe(object);
+
+        CreateTableInfo info(catalog.GetName(), this->name, describe.object_name);
+        vector<SalesforceField> queryable;
+        for (auto &f : describe.fields) {
+            if (!IsQueryableField(f)) {
+                continue;
+            }
+            info.columns.AddColumn(ColumnDefinition(f.name, f.duckdb_type));
+            if (!f.nillable) {
+                info.constraints.push_back(
+                    make_uniq<NotNullConstraint>(LogicalIndex(queryable.size())));
+            }
+            queryable.push_back(f);
+        }
+        auto entry = make_uniq<SalesforceTableEntry>(catalog, *this, info, config_, token_,
+                                                     std::move(queryable));
+        auto *ptr = entry.get();
+        tables_.emplace(key, std::move(entry));
+        return ptr;
+    }
+
+    optional_ptr<CatalogEntry> CreateFunction(CatalogTransaction, CreateFunctionInfo &) override { Unsupported("CREATE FUNCTION"); }
+    optional_ptr<CatalogEntry> CreateTable(CatalogTransaction, BoundCreateTableInfo &) override { Unsupported("CREATE TABLE"); }
+    optional_ptr<CatalogEntry> CreateView(CatalogTransaction, CreateViewInfo &) override { Unsupported("CREATE VIEW"); }
+    optional_ptr<CatalogEntry> CreateSequence(CatalogTransaction, CreateSequenceInfo &) override { Unsupported("CREATE SEQUENCE"); }
+    optional_ptr<CatalogEntry> CreateTableFunction(CatalogTransaction, CreateTableFunctionInfo &) override { Unsupported("CREATE TABLE FUNCTION"); }
+    optional_ptr<CatalogEntry> CreateCopyFunction(CatalogTransaction, CreateCopyFunctionInfo &) override { Unsupported("CREATE COPY FUNCTION"); }
+    optional_ptr<CatalogEntry> CreatePragmaFunction(CatalogTransaction, CreatePragmaFunctionInfo &) override { Unsupported("CREATE PRAGMA FUNCTION"); }
+    optional_ptr<CatalogEntry> CreateCollation(CatalogTransaction, CreateCollationInfo &) override { Unsupported("CREATE COLLATION"); }
+    optional_ptr<CatalogEntry> CreateType(CatalogTransaction, CreateTypeInfo &) override { Unsupported("CREATE TYPE"); }
+    optional_ptr<CatalogEntry> CreateIndex(CatalogTransaction, CreateIndexInfo &, TableCatalogEntry &) override { Unsupported("CREATE INDEX"); }
+    void DropEntry(ClientContext &, DropInfo &) override { Unsupported("DROP"); }
+    void Alter(CatalogTransaction, AlterInfo &) override { Unsupported("ALTER"); }
+
+private:
+    void EmitResolved(CatalogType type, const std::function<void(CatalogEntry &)> &callback) {
+        if (type != CatalogType::TABLE_ENTRY) {
+            return;
+        }
+        std::lock_guard<std::mutex> g(lock_);
+        for (auto &kv : tables_) {
+            callback(*kv.second);
+        }
+    }
+
+    [[noreturn]] static void Unsupported(const char *op) {
+        throw NotImplementedException(
+            std::string("Salesforce ATTACH catalog is read-only — ") + op +
+            " is not supported.");
+    }
+
+    SalesforceConfig config_;
+    SalesforceTokenSet token_;
+    std::mutex lock_;
+    std::unordered_map<string, unique_ptr<SalesforceTableEntry>> tables_;
+};
+
+// ---------------------------------------------------------------------------
+//  SalesforceCatalog
+// ---------------------------------------------------------------------------
+
+class SalesforceCatalog final : public Catalog {
+public:
+    SalesforceCatalog(AttachedDatabase &db, SalesforceConfig config, SalesforceTokenSet token)
+        : Catalog(db), config_(std::move(config)), token_(std::move(token)) {}
+
+    string GetCatalogType() override { return "salesforce"; }
+
+    void Initialize(bool) override {
+        CreateSchemaInfo info;
+        info.schema = SALESFORCE_MAIN_SCHEMA;
+        info.on_conflict = OnCreateConflict::ERROR_ON_CONFLICT;
+        main_schema_ = make_uniq<SalesforceSchemaEntry>(*this, info, config_, token_);
+    }
+
+    bool InMemory() override { return false; }
+    string GetDBPath() override { return "salesforce://" + config_.org; }
+    DatabaseSize GetDatabaseSize(ClientContext &) override { return DatabaseSize(); }
+
+    void ScanSchemas(ClientContext &, std::function<void(SchemaCatalogEntry &)> callback) override {
+        if (main_schema_) {
+            callback(*main_schema_);
+        }
+    }
+
+    optional_ptr<SchemaCatalogEntry> LookupSchema(CatalogTransaction, const EntryLookupInfo &schema_lookup,
+                                                  OnEntryNotFound if_not_found) override {
+        const auto &name = schema_lookup.GetEntryName();
+        if (name.empty() || name == SALESFORCE_MAIN_SCHEMA || name == DEFAULT_SCHEMA) {
+            return main_schema_.get();
+        }
+        if (if_not_found == OnEntryNotFound::RETURN_NULL) {
+            return nullptr;
+        }
+        throw BinderException("Schema '%s' not found in Salesforce catalog (only 'main' is exposed)", name);
+    }
+
+    optional_ptr<CatalogEntry> CreateSchema(CatalogTransaction, CreateSchemaInfo &) override {
+        throw NotImplementedException("CREATE SCHEMA is not supported on a Salesforce catalog (read-only).");
+    }
+    void DropSchema(ClientContext &, DropInfo &) override {
+        throw NotImplementedException("DROP SCHEMA is not supported on a Salesforce catalog.");
+    }
+
+    PhysicalOperator &PlanCreateTableAs(ClientContext &, PhysicalPlanGenerator &, LogicalCreateTable &, PhysicalOperator &) override {
+        throw NotImplementedException("CTAS not supported on Salesforce catalog");
+    }
+    PhysicalOperator &PlanInsert(ClientContext &, PhysicalPlanGenerator &, LogicalInsert &, optional_ptr<PhysicalOperator>) override {
+        throw NotImplementedException("INSERT not supported on Salesforce catalog");
+    }
+    PhysicalOperator &PlanDelete(ClientContext &, PhysicalPlanGenerator &, LogicalDelete &, PhysicalOperator &) override {
+        throw NotImplementedException("DELETE not supported on Salesforce catalog");
+    }
+    PhysicalOperator &PlanUpdate(ClientContext &, PhysicalPlanGenerator &, LogicalUpdate &, PhysicalOperator &) override {
+        throw NotImplementedException("UPDATE not supported on Salesforce catalog");
+    }
+    PhysicalOperator &PlanMergeInto(ClientContext &, PhysicalPlanGenerator &, LogicalMergeInto &, PhysicalOperator &) override {
+        throw NotImplementedException("MERGE not supported on Salesforce catalog");
+    }
+    unique_ptr<LogicalOperator> BindCreateIndex(Binder &, CreateStatement &, TableCatalogEntry &,
+                                                unique_ptr<LogicalOperator>) override {
+        throw NotImplementedException("CREATE INDEX not supported on Salesforce catalog");
+    }
+    unique_ptr<LogicalOperator> BindAlterAddIndex(Binder &, TableCatalogEntry &, unique_ptr<LogicalOperator>,
+                                                  unique_ptr<CreateIndexInfo>, unique_ptr<AlterTableInfo>) override {
+        throw NotImplementedException("ALTER ... ADD INDEX not supported on Salesforce catalog");
+    }
+
+private:
+    SalesforceConfig config_;
+    SalesforceTokenSet token_;
+    unique_ptr<SalesforceSchemaEntry> main_schema_;
+};
+
+// ---------------------------------------------------------------------------
+//  SalesforceTransactionManager (no-op, read-only)
+// ---------------------------------------------------------------------------
+
+class SalesforceTransaction final : public Transaction {
+public:
+    SalesforceTransaction(TransactionManager &manager, ClientContext &context)
+        : Transaction(manager, context) {}
+};
+
+class SalesforceTransactionManager final : public TransactionManager {
+public:
+    explicit SalesforceTransactionManager(AttachedDatabase &db) : TransactionManager(db) {}
+
+    Transaction &StartTransaction(ClientContext &context) override {
+        auto tx = make_uniq<SalesforceTransaction>(*this, context);
+        auto &ref = *tx;
+        std::lock_guard<std::mutex> g(lock_);
+        transactions_.emplace(&ref, std::move(tx));
+        return ref;
+    }
+    ErrorData CommitTransaction(ClientContext &, Transaction &transaction) override {
+        std::lock_guard<std::mutex> g(lock_);
+        transactions_.erase(&transaction);
+        return ErrorData();
+    }
+    void RollbackTransaction(Transaction &transaction) override {
+        std::lock_guard<std::mutex> g(lock_);
+        transactions_.erase(&transaction);
+    }
+    void Checkpoint(ClientContext &, bool) override {}
+
+private:
+    std::mutex lock_;
+    std::unordered_map<Transaction *, unique_ptr<SalesforceTransaction>> transactions_;
+};
+
+// ---------------------------------------------------------------------------
+//  StorageExtension wiring
+// ---------------------------------------------------------------------------
+
+static unique_ptr<Catalog> SalesforceAttach(optional_ptr<StorageExtensionInfo>, ClientContext &context,
+                                            AttachedDatabase &db, const string &,
+                                            AttachInfo &attach_info, AttachOptions &) {
+    // #2 parse + validate; #3 OAuth exchange (token in memory only).
+    SalesforceConfig config = SalesforceConfig::ParseAndValidate(attach_info.path, attach_info);
     auto http = BuildHttpClientForContext(context);
     SalesforceTokenSet token = SalesforceAuth::ExchangeRefreshToken(config, *http);
-
-    // Authentication succeeded. The catalog/scanner (#5-#9) will consume
-    // `token` to issue SOQL queries; until then we stop here. We echo only the
-    // non-secret instance_url to confirm the exchange — never the access_token.
-    throw NotImplementedException(
-        "duckdb-salesforce v0.1: authenticated org '%s' (instance_url '%s'), "
-        "but table scanning is not implemented yet. Tracked in v0.1-readonly-rest "
-        "(scan #5-#9).",
-        config.org, token.instance_url);
+    return make_uniq_base<Catalog, SalesforceCatalog>(db, std::move(config), std::move(token));
 }
 
 static unique_ptr<TransactionManager>
-SalesforceCreateTransactionManager(optional_ptr<StorageExtensionInfo> /*info*/,
-                                   AttachedDatabase & /*db*/,
-                                   Catalog & /*catalog*/) {
-    // Never reached in v0.1: SalesforceAttach throws before any catalog or
-    // transaction manager is constructed. The callback must nonetheless be
-    // non-null — DuckDB (this pinned build) only dispatches ATTACH to a
-    // storage extension when BOTH attach and create_transaction_manager are
-    // set (see duckdb src/main/database.cpp CreateAttachedDatabase). Without
-    // it, ATTACH silently falls back to opening the path as a DuckDB file.
-    throw NotImplementedException(
-        "duckdb-salesforce v0.1 scaffold: transaction manager not implemented.");
+SalesforceCreateTransactionManager(optional_ptr<StorageExtensionInfo>, AttachedDatabase &db, Catalog &) {
+    return make_uniq_base<TransactionManager, SalesforceTransactionManager>(db);
 }
 
 unique_ptr<StorageExtension> GetSalesforceStorageExtension() {

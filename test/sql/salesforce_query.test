@@ -19,10 +19,10 @@ SELECT%20Id%20FROM%20Account%20WHERE%20Name%20%3D%20%27A%20B%27%20AND%20X%20%3E%
 
 # --- single page (done=true) -------------------------------------------------
 statement ok
-SET sf_mock_get_status = '200';
+SET sf_mock_query_status = '200';
 
 statement ok
-SET sf_mock_get_body = '{"done":true,"totalSize":2,"records":[{"Id":"1"},{"Id":"2"}]}';
+SET sf_mock_query_body = '{"done":true,"totalSize":2,"records":[{"Id":"1"},{"Id":"2"}]}';
 
 query II
 SELECT record_index, record_json FROM salesforce_query('SELECT Id FROM Account',
@@ -33,10 +33,10 @@ SELECT record_index, record_json FROM salesforce_query('SELECT Id FROM Account',
 
 # --- multi page (done=false + nextRecordsUrl) concatenates in order ----------
 statement ok
-SET sf_mock_get_status = '200,200';
+SET sf_mock_query_status = '200,200';
 
 statement ok
-SET sf_mock_get_body = '{"done":false,"nextRecordsUrl":"/services/data/v60.0/query/01g-2000","records":[{"Id":"1"},{"Id":"2"}]}|~|{"done":true,"records":[{"Id":"3"}]}';
+SET sf_mock_query_body = '{"done":false,"nextRecordsUrl":"/services/data/v60.0/query/01g-2000","records":[{"Id":"1"},{"Id":"2"}]}|~|{"done":true,"records":[{"Id":"3"}]}';
 
 query II
 SELECT record_index, record_json FROM salesforce_query('SELECT Id FROM Account',
@@ -49,10 +49,10 @@ SELECT record_index, record_json FROM salesforce_query('SELECT Id FROM Account',
 # --- 401 on an intermediate page reauthenticates and continues ---------------
 # GET1 page1 (200), GET2 401 -> refresh -> GET3 page2 (200).
 statement ok
-SET sf_mock_get_status = '200,401,200';
+SET sf_mock_query_status = '200,401,200';
 
 statement ok
-SET sf_mock_get_body = '{"done":false,"nextRecordsUrl":"/services/data/v60.0/query/01g-2000","records":[{"Id":"1"}]}|~||~|{"done":true,"records":[{"Id":"2"}]}';
+SET sf_mock_query_body = '{"done":false,"nextRecordsUrl":"/services/data/v60.0/query/01g-2000","records":[{"Id":"1"}]}|~||~|{"done":true,"records":[{"Id":"2"}]}';
 
 query I
 SELECT COUNT(*) FROM salesforce_query('SELECT Id FROM Account',
@@ -62,10 +62,10 @@ SELECT COUNT(*) FROM salesforce_query('SELECT Id FROM Account',
 
 # --- pagination loop guard: same nextRecordsUrl repeats ----------------------
 statement ok
-SET sf_mock_get_status = '200';
+SET sf_mock_query_status = '200';
 
 statement ok
-SET sf_mock_get_body = '{"done":false,"nextRecordsUrl":"/services/data/v60.0/query/SAME","records":[{"Id":"1"}]}';
+SET sf_mock_query_body = '{"done":false,"nextRecordsUrl":"/services/data/v60.0/query/SAME","records":[{"Id":"1"}]}';
 
 statement error
 SELECT * FROM salesforce_query('SELECT Id FROM Account',
@@ -75,10 +75,10 @@ pagination loop detected
 
 # --- 400 malformed query surfaces SF errorCode, no secret --------------------
 statement ok
-SET sf_mock_get_status = '400';
+SET sf_mock_query_status = '400';
 
 statement ok
-SET sf_mock_get_body = '[{"errorCode":"MALFORMED_QUERY","message":"unexpected token"}]';
+SET sf_mock_query_body = '[{"errorCode":"MALFORMED_QUERY","message":"unexpected token"}]';
 
 statement error
 SELECT * FROM salesforce_query('SELECT bogus', client_id := 'c', client_secret := 'TOPSECRET', refresh_token := 'REFRESHSECRET');

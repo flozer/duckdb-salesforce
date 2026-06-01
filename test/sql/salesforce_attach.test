@@ -71,14 +71,16 @@ SET sf_mock_token_status = 200;
 statement ok
 SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
 
-# Minimal valid config.
-statement error
+# Minimal valid config -> ATTACH succeeds.
+statement ok
 ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
-----
-authenticated org 'production'
+
+statement ok
+DETACH sf;
 
 # Valid config with both optional fields (login_url + api_version forms).
-statement error
-ATTACH 'salesforce://mysandbox' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', login_url 'https://test.salesforce.com', api_version '60.0');
-----
-authenticated org 'mysandbox'
+statement ok
+ATTACH 'salesforce://mysandbox' AS sf2 (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', login_url 'https://test.salesforce.com', api_version '60.0');
+
+statement ok
+DETACH sf2;

@@ -16,18 +16,12 @@ SET sf_mock_token_status = 200;
 statement ok
 SET sf_mock_token_body = '{"access_token":"00Dxx.SECRETTOKEN","instance_url":"https://myorg.my.salesforce.com","token_type":"Bearer"}';
 
-# Exchange succeeds; ATTACH then stops at the not-yet-implemented scanner.
-# The non-secret instance_url is echoed to prove the exchange worked.
-statement error
+# Exchange succeeds -> ATTACH creates the catalog (no error).
+statement ok
 ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
-----
-authenticated org 'production' (instance_url 'https://myorg.my.salesforce.com')
 
-# The access_token value must NOT leak into the message.
-statement error
-ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
-----
-table scanning is not implemented yet
+statement ok
+DETACH sf;
 
 # --- response missing instance_url ------------------------------------------
 statement ok

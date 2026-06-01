@@ -29,6 +29,7 @@ set(EXTENSION_SOURCES
     src/salesforce_describe.cpp
     src/salesforce_query.cpp
     src/salesforce_value.cpp
+    src/salesforce_scan.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

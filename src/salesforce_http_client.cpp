@@ -167,17 +167,23 @@ private:
     }
 };
 
-// Test double. Post() returns the mocked token-endpoint response (used for the
-// initial exchange and every 401 refresh). Get() walks a scripted sequence of
-// (status, body) responses — one per GET call — so tests can drive describe,
-// multi-page query pagination, and a 401 injected on any page. When the
-// sequence is exhausted the last entry repeats.
+// Test double. Post() returns the mocked token-endpoint response (initial
+// exchange + every 401 refresh). Get() is routed by URL into two independent
+// scripted sequences — one for describe (.../describe) and one for query
+// (.../query, queryMore) — each a list of (status, body) responses that
+// advance per call (last entry repeats once exhausted). The split lets a
+// single SQL flow drive ATTACH-exchange -> describe -> query even though each
+// operation builds its own client instance.
 class ScriptedMockHttpClient final : public SalesforceHttpClient {
 public:
-    ScriptedMockHttpClient(int token_status, string token_body, vector<int> get_statuses,
-                           vector<string> get_bodies)
+    ScriptedMockHttpClient(int token_status, string token_body, vector<int> describe_statuses,
+                           vector<string> describe_bodies, vector<int> query_statuses,
+                           vector<string> query_bodies)
         : token_status_(token_status), token_body_(std::move(token_body)),
-          get_statuses_(std::move(get_statuses)), get_bodies_(std::move(get_bodies)) {
+          describe_statuses_(std::move(describe_statuses)),
+          describe_bodies_(std::move(describe_bodies)),
+          query_statuses_(std::move(query_statuses)),
+          query_bodies_(std::move(query_bodies)) {
     }
 
     HttpResponse Post(const HttpRequest & /*request*/) override {
@@ -188,32 +194,33 @@ public:
         return r;
     }
 
-    HttpResponse Get(const HttpRequest & /*request*/) override {
-        HttpResponse r;
-        r.transport_ok = true;
-        r.status = Pick(get_statuses_, get_index_, 200);
-        r.body = get_bodies_.empty()
-                     ? string()
-                     : get_bodies_[get_index_ < get_bodies_.size() ? get_index_
-                                                                   : get_bodies_.size() - 1];
-        get_index_++;
-        return r;
+    HttpResponse Get(const HttpRequest &request) override {
+        bool is_describe = request.url.find("/describe") != string::npos;
+        if (is_describe) {
+            return Step(describe_statuses_, describe_bodies_, describe_index_);
+        }
+        return Step(query_statuses_, query_bodies_, query_index_);
     }
 
 private:
-    template <class T>
-    static T Pick(const vector<T> &v, size_t i, T dflt) {
-        if (v.empty()) {
-            return dflt;
-        }
-        return v[i < v.size() ? i : v.size() - 1];
+    static HttpResponse Step(const vector<int> &statuses, const vector<string> &bodies,
+                             size_t &index) {
+        HttpResponse r;
+        r.transport_ok = true;
+        r.status = statuses.empty() ? 200 : statuses[index < statuses.size() ? index : statuses.size() - 1];
+        r.body = bodies.empty() ? string() : bodies[index < bodies.size() ? index : bodies.size() - 1];
+        index++;
+        return r;
     }
 
     int token_status_;
     string token_body_;
-    vector<int> get_statuses_;
-    vector<string> get_bodies_;
-    size_t get_index_ = 0;
+    vector<int> describe_statuses_;
+    vector<string> describe_bodies_;
+    vector<int> query_statuses_;
+    vector<string> query_bodies_;
+    size_t describe_index_ = 0;
+    size_t query_index_ = 0;
 };
 
 // Split a string on a multi-char sentinel. An empty input yields one empty
@@ -274,16 +281,20 @@ unique_ptr<SalesforceHttpClient> CreateLiveHttpClient() {
 unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &context) {
     auto token_status = SettingInt(context, "sf_mock_token_status", 0);
     if (token_status != 0) {
-        string status_csv = SettingStr(context, "sf_mock_get_status");
-        vector<int> statuses = ParseIntCsv(status_csv);
-        if (statuses.empty()) {
-            statuses.push_back(200);
-        }
         // "|~|" separates page bodies; chosen to never occur in JSON fixtures.
-        vector<string> bodies = SplitOn(SettingStr(context, "sf_mock_get_body"), "|~|");
+        vector<int> d_status = ParseIntCsv(SettingStr(context, "sf_mock_describe_status"));
+        if (d_status.empty()) {
+            d_status.push_back(200);
+        }
+        vector<string> d_body = SplitOn(SettingStr(context, "sf_mock_describe_body"), "|~|");
+        vector<int> q_status = ParseIntCsv(SettingStr(context, "sf_mock_query_status"));
+        if (q_status.empty()) {
+            q_status.push_back(200);
+        }
+        vector<string> q_body = SplitOn(SettingStr(context, "sf_mock_query_body"), "|~|");
         return make_uniq_base<SalesforceHttpClient, ScriptedMockHttpClient>(
             static_cast<int>(token_status), SettingStr(context, "sf_mock_token_body"),
-            std::move(statuses), std::move(bodies));
+            std::move(d_status), std::move(d_body), std::move(q_status), std::move(q_body));
     }
     return CreateLiveHttpClient();
 }

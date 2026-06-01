@@ -26,6 +26,14 @@ public:
     // Initial refresh-token exchange. Must be called before any request.
     void Authenticate();
 
+    // Reuse a token obtained earlier (e.g. at ATTACH) instead of re-exchanging.
+    void SetToken(SalesforceTokenSet token) {
+        token_ = std::move(token);
+    }
+    const SalesforceTokenSet &Token() const {
+        return token_;
+    }
+
     // GET /services/data/<api_version>/sobjects/<object>/describe -> schema.
     SalesforceDescribe Describe(const string &object);
 

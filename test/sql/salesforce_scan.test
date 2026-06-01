@@ -1,0 +1,49 @@
+# name: test/sql/salesforce_scan.test
+# description: v0.1 #8 — ATTACH + catalog + SELECT * FROM sf.<Object> (mocked)
+# group: [salesforce]
+
+require salesforce
+
+# Token (POST exchange) used by ATTACH.
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT.SECRET","instance_url":"https://x.my.salesforce.com"}';
+
+# Describe response (GET .../describe) -> table schema.
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id","nillable":false},{"name":"Name","type":"string","nillable":true},{"name":"AnnualRevenue","type":"currency","precision":18,"scale":2},{"name":"BillingAddress","type":"address","nillable":true}]}';
+
+# Query response (GET .../query) -> rows.
+statement ok
+SET sf_mock_query_body = '{"done":true,"totalSize":2,"records":[{"Id":"001","Name":"Acme","AnnualRevenue":1000000.00},{"Id":"002","Name":"Globex","AnnualRevenue":null}]}';
+
+# ATTACH authenticates (OAuth exchange) and succeeds.
+statement ok
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# The hello-world: SELECT * resolves the schema lazily (describe) and scans.
+# Compound BillingAddress (type "address") is dropped — not SOQL-selectable.
+query III
+SELECT Id, Name, AnnualRevenue FROM sf.Account ORDER BY Id;
+----
+001	Acme	1000000.00
+002	Globex	NULL
+
+# Schema is correct: column names + types from describe (no BillingAddress).
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM sf.Account) ORDER BY column_name;
+----
+AnnualRevenue	DECIMAL(18,2)
+Id	VARCHAR
+Name	VARCHAR
+
+# Row count.
+query I
+SELECT COUNT(*) FROM sf.Account;
+----
+2
+
+statement ok
+DETACH sf;
