@@ -25,8 +25,9 @@ exists to validate a build before tagging `v0.1.0`.
 - A **sandbox / scratch / Developer Edition** org.
 - A **Connected App** with OAuth enabled, the minimum scopes (`api`,
   `refresh_token`), and a redirect URI.
-- A **refresh token** obtained out-of-band via the OAuth 2.0 web-server or
-  device flow (not covered here). Treat it as a secret.
+- A **refresh token** obtained via the OAuth 2.0 device or web-server flow —
+  step-by-step in [docs/CONNECTED_APP.md](docs/CONNECTED_APP.md). Treat it as a
+  secret. (Username+password is not supported — refresh-token flow only.)
 - A local release build (see [README → Build](README.md#build)).
 
 ## 2. Environment variables
