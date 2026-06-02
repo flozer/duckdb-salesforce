@@ -89,6 +89,9 @@ which are **skipped** unless `SF_LIVE_CLIENT_ID` / `SF_LIVE_CLIENT_SECRET` /
 `SF_LIVE_REFRESH_TOKEN` are set — **never set these in CI**. As of v0.1 the
 offline suite is 166 assertions across 8 files, with 4 live files skipped.
 
+For a repeatable, secret-safe manual sandbox validation (and the criteria to
+tag `v0.1.0`), see [SMOKE.md](SMOKE.md).
+
 ## v0.1 limitations
 
 Known and intentional for this cut (see `docs/ARCHITECTURE.md` Appendix C):
