@@ -23,7 +23,7 @@ SET sf_force_transport = 'nope';
 statement error
 SELECT Id FROM sf.Account;
 ----
-sf_force_transport must be 'rest' or 'bulk'
+sf_force_transport must be 'rest', 'bulk' or 'auto'
 
 # --- Bulk decode: CSV edge cases (comma, escaped quotes, newline, empty, base64)
 statement ok

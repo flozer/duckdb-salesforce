@@ -503,6 +503,76 @@ TableFunction GetSalesforceLastBulkCreateBodyFunction() {
                          LastBulkBodyBind, LastBulkBodyInit);
 }
 
+// --- last transport-selection diagnostic (DEBUG/TEST ONLY) -------------------
+
+static std::mutex g_transport_lock;
+static string g_last_transport;
+static int64_t g_last_est_rows = -1; // -1 -> no probe ran (emitted as NULL)
+static string g_last_transport_reason;
+
+void SetLastTransport(const string &transport, int64_t est_rows, const string &reason) {
+    std::lock_guard<std::mutex> g(g_transport_lock);
+    g_last_transport = transport;
+    g_last_est_rows = est_rows;
+    g_last_transport_reason = reason;
+}
+
+namespace {
+
+struct LastTransportGlobalState : public GlobalTableFunctionState {
+    bool emitted = false;
+    idx_t MaxThreads() const override {
+        return 1;
+    }
+};
+
+static unique_ptr<FunctionData> LastTransportBind(ClientContext &, TableFunctionBindInput &,
+                                                  vector<LogicalType> &return_types,
+                                                  vector<string> &names) {
+    names = {"transport", "est_rows", "reason"};
+    return_types = {LogicalType::VARCHAR, LogicalType::BIGINT, LogicalType::VARCHAR};
+    return nullptr;
+}
+
+static unique_ptr<GlobalTableFunctionState> LastTransportInit(ClientContext &,
+                                                              TableFunctionInitInput &) {
+    return make_uniq<LastTransportGlobalState>();
+}
+
+static void LastTransportFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &gstate = data.global_state->Cast<LastTransportGlobalState>();
+    if (gstate.emitted) {
+        output.SetCardinality(0);
+        return;
+    }
+    string transport, reason;
+    int64_t est;
+    {
+        std::lock_guard<std::mutex> g(g_transport_lock);
+        transport = g_last_transport;
+        est = g_last_est_rows;
+        reason = g_last_transport_reason;
+    }
+    FlatVector::GetData<string_t>(output.data[0])[0] =
+        StringVector::AddString(output.data[0], transport);
+    if (est < 0) {
+        FlatVector::SetNull(output.data[1], 0, true);
+    } else {
+        FlatVector::GetData<int64_t>(output.data[1])[0] = est;
+    }
+    FlatVector::GetData<string_t>(output.data[2])[0] =
+        StringVector::AddString(output.data[2], reason);
+    gstate.emitted = true;
+    output.SetCardinality(1);
+}
+
+} // namespace
+
+TableFunction GetSalesforceLastTransportFunction() {
+    return TableFunction("salesforce_last_transport", {}, LastTransportFunction,
+                         LastTransportBind, LastTransportInit);
+}
+
 // --- describe-call counter (DEBUG/TEST ONLY) ---------------------------------
 
 static std::mutex g_describe_lock;

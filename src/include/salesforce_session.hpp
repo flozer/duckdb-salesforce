@@ -73,6 +73,12 @@ public:
     // Same auth/401-refresh as the REST path. For large extractions.
     SalesforceBulkResult BulkQuery(const string &soql);
 
+    // Auto-transport probe (#v0.3 §2): estimate the row count for a COUNT() SOQL
+    // via one REST /query call (reads `totalSize`; zero row egress). Returns
+    // false on ANY failure (HTTP error, missing totalSize) so the caller falls
+    // back to REST. Never throws.
+    bool TryEstimateCount(const string &count_soql, int64_t &out_rows);
+
 private:
     // Bearer-authenticated request (GET, or POST with a JSON body) that retries
     // ONCE on HTTP 401 after re-exchanging the refresh token. Returns the full

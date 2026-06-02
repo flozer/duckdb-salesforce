@@ -35,7 +35,8 @@ apply identically — so only the delivery mechanism differs.
 
 ```sql
 SET sf_force_transport = 'rest';   -- default: lazy REST /query + queryMore
-SET sf_force_transport = 'bulk';   -- Bulk API 2.0 query job (CSV results)
+SET sf_force_transport = 'bulk';   -- force Bulk API 2.0 query job (CSV results)
+SET sf_force_transport = 'auto';   -- opt-in: probe row count, pick rest/bulk
 ```
 
 | | `rest` (default) | `bulk` |
@@ -54,8 +55,36 @@ Notes / limitations of the `bulk` path:
   `Sforce-Locator`), so memory scales with the result size. v0.3 does not yet
   stream Bulk pages into the scan.
 - A `Failed`/`Aborted` job raises a clean, secret-free error.
-- Auto-selecting the transport by query shape is deferred (v0.3 §2); for now it
-  is explicit via the setting.
+
+### Auto-selection (`'auto'`, v0.3 §2)
+
+`'auto'` is **opt-in**; the default stays `'rest'` so interactive use is
+unchanged. When set, the scan probes the row count once (a `SELECT COUNT()` REST
+call — **one request, zero row egress**) and picks Bulk only for large reads:
+
+| Signal | Decision |
+| --- | --- |
+| Estimated rows `> sf_auto_bulk_threshold` (default `50000`) | **Bulk** |
+| Estimated rows `<= threshold` | **REST** |
+| Aggregate-only scan (`COUNT(*)`, no real column projected) | **REST** (no probe) |
+| Probe failed (HTTP error / no `totalSize`) | **REST** (never blocks the query) |
+| `sf_auto_probe = false` | **REST** (probe skipped) |
+| `sf_force_transport = 'rest'` or `'bulk'` | **forced** — no probe runs |
+
+```sql
+SET sf_force_transport   = 'auto';
+SET sf_auto_bulk_threshold = 100000;   -- rows; tune the rest/bulk cutover
+SET sf_auto_probe        = true;       -- false => 'auto' always uses REST
+
+-- Why did the last scan pick what it picked?
+SELECT * FROM salesforce_last_transport();   -- (transport, est_rows, reason)
+```
+
+⚠️ **`LIMIT` caveat.** DuckDB does not expose a query's `LIMIT` to a table
+function, so `'auto'` cannot see it: a small `LIMIT` over a huge object may still
+estimate large and pick Bulk (which over-fetches). For interactive small-`LIMIT`
+reads on big objects, force `SET sf_force_transport = 'rest'`. There is **no
+mid-stream escalation** — the transport is decided once, before the first row.
 
 ## Pushdown (v0.1)
 

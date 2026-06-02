@@ -91,6 +91,25 @@ string SalesforceSession::AuthorizedGet(const string &path) {
                       resp.status, code, msg.empty() ? "" : " - ", msg);
 }
 
+bool SalesforceSession::TryEstimateCount(const string &count_soql, int64_t &out_rows) {
+    try {
+        HttpResponse resp = AuthorizedSend(false, QueryPath(count_soql), "");
+        if (resp.status != 200) {
+            return false;
+        }
+        bool found = false, is_null = false;
+        string raw;
+        sfjson::GetValue(resp.body, "totalSize", raw, found, is_null);
+        if (!found || is_null) {
+            return false;
+        }
+        out_rows = sfjson::GetInt(resp.body, "totalSize", -1);
+        return out_rows >= 0;
+    } catch (...) {
+        return false; // never block a query on the estimator
+    }
+}
+
 SalesforceDescribe SalesforceSession::Describe(const string &object) {
     string path =
         "/services/data/" + config_.api_version + "/sobjects/" + object + "/describe";

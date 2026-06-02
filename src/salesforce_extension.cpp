@@ -56,6 +56,11 @@ static void LoadInternal(ExtensionLoader &loader) {
     // the same projection + predicate SOQL as REST (v0.3). Not a public API.
     loader.RegisterFunction(GetSalesforceLastBulkCreateBodyFunction());
 
+    // salesforce_last_transport() — DEBUG/TEST ONLY: transport the most recent
+    // scan resolved to + probed est_rows + reason (proves 'auto' selection,
+    // v0.3 §2). Also user-facing diagnostic for why REST vs Bulk was chosen.
+    loader.RegisterFunction(GetSalesforceLastTransportFunction());
+
     // salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the
     // attached catalog issued since ATTACH (proves the metadata cache, #12).
     loader.RegisterFunction(GetSalesforceDescribeCallsFunction());
@@ -101,15 +106,38 @@ static void LoadInternal(ExtensionLoader &loader) {
     config.AddExtensionOption("sf_mock_sobjects_body",
                               "TEST ONLY. Body for mocked global describe (GET /sobjects).",
                               LogicalType::VARCHAR, Value(""));
+    // Mocked COUNT() probe (auto-transport selection, §2): a GET whose SOQL
+    // contains COUNT is routed here instead of the data-query sequence.
+    config.AddExtensionOption("sf_mock_count_status",
+                              "TEST ONLY. Statuses for the mocked COUNT() probe GET.",
+                              LogicalType::VARCHAR, Value("200"));
+    config.AddExtensionOption(
+        "sf_mock_count_body", "TEST ONLY. Body for the mocked COUNT() probe (reads totalSize).",
+        LogicalType::VARCHAR, Value("{\"totalSize\":0,\"done\":true,\"records\":[]}"));
 
-    // Transport for catalog scans: 'rest' (default, lazy REST /query) or 'bulk'
-    // (Bulk API 2.0 query path, for large extractions / materialization). #v0.3.
+    // Transport for catalog scans: 'rest' (default, lazy REST /query), 'bulk'
+    // (Bulk API 2.0 query path), or 'auto' (probe the row count and pick by
+    // sf_auto_bulk_threshold). #v0.3. Default stays 'rest' to preserve the
+    // interactive experience; 'auto' is opt-in; 'bulk' forces Bulk.
     config.AddExtensionOption(
         "sf_force_transport",
-        "Scan transport: 'rest' (default) or 'bulk' (Bulk API 2.0). 'bulk' is for "
-        "large extractions / CREATE TABLE AS / COPY; same SOQL (projection + "
-        "predicate pushdown) either way.",
+        "Scan transport: 'rest' (default), 'bulk' (Bulk API 2.0), or 'auto' "
+        "(choose by row-count probe). 'bulk' is for large extractions / CREATE "
+        "TABLE AS / COPY; same SOQL (projection + predicate pushdown) either way.",
         LogicalType::VARCHAR, Value("rest"));
+    // 'auto' tuning. The threshold is the row estimate above which 'auto' picks
+    // Bulk. The probe is a single COUNT() REST call (zero row egress); disabling
+    // it makes 'auto' always resolve to REST.
+    config.AddExtensionOption(
+        "sf_auto_bulk_threshold",
+        "For sf_force_transport='auto': estimated row count above which Bulk is "
+        "chosen over REST (default 50000).",
+        LogicalType::BIGINT, Value::BIGINT(50000));
+    config.AddExtensionOption(
+        "sf_auto_probe",
+        "For sf_force_transport='auto': run the COUNT() row-count probe (default "
+        "true). When false, 'auto' always resolves to REST.",
+        LogicalType::BOOLEAN, Value::BOOLEAN(true));
 
     // Test-only Bulk mock hooks (active when sf_mock_token_status != 0).
     config.AddExtensionOption("sf_mock_bulk_create_status", "TEST ONLY. Bulk job-create HTTP status.",

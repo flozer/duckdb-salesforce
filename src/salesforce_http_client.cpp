@@ -192,14 +192,17 @@ public:
     ScriptedMockHttpClient(int token_status, string token_body, vector<int> describe_statuses,
                            vector<string> describe_bodies, vector<int> query_statuses,
                            vector<string> query_bodies, vector<int> global_statuses,
-                           vector<string> global_bodies, BulkMock bulk)
+                           vector<string> global_bodies, vector<int> count_statuses,
+                           vector<string> count_bodies, BulkMock bulk)
         : token_status_(token_status), token_body_(std::move(token_body)),
           describe_statuses_(std::move(describe_statuses)),
           describe_bodies_(std::move(describe_bodies)),
           query_statuses_(std::move(query_statuses)),
           query_bodies_(std::move(query_bodies)),
           global_statuses_(std::move(global_statuses)),
-          global_bodies_(std::move(global_bodies)), bulk_(std::move(bulk)) {
+          global_bodies_(std::move(global_bodies)),
+          count_statuses_(std::move(count_statuses)),
+          count_bodies_(std::move(count_bodies)), bulk_(std::move(bulk)) {
     }
 
     HttpResponse Post(const HttpRequest &request) override {
@@ -240,6 +243,12 @@ public:
         if (request.url.find("/sobjects") != string::npos) {
             return Step(global_statuses_, global_bodies_, global_index_);
         }
+        // Auto-transport probe (#v0.3 §2): SELECT COUNT() ... -> count sequence.
+        // "COUNT" survives URL-encoding (letters only), so match it before the
+        // generic data-query branch.
+        if (request.url.find("COUNT") != string::npos) {
+            return Step(count_statuses_, count_bodies_, count_index_);
+        }
         return Step(query_statuses_, query_bodies_, query_index_);
     }
 
@@ -262,10 +271,13 @@ private:
     vector<string> query_bodies_;
     vector<int> global_statuses_;
     vector<string> global_bodies_;
+    vector<int> count_statuses_;
+    vector<string> count_bodies_;
     BulkMock bulk_;
     size_t describe_index_ = 0;
     size_t query_index_ = 0;
     size_t global_index_ = 0;
+    size_t count_index_ = 0;
     size_t bulk_status_index_ = 0;
     size_t bulk_results_index_ = 0;
 };
@@ -344,6 +356,11 @@ unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &contex
             g_status.push_back(200);
         }
         vector<string> g_body = SplitOn(SettingStr(context, "sf_mock_sobjects_body"), "|~|");
+        vector<int> c_status = ParseIntCsv(SettingStr(context, "sf_mock_count_status"));
+        if (c_status.empty()) {
+            c_status.push_back(200);
+        }
+        vector<string> c_body = SplitOn(SettingStr(context, "sf_mock_count_body"), "|~|");
 
         ScriptedMockHttpClient::BulkMock bulk;
         bulk.create_status = static_cast<int>(SettingInt(context, "sf_mock_bulk_create_status", 200));
@@ -363,7 +380,8 @@ unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &contex
         return make_uniq_base<SalesforceHttpClient, ScriptedMockHttpClient>(
             static_cast<int>(token_status), SettingStr(context, "sf_mock_token_body"),
             std::move(d_status), std::move(d_body), std::move(q_status), std::move(q_body),
-            std::move(g_status), std::move(g_body), std::move(bulk));
+            std::move(g_status), std::move(g_body), std::move(c_status), std::move(c_body),
+            std::move(bulk));
     }
     return CreateLiveHttpClient();
 }

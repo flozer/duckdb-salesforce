@@ -50,6 +50,13 @@ TableFunction GetSalesforceLastScanPagesFunction();
 void SetLastBulkCreateBody(const string &body);
 TableFunction GetSalesforceLastBulkCreateBodyFunction();
 
+// DEBUG / TEST ONLY. The transport the most recent scan resolved to, the probed
+// row estimate (NULL when no COUNT() probe ran), and a human reason for the
+// choice (e.g. "forced", "auto: est 120000 rows > threshold 50000 -> bulk").
+// Lets tests + users see why 'auto' picked REST vs Bulk. Not a public API.
+void SetLastTransport(const string &transport, int64_t est_rows, const string &reason);
+TableFunction GetSalesforceLastTransportFunction();
+
 // DEBUG / TEST ONLY. Count of sObject describe calls the attached catalog has
 // issued since the last ATTACH (reset on ATTACH). Proves the per-catalog
 // metadata cache (#12) describes each object once. Not a stable/public API.

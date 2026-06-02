@@ -104,15 +104,17 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     string soql = BuildSelectSoql(bind.object, select_fields, bind.pushed_where, optional_idx());
     SetLastSoql(soql);
 
-    // Transport: 'rest' (default, lazy) or 'bulk' (Bulk API 2.0). Same optimized
-    // SOQL either way, so projection/predicate pushdown applies to both.
+    // Transport: 'rest' (default, lazy), 'bulk' (Bulk API 2.0), or 'auto' (probe
+    // the row count, pick rest/bulk by threshold). Same optimized SOQL either
+    // way, so projection/predicate pushdown applies to both.
     string transport = "rest";
     Value tv;
     if (context.TryGetCurrentSetting("sf_force_transport", tv) && !tv.IsNull()) {
         transport = StringUtil::Lower(tv.ToString());
     }
-    if (transport != "rest" && transport != "bulk") {
-        throw BinderException("sf_force_transport must be 'rest' or 'bulk' (got '%s').", transport);
+    if (transport != "rest" && transport != "bulk" && transport != "auto") {
+        throw BinderException("sf_force_transport must be 'rest', 'bulk' or 'auto' (got '%s').",
+                              transport);
     }
 
     gstate->client = BuildHttpClientForContext(context);
@@ -120,7 +122,64 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     gstate->session->SetToken(bind.token); // reuse ATTACH token (refreshes on 401)
     SetLastScanPages(0);
 
-    if (transport == "bulk") {
+    // Resolve 'auto' -> 'rest'|'bulk' ONCE here (no mid-stream escalation: that
+    // would duplicate already-emitted rows). LIMIT is invisible to a table
+    // function, so 'auto' cannot see a small LIMIT — for interactive small-LIMIT
+    // reads on a huge object, force sf_force_transport='rest'.
+    string effective = transport;
+    int64_t est_rows = -1;     // -1 -> no probe ran (NULL in the diagnostic)
+    string reason = "forced";  // overwritten on the 'auto' path
+    if (transport == "auto") {
+        // Aggregate-only scan (COUNT(*) etc.): no real field projected. A Bulk
+        // job is pointless here, so stay on REST.
+        bool only_virtual = true;
+        for (auto col : input.column_ids) {
+            if (col < bind.fields.size()) {
+                only_virtual = false;
+                break;
+            }
+        }
+        if (input.column_ids.empty() || only_virtual) {
+            effective = "rest";
+            reason = "auto: aggregate-only -> rest";
+        } else {
+            bool probe = true;
+            Value pv;
+            if (context.TryGetCurrentSetting("sf_auto_probe", pv) && !pv.IsNull()) {
+                probe = pv.GetValue<bool>();
+            }
+            if (!probe) {
+                effective = "rest";
+                reason = "auto: probe disabled -> rest";
+            } else {
+                int64_t threshold = 50000;
+                Value thv;
+                if (context.TryGetCurrentSetting("sf_auto_bulk_threshold", thv) && !thv.IsNull()) {
+                    threshold = thv.GetValue<int64_t>();
+                }
+                // COUNT() with the SAME pushed WHERE, so the estimate matches
+                // what the scan will read. One REST call, zero row egress.
+                string count_soql = "SELECT COUNT() FROM " + bind.object;
+                if (!bind.pushed_where.empty()) {
+                    count_soql += " WHERE " + bind.pushed_where;
+                }
+                int64_t n = 0;
+                if (gstate->session->TryEstimateCount(count_soql, n)) {
+                    est_rows = n;
+                    effective = (n > threshold) ? "bulk" : "rest";
+                    reason = StringUtil::Format("auto: est %lld rows %s threshold %lld -> %s",
+                                                (long long)n, (n > threshold) ? ">" : "<=",
+                                                (long long)threshold, effective.c_str());
+                } else {
+                    effective = "rest"; // probe failed -> safe default, never block
+                    reason = "auto: probe failed -> rest";
+                }
+            }
+        }
+    }
+    SetLastTransport(effective, est_rows, reason);
+
+    if (effective == "bulk") {
         gstate->bulk = true;
         gstate->bulk_result = gstate->session->BulkQuery(soql);
         // Map each field to its CSV column index (header may reorder).

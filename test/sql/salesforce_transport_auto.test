@@ -1,0 +1,204 @@
+# name: test/sql/salesforce_transport_auto.test
+# description: v0.3 §2 — sf_force_transport='auto' row-count probe + selection
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+
+# REST data page + Bulk result page used by whichever transport is chosen.
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"RestRow"}]}';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Name
+b1,BulkRow';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- default (rest) is unchanged: no probe, reason 'forced' ------------------
+query I
+SELECT Name FROM sf.Account;
+----
+RestRow
+
+query T
+SELECT transport FROM salesforce_last_transport();
+----
+rest
+
+query I
+SELECT est_rows IS NULL AND reason = 'forced' FROM salesforce_last_transport();
+----
+true
+
+# --- auto + small estimate -> REST ------------------------------------------
+statement ok
+SET sf_force_transport = 'auto';
+
+statement ok
+SET sf_mock_count_body = '{"totalSize":10,"done":true,"records":[]}';
+
+query I
+SELECT Name FROM sf.Account;
+----
+RestRow
+
+query T
+SELECT transport FROM salesforce_last_transport();
+----
+rest
+
+query I
+SELECT est_rows = 10 AND contains(reason, '<= threshold') FROM salesforce_last_transport();
+----
+true
+
+# --- auto + large estimate -> Bulk ------------------------------------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":100000,"done":true,"records":[]}';
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query T
+SELECT transport FROM salesforce_last_transport();
+----
+bulk
+
+query I
+SELECT est_rows = 100000 AND contains(reason, '> threshold') FROM salesforce_last_transport();
+----
+true
+
+# --- threshold is configurable: lower it so 10 rows now picks Bulk ----------
+statement ok
+SET sf_auto_bulk_threshold = 5;
+
+statement ok
+SET sf_mock_count_body = '{"totalSize":10,"done":true,"records":[]}';
+
+statement ok
+SELECT Name FROM sf.Account;
+
+query T
+SELECT transport FROM salesforce_last_transport();
+----
+bulk
+
+# raise it again so 10 rows picks REST
+statement ok
+SET sf_auto_bulk_threshold = 1000000;
+
+query I
+SELECT Name FROM sf.Account;
+----
+RestRow
+
+query T
+SELECT transport FROM salesforce_last_transport();
+----
+rest
+
+statement ok
+SET sf_auto_bulk_threshold = 50000;
+
+# --- forced rest / bulk skip the probe (reason 'forced', est NULL) ----------
+statement ok
+SET sf_force_transport = 'rest';
+
+query I
+SELECT Name FROM sf.Account;
+----
+RestRow
+
+query I
+SELECT transport = 'rest' AND est_rows IS NULL AND reason = 'forced'
+FROM salesforce_last_transport();
+----
+true
+
+statement ok
+SET sf_force_transport = 'bulk';
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query I
+SELECT transport = 'bulk' AND est_rows IS NULL AND reason = 'forced'
+FROM salesforce_last_transport();
+----
+true
+
+# --- auto + aggregate-only (COUNT(*)) -> REST, no probe ---------------------
+statement ok
+SET sf_force_transport = 'auto';
+
+query I
+SELECT COUNT(*) FROM sf.Account;
+----
+1
+
+query I
+SELECT transport = 'rest' AND est_rows IS NULL AND contains(reason, 'aggregate-only')
+FROM salesforce_last_transport();
+----
+true
+
+# --- auto + probe failure (HTTP 500) -> REST with clear reason --------------
+statement ok
+SET sf_mock_count_status = '500';
+
+query I
+SELECT Name FROM sf.Account;
+----
+RestRow
+
+query I
+SELECT transport = 'rest' AND est_rows IS NULL AND contains(reason, 'probe failed')
+FROM salesforce_last_transport();
+----
+true
+
+statement ok
+SET sf_mock_count_status = '200';
+
+# --- auto + probe disabled -> REST ------------------------------------------
+statement ok
+SET sf_auto_probe = false;
+
+statement ok
+SELECT Name FROM sf.Account;
+
+query I
+SELECT transport = 'rest' AND est_rows IS NULL AND contains(reason, 'probe disabled')
+FROM salesforce_last_transport();
+----
+true
+
+statement ok
+SET sf_auto_probe = true;
+
+# --- invalid transport value still rejected ---------------------------------
+statement ok
+SET sf_force_transport = 'nope';
+
+statement error
+SELECT Id FROM sf.Account;
+----
+sf_force_transport must be 'rest', 'bulk' or 'auto'
+
+statement ok
+DETACH sf;
