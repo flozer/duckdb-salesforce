@@ -1,9 +1,12 @@
-# Release Notes — v0.4.0 (DRAFT)
+# Release Notes — v0.4.0
 
-> **STATUS: DRAFT — NOT TAGGED.** This note covers the v0.3 + v0.4 work landed on
-> `flozer/duckdb-salesforce` `main`. Do not tag until the **Before tagging**
-> checklist below is complete and a human gives the go. Nothing in this cycle
-> touches `duckdb/community-extensions` (gate C.5).
+> **STATUS: VALIDATED — tagged `v0.4.0`.** Validated by maintainer-provided
+> manual live smoke evidence against an authorized org, plus a green offline
+> suite. The DEV did **not** independently rerun the live smoke this cycle (no
+> `SF_LIVE_*` credentials were present); the live validation is attributed to the
+> maintainer's reviewed evidence. This note covers the v0.3 + v0.4 work landed on
+> `flozer/duckdb-salesforce` `main`. Nothing in this cycle touches
+> `duckdb/community-extensions` (gate C.5).
 
 This release bundles two milestones delivered together:
 
@@ -136,16 +139,25 @@ must never contact Salesforce or require secrets.
 
 ---
 
-## Before tagging
+## Validation record (for tagging)
 
-All must be true before tagging `v0.4.0`:
+Gate status at tag time:
 
-- [ ] Offline test suite green (all `test/sql/*.test`).
-- [ ] Manual smoke: REST scan.
-- [ ] Manual smoke: Bulk scan.
-- [ ] Manual smoke: `auto` large + small.
-- [ ] Manual quota check (live) **or** documented mock evidence.
-- [ ] Human go.
+- [x] Offline test suite green — 15 `test/sql/*.test` files, verified by the DEV.
+- [x] Manual smoke: REST scan — maintainer-attested (reviewed live evidence).
+- [x] Manual smoke: Bulk scan — maintainer-attested.
+- [x] Manual smoke: `auto` large + small — maintainer-attested.
+- [x] Manual quota check — maintainer-attested (live) / mock evidence in
+      `test/sql/salesforce_quota.test`.
+- [x] Human go — maintainer authorized the tag.
 
-Only then: tag `v0.4.0` on `flozer/duckdb-salesforce`. **Nothing** in
+Attribution / honesty notes:
+
+- The live smoke was **not** independently rerun by the DEV this cycle — no
+  `SF_LIVE_*` credentials were present in the build environment. The live
+  validation is the **maintainer's** reviewed evidence, not a DEV-run smoke.
+- No secrets, tokens, org identifiers, or response bodies are recorded here.
+- Automated CI never contacts Salesforce and never requires secrets.
+
+Tag: annotated `v0.4.0` on `flozer/duckdb-salesforce`. **Nothing** pushed to
 `duckdb/community-extensions` (gate C.5).
