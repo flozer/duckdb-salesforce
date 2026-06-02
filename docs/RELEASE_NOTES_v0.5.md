@@ -1,9 +1,12 @@
-# Release Notes — v0.5.0 (DRAFT)
+# Release Notes — v0.5.0
 
-> **STATUS: DRAFT — NOT TAGGED.** Covers the v0.4 §4 (query cost diagnostics) +
-> v0.5 §5 (COUNT pushdown) work landed on `flozer/duckdb-salesforce` `main`. Do
-> not tag until the **Before tagging** checklist is complete and a human gives
-> the go. Nothing in this cycle touches `duckdb/community-extensions` (gate C.5).
+> **STATUS: VALIDATED — tagged `v0.5.0`.** Validated by maintainer-provided
+> manual live smoke evidence against an authorized org, plus a green offline
+> suite. The DEV did **not** independently rerun the live smoke (no `SF_LIVE_*`
+> credentials were present); the live validation is attributed to the
+> maintainer's reviewed evidence. Covers the v0.4 §4 (query cost diagnostics) +
+> v0.5 §5 (COUNT pushdown) work on `flozer/duckdb-salesforce` `main`. Nothing in
+> this cycle touches `duckdb/community-extensions` (gate C.5).
 
 Commits: `8fd5db2` (§4 query cost), `6973e66` (§5 COUNT pushdown + WHERE fix).
 
@@ -102,16 +105,38 @@ must never contact Salesforce or require secrets.
 
 ---
 
-## Before tagging
+## Validation record (for tagging)
 
-All must be true before tagging `v0.5.0`:
+Gate status at tag time — all satisfied:
 
-- [ ] Offline test suite green (all `test/sql/*.test`).
-- [ ] Manual smoke: `COUNT(*)`.
-- [ ] Manual smoke: `COUNT(*)` WHERE (filtered count correct — the fix).
-- [ ] Manual smoke: residual fallback (`count_pushdown=false`, correct count).
-- [ ] Manual smoke: `salesforce_query_cost()` output reviewed.
-- [ ] Human go.
+- [x] Offline test suite green — 17 `test/sql/*.test` files, verified by the DEV.
+- [x] Manual smoke: `COUNT(*)` — maintainer-attested.
+- [x] Manual smoke: `COUNT(*)` WHERE (filtered count, the fix) — maintainer-attested.
+- [x] Manual smoke: residual fallback — maintainer-attested.
+- [x] Manual smoke: `salesforce_query_cost()` reviewed — maintainer-attested.
+- [x] Human go — maintainer authorized the tag.
 
-Only then: tag `v0.5.0` on `flozer/duckdb-salesforce`. **Nothing** in
+Maintainer smoke evidence (secret-free; reviewed from 3 `salesforce_query_cost()`
+captures against an authorized org):
+
+| Case | soql | count_pushdown | pages_fetched | rows_emitted |
+| --- | --- | --- | --- | --- |
+| `COUNT(*)` | `SELECT COUNT() FROM Account` | `true` | `0` | `54710` |
+| `COUNT(*) WHERE Name != ''` | `SELECT COUNT() FROM Account WHERE Name != ''` | `true` | `0` | `54710` |
+| residual fallback | `SELECT Name FROM Account` | `false` | `28` | `54710` |
+
+- Case 2 confirms the `WHERE` is carried into the `COUNT()` SOQL (the
+  over-count correctness fix) against a real org.
+- Case 3 confirms a non-pushable predicate falls back to a correct normal scan
+  (28 pages), with guidance flagging the residual filter / over-fetch.
+
+Attribution / honesty notes:
+
+- The live smoke was **not** independently rerun by the DEV — no `SF_LIVE_*`
+  credentials were present. The live validation is the **maintainer's** reviewed
+  evidence.
+- No secrets, tokens, org identifiers, or response bodies are recorded here.
+- Automated CI never contacts Salesforce and never requires secrets.
+
+Tag: annotated `v0.5.0` on `flozer/duckdb-salesforce`. **Nothing** pushed to
 `duckdb/community-extensions` (gate C.5).
