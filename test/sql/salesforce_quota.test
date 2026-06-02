@@ -1,0 +1,215 @@
+# name: test/sql/salesforce_quota.test
+# description: v0.4 — quota governor gates Bulk job starts (mocked /limits)
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"RestRow"}]}';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Name
+b1,BulkRow';
+
+# Governor only gates Bulk -> force Bulk so every scan is checked.
+statement ok
+SET sf_force_transport = 'bulk';
+
+# Disable caching so each scenario re-reads the mocked /limits (a dedicated
+# cache scenario below re-enables it).
+statement ok
+SET sf_quota_cache_seconds = 0;
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- healthy quota -> Bulk allowed ------------------------------------------
+statement ok
+SET sf_mock_limits_body = '{"DailyApiRequests":{"Max":100000,"Remaining":99000}}';
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query I
+SELECT allowed AND remaining = 99000 AND limit_name = 'DailyApiRequests'
+   AND contains(reason, 'allowed')
+FROM salesforce_last_quota();
+----
+true
+
+# --- low quota -> Bulk blocked with a clear, secret-free error --------------
+statement ok
+SET sf_mock_limits_body = '{"DailyApiRequests":{"Max":100000,"Remaining":50}}';
+
+statement error
+SELECT Name FROM sf.Account;
+----
+quota guard
+
+query I
+SELECT (NOT allowed) AND remaining = 50 AND threshold = 10000
+FROM salesforce_last_quota();
+----
+true
+
+# --- reserve_pct / min_remaining are configurable (flip the decision) -------
+# reserve 0%, floor 10 -> threshold 10, Remaining 50 now passes.
+statement ok
+SET sf_quota_reserve_pct = 0;
+
+statement ok
+SET sf_quota_min_remaining = 10;
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query I
+SELECT allowed AND threshold = 10 FROM salesforce_last_quota();
+----
+true
+
+# floor above remaining -> blocked
+statement ok
+SET sf_quota_min_remaining = 100000;
+
+statement error
+SELECT Name FROM sf.Account;
+----
+quota guard
+
+statement ok
+SET sf_quota_reserve_pct = 10;
+
+statement ok
+SET sf_quota_min_remaining = 1000;
+
+# --- enabled=false: skip /limits, never block (even with low quota) ---------
+statement ok
+SET sf_quota_enabled = false;
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query I
+SELECT allowed AND contains(reason, 'disabled') FROM salesforce_last_quota();
+----
+true
+
+statement ok
+SET sf_quota_enabled = true;
+
+# --- enforce=false: consult + report, but proceed (warn-only) ---------------
+statement ok
+SET sf_quota_enforce = false;
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query I
+SELECT allowed AND remaining = 50 AND contains(reason, 'WARN')
+FROM salesforce_last_quota();
+----
+true
+
+statement ok
+SET sf_quota_enforce = true;
+
+# --- /limits unavailable + fail_open (default) -> allow ---------------------
+statement ok
+SET sf_mock_limits_status = '500';
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query I
+SELECT allowed AND contains(reason, 'limits unavailable') AND contains(reason, 'fail-open')
+FROM salesforce_last_quota();
+----
+true
+
+# --- /limits unavailable + fail_open=false -> block -------------------------
+statement ok
+SET sf_quota_fail_open = false;
+
+statement error
+SELECT Name FROM sf.Account;
+----
+/limits is unavailable
+
+query I
+SELECT (NOT allowed) AND contains(reason, 'fail-closed') FROM salesforce_last_quota();
+----
+true
+
+statement ok
+SET sf_quota_fail_open = true;
+
+statement ok
+SET sf_mock_limits_status = '200';
+
+# --- cache TTL: a second Bulk within TTL reuses the snapshot (no re-read) ----
+statement ok
+SET sf_quota_cache_seconds = 300;
+
+statement ok
+SET sf_mock_limits_body = '{"DailyApiRequests":{"Max":100000,"Remaining":99000}}';
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+# now starve the mock; the cached healthy snapshot must still allow + report cached
+statement ok
+SET sf_mock_limits_body = '{"DailyApiRequests":{"Max":100000,"Remaining":1}}';
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query I
+SELECT allowed AND remaining = 99000 AND contains(reason, 'cached')
+FROM salesforce_last_quota();
+----
+true
+
+statement ok
+SET sf_quota_cache_seconds = 0;
+
+# --- REQUEST_LIMIT_EXCEEDED on a data call is terminal (no retry) -----------
+statement ok
+SET sf_force_transport = 'rest';
+
+statement ok
+SET sf_mock_query_status = '403';
+
+statement ok
+SET sf_mock_query_body = '[{"errorCode":"REQUEST_LIMIT_EXCEEDED","message":"limit"}]';
+
+statement error
+SELECT Name FROM sf.Account;
+----
+daily API request limit exhausted
+
+statement ok
+DETACH sf;

@@ -6,6 +6,7 @@
 #include "salesforce_query.hpp"
 #include "salesforce_value.hpp"
 #include "salesforce_soql.hpp"
+#include "salesforce_quota.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
@@ -61,6 +62,10 @@ static void LoadInternal(ExtensionLoader &loader) {
     // v0.3 §2). Also user-facing diagnostic for why REST vs Bulk was chosen.
     loader.RegisterFunction(GetSalesforceLastTransportFunction());
 
+    // salesforce_last_quota() — DEBUG/diagnostic: the last quota-governor
+    // decision (limit_name, max, remaining, threshold, allowed, reason). v0.4.
+    loader.RegisterFunction(GetSalesforceLastQuotaFunction());
+
     // salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the
     // attached catalog issued since ATTACH (proves the metadata cache, #12).
     loader.RegisterFunction(GetSalesforceDescribeCallsFunction());
@@ -114,6 +119,14 @@ static void LoadInternal(ExtensionLoader &loader) {
     config.AddExtensionOption(
         "sf_mock_count_body", "TEST ONLY. Body for the mocked COUNT() probe (reads totalSize).",
         LogicalType::VARCHAR, Value("{\"totalSize\":0,\"done\":true,\"records\":[]}"));
+    // Mocked /limits for the quota governor (§v0.4). Default is a healthy org so
+    // existing Bulk tests pass unchanged.
+    config.AddExtensionOption("sf_mock_limits_status",
+                              "TEST ONLY. Statuses for the mocked GET /limits.",
+                              LogicalType::VARCHAR, Value("200"));
+    config.AddExtensionOption(
+        "sf_mock_limits_body", "TEST ONLY. Body for the mocked GET /limits.", LogicalType::VARCHAR,
+        Value("{\"DailyApiRequests\":{\"Max\":100000,\"Remaining\":99000}}"));
 
     // Transport for catalog scans: 'rest' (default, lazy REST /query), 'bulk'
     // (Bulk API 2.0 query path), or 'auto' (probe the row count and pick by
@@ -138,6 +151,35 @@ static void LoadInternal(ExtensionLoader &loader) {
         "For sf_force_transport='auto': run the COUNT() row-count probe (default "
         "true). When false, 'auto' always resolves to REST.",
         LogicalType::BOOLEAN, Value::BOOLEAN(true));
+
+    // Quota governor (#v0.4). Gates Bulk job STARTS on the org's REST /limits;
+    // REST scans are never preflight-gated. enabled=false skips /limits entirely;
+    // enforce=false consults+reports but never blocks (warn); fail_open governs
+    // behaviour when /limits is unavailable.
+    config.AddExtensionOption("sf_quota_enabled",
+                              "Quota governor: gate Bulk job starts on the org's API quota "
+                              "(default true). false skips /limits and never blocks.",
+                              LogicalType::BOOLEAN, Value::BOOLEAN(true));
+    config.AddExtensionOption("sf_quota_enforce",
+                              "Quota governor: block when below reserve (default true). false = "
+                              "consult /limits and report, but proceed (warn-only).",
+                              LogicalType::BOOLEAN, Value::BOOLEAN(true));
+    config.AddExtensionOption("sf_quota_fail_open",
+                              "Quota governor: when /limits is unavailable, allow the Bulk job "
+                              "(default true). false blocks with a clear error.",
+                              LogicalType::BOOLEAN, Value::BOOLEAN(true));
+    config.AddExtensionOption("sf_quota_reserve_pct",
+                              "Quota governor: keep this %% of DailyApiRequests.Max in reserve "
+                              "(default 10).",
+                              LogicalType::BIGINT, Value::BIGINT(10));
+    config.AddExtensionOption("sf_quota_min_remaining",
+                              "Quota governor: absolute floor of remaining DailyApiRequests below "
+                              "which Bulk is refused (default 1000).",
+                              LogicalType::BIGINT, Value::BIGINT(1000));
+    config.AddExtensionOption("sf_quota_cache_seconds",
+                              "Quota governor: in-memory TTL for a cached /limits snapshot, per "
+                              "instance_url (default 60; 0 disables caching).",
+                              LogicalType::BIGINT, Value::BIGINT(60));
 
     // Test-only Bulk mock hooks (active when sf_mock_token_status != 0).
     config.AddExtensionOption("sf_mock_bulk_create_status", "TEST ONLY. Bulk job-create HTTP status.",

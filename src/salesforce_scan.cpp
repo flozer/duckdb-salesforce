@@ -10,6 +10,7 @@
 
 #include "salesforce_scan.hpp"
 #include "salesforce_http.hpp"
+#include "salesforce_quota.hpp"
 #include "salesforce_session.hpp"
 #include "salesforce_soql.hpp"
 #include "salesforce_value.hpp"
@@ -181,6 +182,10 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 
     if (effective == "bulk") {
         gstate->bulk = true;
+        // Quota governor (#v0.4): gate the Bulk job START on the org's API
+        // allocation. REST scans are intentionally not gated.
+        QuotaGuardBulkStart(context, *gstate->session,
+                            gstate->session->Token().instance_url);
         gstate->bulk_result = gstate->session->BulkQuery(soql);
         // Map each field to its CSV column index (header may reorder).
         gstate->field_to_csv.assign(bind.fields.size(), -1);

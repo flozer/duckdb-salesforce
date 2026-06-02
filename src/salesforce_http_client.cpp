@@ -193,7 +193,8 @@ public:
                            vector<string> describe_bodies, vector<int> query_statuses,
                            vector<string> query_bodies, vector<int> global_statuses,
                            vector<string> global_bodies, vector<int> count_statuses,
-                           vector<string> count_bodies, BulkMock bulk)
+                           vector<string> count_bodies, vector<int> limits_statuses,
+                           vector<string> limits_bodies, BulkMock bulk)
         : token_status_(token_status), token_body_(std::move(token_body)),
           describe_statuses_(std::move(describe_statuses)),
           describe_bodies_(std::move(describe_bodies)),
@@ -202,7 +203,9 @@ public:
           global_statuses_(std::move(global_statuses)),
           global_bodies_(std::move(global_bodies)),
           count_statuses_(std::move(count_statuses)),
-          count_bodies_(std::move(count_bodies)), bulk_(std::move(bulk)) {
+          count_bodies_(std::move(count_bodies)),
+          limits_statuses_(std::move(limits_statuses)),
+          limits_bodies_(std::move(limits_bodies)), bulk_(std::move(bulk)) {
     }
 
     HttpResponse Post(const HttpRequest &request) override {
@@ -243,6 +246,10 @@ public:
         if (request.url.find("/sobjects") != string::npos) {
             return Step(global_statuses_, global_bodies_, global_index_);
         }
+        // Quota governor (#v0.4): GET .../limits -> limits sequence.
+        if (request.url.find("/limits") != string::npos) {
+            return Step(limits_statuses_, limits_bodies_, limits_index_);
+        }
         // Auto-transport probe (#v0.3 §2): SELECT COUNT() ... -> count sequence.
         // "COUNT" survives URL-encoding (letters only), so match it before the
         // generic data-query branch.
@@ -273,11 +280,14 @@ private:
     vector<string> global_bodies_;
     vector<int> count_statuses_;
     vector<string> count_bodies_;
+    vector<int> limits_statuses_;
+    vector<string> limits_bodies_;
     BulkMock bulk_;
     size_t describe_index_ = 0;
     size_t query_index_ = 0;
     size_t global_index_ = 0;
     size_t count_index_ = 0;
+    size_t limits_index_ = 0;
     size_t bulk_status_index_ = 0;
     size_t bulk_results_index_ = 0;
 };
@@ -361,6 +371,11 @@ unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &contex
             c_status.push_back(200);
         }
         vector<string> c_body = SplitOn(SettingStr(context, "sf_mock_count_body"), "|~|");
+        vector<int> l_status = ParseIntCsv(SettingStr(context, "sf_mock_limits_status"));
+        if (l_status.empty()) {
+            l_status.push_back(200);
+        }
+        vector<string> l_body = SplitOn(SettingStr(context, "sf_mock_limits_body"), "|~|");
 
         ScriptedMockHttpClient::BulkMock bulk;
         bulk.create_status = static_cast<int>(SettingInt(context, "sf_mock_bulk_create_status", 200));
@@ -381,7 +396,7 @@ unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &contex
             static_cast<int>(token_status), SettingStr(context, "sf_mock_token_body"),
             std::move(d_status), std::move(d_body), std::move(q_status), std::move(q_body),
             std::move(g_status), std::move(g_body), std::move(c_status), std::move(c_body),
-            std::move(bulk));
+            std::move(l_status), std::move(l_body), std::move(bulk));
     }
     return CreateLiveHttpClient();
 }

@@ -30,6 +30,18 @@ struct SalesforceBulkResult {
     vector<vector<string>> rows; // one vector of cells per record
 };
 
+// Snapshot of the org's REST /limits relevant to the quota governor (#v0.4).
+// `available` is false when /limits could not be read — the governor then
+// applies its fail-open/closed policy. -1 means a limit was absent from the
+// payload (org variance) and is not checked.
+struct SalesforceQuotaSnapshot {
+    bool available = false;
+    int64_t api_max = -1;       // DailyApiRequests.Max
+    int64_t api_remaining = -1; // DailyApiRequests.Remaining
+    int64_t bulk_max = -1;      // DailyBulkV2QueryJobs.Max (optional)
+    int64_t bulk_remaining = -1;
+};
+
 // A live (mock-injectable) session against one Salesforce org: holds the
 // OAuth token and performs authenticated GETs with a single
 // 401 -> refresh -> retry. Token is in memory only and never logged.
@@ -78,6 +90,11 @@ public:
     // false on ANY failure (HTTP error, missing totalSize) so the caller falls
     // back to REST. Never throws.
     bool TryEstimateCount(const string &count_soql, int64_t &out_rows);
+
+    // Read the org's REST /limits (#v0.4 quota governor). One API call; the
+    // caller caches it. Returns an unavailable snapshot (never throws) on any
+    // failure so the governor can apply its fail-open policy.
+    SalesforceQuotaSnapshot QueryLimits();
 
 private:
     // Bearer-authenticated request (GET, or POST with a JSON body) that retries

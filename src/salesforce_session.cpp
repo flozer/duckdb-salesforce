@@ -31,6 +31,41 @@ static string TrimTrailingSlash(const string &s) {
     return out;
 }
 
+// Return the balanced "{...}" object that is the value of `key`, or "" if `key`
+// is absent or its value is not an object. Used to scope nested reads (e.g. the
+// Max/Remaining inside one /limits entry) so a whole-string scan can't cross
+// into a sibling object.
+static string ExtractObject(const string &json, const string &key) {
+    size_t i = sfjson::FindValue(json, key);
+    if (i == string::npos || i >= json.size() || json[i] != '{') {
+        return "";
+    }
+    size_t start = i;
+    int depth = 0;
+    bool in_str = false;
+    for (; i < json.size(); i++) {
+        char c = json[i];
+        if (in_str) {
+            if (c == '\\') {
+                i++;
+            } else if (c == '"') {
+                in_str = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_str = true;
+        } else if (c == '{') {
+            depth++;
+        } else if (c == '}') {
+            if (--depth == 0) {
+                return json.substr(start, i - start + 1);
+            }
+        }
+    }
+    return "";
+}
+
 SalesforceSession::SalesforceSession(SalesforceConfig config, SalesforceHttpClient &client)
     : config_(std::move(config)), client_(client) {
 }
@@ -72,7 +107,46 @@ HttpResponse SalesforceSession::AuthorizedSend(bool post, const string &path,
                 "salesforce: authentication failed (HTTP 401) after refreshing the token.");
         }
     }
+    // Daily API allocation exhausted (HTTP 403 errorCode REQUEST_LIMIT_EXCEEDED)
+    // is TERMINAL — it resets at org midnight, so retrying/backoff is pointless.
+    // Distinct from HTTP 429 (short-term rate limit), which the transport retries.
+    // Surface a clear, secret-free error (no body/bearer).
+    if (resp.status >= 400 &&
+        sfjson::GetString(resp.body, "errorCode") == "REQUEST_LIMIT_EXCEEDED") {
+        throw IOException(
+            "salesforce: daily API request limit exhausted (REQUEST_LIMIT_EXCEEDED). This "
+            "resets at the org's midnight and is not retried. Reduce usage, raise the org "
+            "limit, or wait for the reset.");
+    }
     return resp;
+}
+
+SalesforceQuotaSnapshot SalesforceSession::QueryLimits() {
+    SalesforceQuotaSnapshot s;
+    try {
+        HttpResponse resp =
+            AuthorizedSend(false, "/services/data/" + config_.api_version + "/limits", "");
+        if (resp.status != 200) {
+            return s; // available stays false
+        }
+        // /limits => { "DailyApiRequests": {"Max":N,"Remaining":M}, ... }. Scope
+        // the Max/Remaining reads to each named sub-object (GetInt scans whole
+        // string, so we must extract the object first).
+        string api = ExtractObject(resp.body, "DailyApiRequests");
+        if (!api.empty()) {
+            s.api_max = sfjson::GetInt(api, "Max", -1);
+            s.api_remaining = sfjson::GetInt(api, "Remaining", -1);
+        }
+        string bulk = ExtractObject(resp.body, "DailyBulkV2QueryJobs");
+        if (!bulk.empty()) {
+            s.bulk_max = sfjson::GetInt(bulk, "Max", -1);
+            s.bulk_remaining = sfjson::GetInt(bulk, "Remaining", -1);
+        }
+        s.available = (s.api_max >= 0 && s.api_remaining >= 0);
+    } catch (...) {
+        // never let the governance endpoint break a real query
+    }
+    return s;
 }
 
 string SalesforceSession::AuthorizedGet(const string &path) {

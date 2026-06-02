@@ -86,6 +86,47 @@ estimate large and pick Bulk (which over-fetches). For interactive small-`LIMIT`
 reads on big objects, force `SET sf_force_transport = 'rest'`. There is **no
 mid-stream escalation** — the transport is decided once, before the first row.
 
+## Quota governor (v0.4)
+
+> **v0.4 quota governor currently protects Bulk starts; REST scans are not
+> preflight-gated.** A REST scan can still consume API calls (one per page); the
+> governor deliberately does not probe `/limits` for REST so interactive flows
+> stay cheap and a small query is never blocked.
+
+Before starting a **Bulk** query job, the governor reads the org's
+`GET /limits` once (cached in memory per `instance_url`, TTL-bounded — never
+persisted to disk) and refuses to start the job when the remaining daily API
+allocation is at/below the reserve:
+
+> threshold = `max(sf_quota_min_remaining, sf_quota_reserve_pct% × DailyApiRequests.Max)`
+> — allowed iff `Remaining > threshold`.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `sf_quota_enabled` | `true` | `false` → skip `/limits` entirely, never block |
+| `sf_quota_enforce` | `true` | `false` → consult + report, but proceed (warn-only) |
+| `sf_quota_fail_open` | `true` | `/limits` unavailable → allow; `false` → block with a clear error |
+| `sf_quota_reserve_pct` | `10` | reserve % of `DailyApiRequests.Max` |
+| `sf_quota_min_remaining` | `1000` | absolute floor of remaining requests |
+| `sf_quota_cache_seconds` | `60` | in-memory `/limits` TTL per `instance_url` (`0` = no cache) |
+
+```sql
+SELECT * FROM salesforce_last_quota();
+-- (limit_name, max, remaining, threshold, allowed, reason)
+```
+
+Notes:
+
+- **Fail-open by default.** If `/limits` cannot be read, the Bulk job proceeds
+  and the diagnostic reason is `limits unavailable -> allowed (fail-open)`. Set
+  `sf_quota_fail_open = false` to harden (then it blocks with a clear error).
+- **`429` vs `REQUEST_LIMIT_EXCEEDED`.** HTTP `429` is a short-term rate limit
+  and is retried with backoff. `REQUEST_LIMIT_EXCEEDED` (the daily allocation)
+  is **terminal** — surfaced as a clear error, never retried (it resets at the
+  org's midnight).
+- Errors never include a bearer token, secret, or raw response body.
+- `DailyBulkV2QueryJobs` is also honoured when the org reports it.
+
 ## Pushdown (v0.1)
 
 Pushdown to SOQL is a best-effort over-fetch optimisation; anything not pushed is
