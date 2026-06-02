@@ -944,7 +944,7 @@ These six are flagged now so v0.1–v0.7 implementations avoid baking in live-on
 
 ## Appendix C: v0.1 Delivery Track (`v0.1-readonly-rest`)
 
-> PM scope lock. The architecture above is the *target*; this appendix defines the **first vertical slice only**. Everything not listed under "In scope" is explicitly a non-goal for v0.1 to prevent scope creep. v0.1 is **dev / sandbox-only** and must not be presented as production-ready.
+> PM scope lock. The architecture above is the *target*; this appendix defines the **first vertical slice only**. Everything not listed under "In scope" is explicitly a non-goal for v0.1 to prevent scope creep. v0.1 **live validation is manual-only** and must be run only against an org the maintainer is authorized to use; automated CI must never contact Salesforce or require secrets. Not production-hardened.
 
 ### C.1 Scope (the v0.1 vertical slice)
 
@@ -976,7 +976,7 @@ One thin end-to-end path, REST-only, read-only:
 - `LIMIT n` pushed to SOQL; pagination via `queryMore`/`nextRecordsUrl` beyond the 2,000-row page works.
 - JSON → DuckDB vector mapping covers the common Salesforce field types (id, string, boolean, int, double, date, datetime).
 - Mocked-HTTP unit tests pass in CI (no live org required to run the suite).
-- README documents the dev/sandbox-only status and the ATTACH usage.
+- README documents the manual-only live-validation status and the ATTACH usage.
 
 ### C.4 Security Gate (hard merge-blocker for any functional v0.1 PR)
 
@@ -987,7 +987,7 @@ No functional v0.1 code merges to `main` until **all** are satisfied:
 - Tokens held **in memory only** for v0.1; no on-disk token persistence until a reviewed secure-storage design exists.
 - No Salesforce password / username-password OAuth flow anywhere — refresh-token (and later JWT bearer) only.
 - TLS verification enabled (no `verify=false` escape hatch shipped).
-- A short `SECURITY.md` note states the v0.1 secret-handling policy and the dev/sandbox-only boundary.
+- A short `SECURITY.md` note states the v0.1 secret-handling policy and the manual-only live-validation boundary.
 
 This gate exists because the architecture doc describes OAuth but does not yet make secret-handling an enforced, reviewable checklist — v0.1 makes it one.
 

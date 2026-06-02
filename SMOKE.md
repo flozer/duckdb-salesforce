@@ -4,8 +4,10 @@ Repeatable, **manual** validation of `duckdb-salesforce` against a real
 Salesforce org. This is **never** run in CI and is **never** automated. It
 exists to validate a build before tagging `v0.1.0`.
 
-> **Use a sandbox / scratch / Developer Edition org with a throwaway Connected
-> App only.** Never point this at production. v0.1 is DEV / SANDBOX ONLY.
+> **Manual-only.** Run this only against an org the maintainer is **authorized
+> to use** (a sandbox/scratch/Developer Edition, or your own org). Automated CI
+> must never contact Salesforce or require secrets. You run these steps
+> yourself and control the credentials.
 
 ## 0. Security rules (read first)
 
@@ -22,7 +24,8 @@ exists to validate a build before tagging `v0.1.0`.
 
 ## 1. Prerequisites
 
-- A **sandbox / scratch / Developer Edition** org.
+- An org you are **authorized to use** (sandbox / scratch / Developer Edition,
+  or your own).
 - A **Connected App** with OAuth enabled, the minimum scopes (`api`,
   `refresh_token`), and a redirect URI.
 - A **refresh token** obtained via the OAuth 2.0 device or web-server flow —

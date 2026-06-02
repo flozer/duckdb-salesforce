@@ -5,12 +5,14 @@ official Salesforce REST / Bulk APIs. Architectural sibling of
 [duckdb-firebird](https://github.com/flozer/duckdb-firebird) — same
 catalog/storage + table-function scanner + pushdown design, different backend.
 
-> **Status: v0.1 (read-only REST) — DEV / SANDBOX ONLY. Not production-ready.**
+> **Status: v0.1 (read-only REST) — early, not production-hardened.**
 > ATTACH authenticates via OAuth, sObjects are resolved on demand, and
 > `SELECT * FROM salesforce.<Object>` returns typed rows over the REST query
-> API, with SOQL projection + a conservative predicate pushdown. Use only
-> against **sandbox / scratch** orgs with throwaway Connected App credentials.
-> See [`v0.1-readonly-rest`](https://github.com/flozer/duckdb-salesforce/milestone/1)
+> API, with SOQL projection + a conservative predicate pushdown.
+> **Live validation is manual-only** and must be run only against an org the
+> maintainer is authorized to use; **automated CI never contacts Salesforce or
+> requires secrets**. See
+> [`v0.1-readonly-rest`](https://github.com/flozer/duckdb-salesforce/milestone/1)
 > and the [limitations](#v01-limitations) below.
 
 ## Usage
@@ -99,7 +101,9 @@ tag `v0.1.0`), see [SMOKE.md](SMOKE.md).
 
 Known and intentional for this cut (see `docs/ARCHITECTURE.md` Appendix C):
 
-- **Dev / sandbox only.** Not production-ready; use throwaway sandbox creds.
+- **Live validation is manual-only.** Run only against an org you are
+  authorized to use; automated CI never contacts Salesforce or uses secrets.
+  Not production-hardened.
 - **`LIMIT` is residual**, not SOQL pushdown — this DuckDB build does not expose
   the query `LIMIT` to a table function, so DuckDB applies it after the scan
   (correct, but the full page is still fetched).

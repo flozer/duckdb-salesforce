@@ -1,8 +1,9 @@
 # Connected App + Refresh Token (para o teste de smoke)
 
 Como criar um Connected App e gerar um **refresh token** para rodar a validação
-do [SMOKE.md](../SMOKE.md). **Somente sandbox / scratch / Developer Edition.**
-Nunca cole nenhum segredo em issue, chat, log ou commit.
+do [SMOKE.md](../SMOKE.md). Use uma org que você está **autorizado a usar**
+(sandbox / scratch / Developer Edition, ou a sua própria); a validação live é
+manual. Nunca cole nenhum segredo em issue, chat, log ou commit.
 
 > 🇬🇧 English version: [CONNECTED_APP.md](CONNECTED_APP.md)
 
