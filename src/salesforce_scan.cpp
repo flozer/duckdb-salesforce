@@ -108,7 +108,7 @@ static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &o
         gstate.cursor++;
         row++;
     }
-    output.SetChildCardinality(row);
+    output.SetCardinality(row);
 }
 
 // Predicate pushdown: translate the safe subset of the conjunctive filter list

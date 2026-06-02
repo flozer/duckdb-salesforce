@@ -14,7 +14,6 @@
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression/bound_comparison_expression.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
-#include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression/bound_operator_expression.hpp"
 
 #include <mutex>
@@ -110,7 +109,7 @@ static bool FieldFor(const Expression &expr, const vector<SalesforceField> &fiel
         return false;
     }
     auto &col = expr.Cast<BoundColumnRefExpression>();
-    idx_t proj = col.Binding().column_index.GetIndex();
+    idx_t proj = col.binding.column_index;
     if (proj >= projection_to_field.size()) {
         return false;
     }
@@ -127,11 +126,10 @@ static bool FieldFor(const Expression &expr, const vector<SalesforceField> &fiel
 static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> &fields,
                           const vector<idx_t> &projection_to_field, string &out) {
     try {
-        if (expr.GetExpressionClass() == ExpressionClass::BOUND_FUNCTION &&
-            BoundComparisonExpression::IsComparison(expr.GetExpressionType())) {
-            auto &fe = expr.Cast<BoundFunctionExpression>();
-            const Expression &l = BoundComparisonExpression::Left(fe);
-            const Expression &r = BoundComparisonExpression::Right(fe);
+        if (expr.GetExpressionClass() == ExpressionClass::BOUND_COMPARISON) {
+            auto &cmp_expr = expr.Cast<BoundComparisonExpression>();
+            const Expression &l = *cmp_expr.left;
+            const Expression &r = *cmp_expr.right;
 
             string field;
             ExpressionType cmp = expr.GetExpressionType();
@@ -264,7 +262,7 @@ static unique_ptr<GlobalTableFunctionState> LastSoqlInit(ClientContext &,
 static void LastSoqlFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
     auto &gstate = data.global_state->Cast<LastSoqlGlobalState>();
     if (gstate.emitted) {
-        output.SetChildCardinality(0);
+        output.SetCardinality(0);
         return;
     }
     string soql;
@@ -272,10 +270,10 @@ static void LastSoqlFunction(ClientContext &, TableFunctionInput &data, DataChun
         std::lock_guard<std::mutex> g(g_soql_lock);
         soql = g_last_soql;
     }
-    FlatVector::GetDataMutable<string_t>(output.data[0])[0] =
+    FlatVector::GetData<string_t>(output.data[0])[0] =
         StringVector::AddString(output.data[0], soql);
     gstate.emitted = true;
-    output.SetChildCardinality(1);
+    output.SetCardinality(1);
 }
 
 } // namespace

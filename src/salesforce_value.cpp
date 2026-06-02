@@ -97,12 +97,12 @@ void AppendJsonValue(Vector &vec, idx_t row, const SalesforceField &field,
         // String/blob go through the vector's own string heap (the correct
         // vectorized path — SetValue would build a malformed string_t here).
         if (type.id() == LogicalTypeId::VARCHAR) {
-            FlatVector::GetDataMutable<string_t>(vec)[row] = StringVector::AddString(vec, raw);
+            FlatVector::GetData<string_t>(vec)[row] = StringVector::AddString(vec, raw);
             return;
         }
         if (type.id() == LogicalTypeId::BLOB) {
             string bytes = DecodeBase64(raw);
-            FlatVector::GetDataMutable<string_t>(vec)[row] =
+            FlatVector::GetData<string_t>(vec)[row] =
                 StringVector::AddStringOrBlob(vec, bytes.data(), bytes.size());
             return;
         }
@@ -198,10 +198,7 @@ static void DecodeFunction(ClientContext &, TableFunctionInput &data, DataChunk 
         gstate.cursor++;
         row++;
     }
-    // SetChildCardinality sets the chunk count AND each vector's size; plain
-    // SetCardinality would leave vector sizes at 0 and break scalar-expression
-    // evaluation over the result (this DuckDB build's vectors carry a size).
-    output.SetChildCardinality(row);
+    output.SetCardinality(row);
 }
 
 } // namespace

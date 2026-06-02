@@ -104,13 +104,13 @@ static void QueryFunction(ClientContext &, TableFunctionInput &data, DataChunk &
     idx_t row = 0;
     while (row < STANDARD_VECTOR_SIZE && gstate.cursor < records.size()) {
         idx_t idx = gstate.cursor;
-        FlatVector::GetDataMutable<int64_t>(output.data[0])[row] = static_cast<int64_t>(idx);
-        FlatVector::GetDataMutable<string_t>(output.data[1])[row] =
+        FlatVector::GetData<int64_t>(output.data[0])[row] = static_cast<int64_t>(idx);
+        FlatVector::GetData<string_t>(output.data[1])[row] =
             StringVector::AddString(output.data[1], records[idx]);
         gstate.cursor++;
         row++;
     }
-    output.SetChildCardinality(row);
+    output.SetCardinality(row);
 }
 
 } // namespace

@@ -139,22 +139,22 @@ static void DescribeFunction(ClientContext &, TableFunctionInput &data, DataChun
     idx_t row = 0;
     while (row < STANDARD_VECTOR_SIZE && gstate.cursor < fields.size()) {
         const auto &f = fields[gstate.cursor++];
-        FlatVector::GetDataMutable<string_t>(output.data[0])[row] =
+        FlatVector::GetData<string_t>(output.data[0])[row] =
             StringVector::AddString(output.data[0], f.name);
-        FlatVector::GetDataMutable<string_t>(output.data[1])[row] =
+        FlatVector::GetData<string_t>(output.data[1])[row] =
             StringVector::AddString(output.data[1], f.sf_type);
-        FlatVector::GetDataMutable<string_t>(output.data[2])[row] =
+        FlatVector::GetData<string_t>(output.data[2])[row] =
             StringVector::AddString(output.data[2], f.duckdb_type.ToString());
-        FlatVector::GetDataMutable<bool>(output.data[3])[row] = f.nillable;
-        FlatVector::GetDataMutable<int64_t>(output.data[4])[row] = f.length;
-        FlatVector::GetDataMutable<int64_t>(output.data[5])[row] = f.precision;
-        FlatVector::GetDataMutable<int64_t>(output.data[6])[row] = f.scale;
-        FlatVector::GetDataMutable<bool>(output.data[7])[row] = f.filterable;
-        FlatVector::GetDataMutable<bool>(output.data[8])[row] = f.sortable;
-        FlatVector::GetDataMutable<bool>(output.data[9])[row] = f.unknown_type;
+        FlatVector::GetData<bool>(output.data[3])[row] = f.nillable;
+        FlatVector::GetData<int64_t>(output.data[4])[row] = f.length;
+        FlatVector::GetData<int64_t>(output.data[5])[row] = f.precision;
+        FlatVector::GetData<int64_t>(output.data[6])[row] = f.scale;
+        FlatVector::GetData<bool>(output.data[7])[row] = f.filterable;
+        FlatVector::GetData<bool>(output.data[8])[row] = f.sortable;
+        FlatVector::GetData<bool>(output.data[9])[row] = f.unknown_type;
         row++;
     }
-    output.SetChildCardinality(row);
+    output.SetCardinality(row);
 }
 
 } // namespace

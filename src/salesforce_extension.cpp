@@ -21,9 +21,9 @@ static void LoadInternal(ExtensionLoader &loader) {
     // clear NotImplementedException (see salesforce_storage.cpp).
     //
     // StorageExtension::Register matches the registration path used by
-    // duckdb-firebird. Verified against the pinned DuckDB submodule
-    // (v1.5.2-6640-g0a8a19486d): ATTACH dispatch requires BOTH attach and
-    // create_transaction_manager to be non-null (see salesforce_storage.cpp).
+    // duckdb-firebird. Verified against the pinned DuckDB v1.5.3 release:
+    // ATTACH dispatch requires BOTH attach and create_transaction_manager to
+    // be non-null (see salesforce_storage.cpp).
     auto &db = loader.GetDatabaseInstance();
     auto &config = DBConfig::GetConfig(db);
     auto storage_ext = GetSalesforceStorageExtension();

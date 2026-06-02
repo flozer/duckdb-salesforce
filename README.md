@@ -63,15 +63,18 @@ toolchain (`-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake`,
 static (`/MT`) MSVC runtime; OpenSSL is built on first configure. TLS
 certificate verification is always on; there is no insecure build flag.
 
-Pinned via the `duckdb` and `extension-ci-tools` submodules to the commits
-the v0.1 scaffold was built and tested against:
+Pinned via the `duckdb` and `extension-ci-tools` submodules to the
+**DuckDB v1.5.3 release** (the minimum supported version):
 
-- `duckdb` @ `0a8a19486d` (`v1.5.2-6640-g0a8a19486d`)
-- `extension-ci-tools` @ `a4373c6e`
+- `duckdb` @ `14eca11bd9` (release **v1.5.3**)
+- `extension-ci-tools` @ `18c54662`
 
-The `StorageExtension::Register` registration path and the
-`attach` + `create_transaction_manager` dispatch requirement are verified
-against this DuckDB build (see `src/salesforce_storage.cpp`).
+DuckDB extensions are **version-locked**: a `.duckdb_extension` built against
+v1.5.3 loads in DuckDB v1.5.3. Supporting newer DuckDB releases ("1.5.3
+onward") means rebuilding per release — tracked as a build-matrix task. The
+`StorageExtension::Register` path and the `attach` + `create_transaction_manager`
+dispatch requirement are verified against this build (see
+`src/salesforce_storage.cpp`).
 
 ## Testing
 
