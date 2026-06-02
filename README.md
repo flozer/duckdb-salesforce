@@ -5,25 +5,24 @@ official Salesforce REST / Bulk APIs. Architectural sibling of
 [duckdb-firebird](https://github.com/flozer/duckdb-firebird) — same
 catalog/storage + table-function scanner + pushdown design, different backend.
 
-> **Status: v0.1 scaffold — DEV / SANDBOX ONLY. Not production-ready.**
-> This cut only proves the extension builds, loads, and registers the
-> `salesforce` storage type. Authentication, schema discovery and table
-> scanning are **not implemented yet**; `ATTACH` fails with a clear
-> not-implemented message. See the
-> [`v0.1-readonly-rest`](https://github.com/flozer/duckdb-salesforce/milestone/1)
-> milestone for scope and progress.
+> **Status: v0.1 (read-only REST) — DEV / SANDBOX ONLY. Not production-ready.**
+> ATTACH authenticates via OAuth, sObjects are resolved on demand, and
+> `SELECT * FROM salesforce.<Object>` returns typed rows over the REST query
+> API, with SOQL projection + a conservative predicate pushdown. Use only
+> against **sandbox / scratch** orgs with throwaway Connected App credentials.
+> See [`v0.1-readonly-rest`](https://github.com/flozer/duckdb-salesforce/milestone/1)
+> and the [limitations](#v01-limitations) below.
 
-## Target experience (not yet functional)
+## Usage
 
 ```sql
-INSTALL salesforce;
 LOAD salesforce;
 
-ATTACH 'salesforce://production'
-    (client_id 'xxx', client_secret 'xxx', refresh_token 'xxx');
+-- Use a sandbox Connected App; for a sandbox add login_url 'https://test.salesforce.com'.
+ATTACH 'salesforce://production' AS sf (TYPE salesforce,
+    client_id 'xxx', client_secret 'xxx', refresh_token 'xxx');
 
-SELECT Id, Name FROM salesforce.Opportunity
-WHERE LastModifiedDate >= '2025-01-01';
+SELECT Id, Name FROM sf.Account WHERE Name = 'Acme';
 ```
 
 ## Pushdown (v0.1)
@@ -54,21 +53,15 @@ delivery track (Definition of Done, non-goals, security gate) is **Appendix C**.
 ```sh
 git submodule update --init --recursive
 make release        # or: make debug
-make test_debug     # runs test/sql/*.test against the debug build
 ```
 
 The live HTTPS transport uses vendored [httplib](third_party/httplib) (MIT) +
 **OpenSSL**, pulled via vcpkg manifest mode (`vcpkg.json`). On Windows without
 GNU `make`, configure DuckDB directly inside a VS dev shell with the vcpkg
 toolchain (`-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake`,
-`-DVCPKG_TARGET_TRIPLET=x64-windows-static-md`) — OpenSSL is built on first
-configure. TLS certificate verification is always on; there is no insecure
-build flag.
-
-Tests run fully offline (mocked HTTP). The real OAuth exchange is exercised
-only by the gated `test/sql/salesforce_oauth_live.test`, which is skipped
-unless `SF_LIVE_CLIENT_ID` / `SF_LIVE_CLIENT_SECRET` / `SF_LIVE_REFRESH_TOKEN`
-are set — never set these in CI.
+`-DVCPKG_TARGET_TRIPLET=x64-windows-static`) — the triplet must match DuckDB's
+static (`/MT`) MSVC runtime; OpenSSL is built on first configure. TLS
+certificate verification is always on; there is no insecure build flag.
 
 Pinned via the `duckdb` and `extension-ci-tools` submodules to the commits
 the v0.1 scaffold was built and tested against:
@@ -79,6 +72,43 @@ the v0.1 scaffold was built and tested against:
 The `StorageExtension::Register` registration path and the
 `attach` + `create_transaction_manager` dispatch requirement are verified
 against this DuckDB build (see `src/salesforce_storage.cpp`).
+
+## Testing
+
+The whole suite runs **fully offline** — every test mocks the Salesforce HTTP
+layer, so CI never contacts a real org.
+
+```sh
+make test_debug              # CI path (GNU make + extension-ci-tools)
+# or run the unittest binary directly against the SQL tests:
+build/release/test/unittest "test/sql/salesforce_scan.test"
+```
+
+The real network paths are exercised only by the gated `*_live.test` files,
+which are **skipped** unless `SF_LIVE_CLIENT_ID` / `SF_LIVE_CLIENT_SECRET` /
+`SF_LIVE_REFRESH_TOKEN` are set — **never set these in CI**. As of v0.1 the
+offline suite is 166 assertions across 8 files, with 4 live files skipped.
+
+## v0.1 limitations
+
+Known and intentional for this cut (see `docs/ARCHITECTURE.md` Appendix C):
+
+- **Dev / sandbox only.** Not production-ready; use throwaway sandbox creds.
+- **`LIMIT` is residual**, not SOQL pushdown — this DuckDB build does not expose
+  the query `LIMIT` to a table function, so DuckDB applies it after the scan
+  (correct, but the full page is still fetched).
+- **`SHOW TABLES` is lazy / partial.** Objects resolve on first reference; there
+  is no upfront global object listing, so the catalog only lists sObjects
+  already referenced this session.
+- **REST only.** No Bulk API 2.0, GraphQL, Tooling or Metadata API yet; no
+  relationship/join traversal; no persisted metadata cache.
+- **Read-only.** All catalog mutations (CREATE/INSERT/UPDATE/DELETE/...) throw.
+
+## Community publication
+
+Per `docs/ARCHITECTURE.md` Appendix C.5, there is **no** push, PR, tag, or
+release to `duckdb/community-extensions` without explicit human go/no-go after
+multi-test evidence. Development stays in this repository.
 
 ## License
 
