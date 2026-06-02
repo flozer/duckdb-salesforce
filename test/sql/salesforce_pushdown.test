@@ -16,8 +16,11 @@ SET sf_mock_token_status = 200;
 statement ok
 SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
 
+# Leading decoy "name" (mimics a real describe where nested action-override /
+# child-relationship names precede the top-level object name) — the scan must
+# still emit FROM Account, not FROM <decoy>.
 statement ok
-SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id","nillable":false,"filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"AnnualRevenue","type":"currency","precision":18,"scale":2,"filterable":true},{"name":"Secret","type":"string","filterable":false}]}';
+SET sf_mock_describe_body = '{"actionOverrides":[{"name":"View"}],"childRelationships":[{"name":"Cases"}],"name":"Account","fields":[{"name":"Id","type":"id","nillable":false,"filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"AnnualRevenue","type":"currency","precision":18,"scale":2,"filterable":true},{"name":"Secret","type":"string","filterable":false}]}';
 
 statement ok
 SET sf_mock_query_body = '{"done":true,"records":[{"Id":"001","Name":"Acme","AnnualRevenue":1000000.00,"Secret":"s1"},{"Id":"002","Name":"Globex","AnnualRevenue":50.00,"Secret":"s2"}]}';

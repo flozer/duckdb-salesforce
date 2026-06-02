@@ -84,7 +84,13 @@ SalesforceDescribe SalesforceSession::Describe(const string &object) {
     string path =
         "/services/data/" + config_.api_version + "/sobjects/" + object + "/describe";
     string body = AuthorizedGet(path);
-    return ParseDescribe(body, object);
+    SalesforceDescribe d = ParseDescribe(body, object);
+    // Authoritative: we described /sobjects/<object>/describe, so the object
+    // name IS `object`. Do not trust a name scraped from the JSON — a naive
+    // reader can pick a nested "name" (action override / child relationship)
+    // instead of the top-level one.
+    d.object_name = object;
+    return d;
 }
 
 SalesforceQueryResult SalesforceSession::Query(const string &soql) {
