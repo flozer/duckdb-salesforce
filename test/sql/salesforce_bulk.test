@@ -1,0 +1,148 @@
+# name: test/sql/salesforce_bulk.test
+# description: v0.3 — Bulk API 2.0 query path (sf_force_transport='bulk'), mocked
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"Blob","type":"base64"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- invalid transport value -> clear error ----------------------------------
+statement ok
+SET sf_force_transport = 'nope';
+
+statement error
+SELECT Id FROM sf.Account;
+----
+sf_force_transport must be 'rest' or 'bulk'
+
+# --- Bulk decode: CSV edge cases (comma, escaped quotes, newline, empty, base64)
+statement ok
+SET sf_force_transport = 'bulk';
+
+statement ok
+SET sf_mock_bulk_create_body = '{"id":"JOB1","state":"UploadComplete"}';
+
+statement ok
+SET sf_mock_bulk_status_body = '{"state":"JobComplete"}';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Name,Blob
+001,"Acme, Inc",aGVsbG8=
+002,"He said ""hi""",
+003,"multi
+line",QQ==';
+
+query I
+SELECT COUNT(*) FROM sf.Account;
+----
+3
+
+# Rows are selected via LIKE (kept residual, so DuckDB applies it) — an exact
+# Id = '...' would be pushed to SOQL and erased, and the mock ignores the SOQL.
+
+# comma-in-field + base64 -> bytes
+query I
+SELECT Name = 'Acme, Inc' AND Blob = 'hello'::BLOB FROM sf.Account WHERE Name LIKE 'Acme%';
+----
+true
+
+# escaped quotes + empty cell -> NULL blob
+query I
+SELECT Name = 'He said "hi"' AND Blob IS NULL FROM sf.Account WHERE Name LIKE 'He said%';
+----
+true
+
+# newline inside quoted field (CRLF-agnostic: the source line ending may be \r\n)
+query I
+SELECT starts_with(Name, 'multi') AND ends_with(Name, 'line') AND contains(Name, chr(10))
+   AND Blob = 'A'::BLOB
+FROM sf.Account WHERE Name LIKE 'multi%';
+----
+true
+
+# --- the Bulk job carries the same projection + predicate SOQL as REST -------
+# Inspect the exact /jobs/query create POST body. SELECT Id, Name ... WHERE
+# Name = 'Acme' must appear (JSON-escaped) inside the job's SOQL.
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Name
+001,Acme';
+
+statement ok
+SELECT Id, Name FROM sf.Account WHERE Name = 'Acme';
+
+query I
+SELECT contains(body, 'FROM Account')
+   AND contains(body, 'Id')
+   AND contains(body, 'Name')
+   AND contains(body, 'WHERE Name = ''Acme''')
+FROM salesforce_last_bulk_create_body();
+----
+true
+
+# --- multi-page via Sforce-Locator ------------------------------------------
+statement ok
+SET sf_mock_bulk_results_locator = 'loc1,';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Name
+p1a,A
+p1b,B|~|Id,Name
+p2a,C';
+
+query I
+SELECT COUNT(*) FROM sf.Account;
+----
+3
+
+# --- 401 on a results request: re-auth once and continue ---------------------
+statement ok
+SET sf_mock_bulk_results_locator = '';
+
+statement ok
+SET sf_mock_bulk_results_status = '401,200';
+
+statement ok
+SET sf_mock_bulk_results_body = 'IGNORED|~|Id,Name
+001,Acme';
+
+query I
+SELECT COUNT(*) FROM sf.Account;
+----
+1
+
+# --- job Failed -> clean error, no secret ------------------------------------
+statement ok
+SET sf_mock_bulk_results_status = '200';
+
+statement ok
+SET sf_mock_bulk_status_body = '{"state":"Failed","errorMessage":"malformed query"}';
+
+statement error
+SELECT Id FROM sf.Account;
+----
+bulk: job Failed - malformed query
+
+# --- REST transport still works (default behaviour) --------------------------
+statement ok
+SET sf_force_transport = 'rest';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"RestRow"}]}';
+
+query I
+SELECT Name FROM sf.Account;
+----
+RestRow
+
+statement ok
+DETACH sf;

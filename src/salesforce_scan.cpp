@@ -58,6 +58,12 @@ struct ScanGlobalState : public GlobalTableFunctionState {
     idx_t pages_fetched = 0;
     std::unordered_set<string> seen; // queryMore cursors seen (loop guard)
 
+    // Bulk path (sf_force_transport='bulk', #v0.3): eager CSV result.
+    bool bulk = false;
+    SalesforceBulkResult bulk_result;
+    vector<int64_t> field_to_csv; // field index -> CSV column index (-1 if absent)
+    idx_t bulk_cursor = 0;
+
     // DuckDB-level projection: which source field each output column maps to.
     vector<column_t> column_ids;
     idx_t MaxThreads() const override {
@@ -98,12 +104,39 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     string soql = BuildSelectSoql(bind.object, select_fields, bind.pushed_where, optional_idx());
     SetLastSoql(soql);
 
-    // Build the session + initial page path, but fetch NOTHING yet (lazy, #11).
+    // Transport: 'rest' (default, lazy) or 'bulk' (Bulk API 2.0). Same optimized
+    // SOQL either way, so projection/predicate pushdown applies to both.
+    string transport = "rest";
+    Value tv;
+    if (context.TryGetCurrentSetting("sf_force_transport", tv) && !tv.IsNull()) {
+        transport = StringUtil::Lower(tv.ToString());
+    }
+    if (transport != "rest" && transport != "bulk") {
+        throw BinderException("sf_force_transport must be 'rest' or 'bulk' (got '%s').", transport);
+    }
+
     gstate->client = BuildHttpClientForContext(context);
     gstate->session = make_uniq<SalesforceSession>(bind.config, *gstate->client);
     gstate->session->SetToken(bind.token); // reuse ATTACH token (refreshes on 401)
-    gstate->next_path = gstate->session->QueryPath(soql);
     SetLastScanPages(0);
+
+    if (transport == "bulk") {
+        gstate->bulk = true;
+        gstate->bulk_result = gstate->session->BulkQuery(soql);
+        // Map each field to its CSV column index (header may reorder).
+        gstate->field_to_csv.assign(bind.fields.size(), -1);
+        for (idx_t f = 0; f < bind.fields.size(); f++) {
+            for (idx_t c = 0; c < gstate->bulk_result.columns.size(); c++) {
+                if (StringUtil::CIEquals(bind.fields[f].name, gstate->bulk_result.columns[c])) {
+                    gstate->field_to_csv[f] = static_cast<int64_t>(c);
+                    break;
+                }
+            }
+        }
+    } else {
+        // REST: build the initial page path, but fetch NOTHING yet (lazy, #11).
+        gstate->next_path = gstate->session->QueryPath(soql);
+    }
     return std::move(gstate);
 }
 
@@ -149,6 +182,27 @@ static bool ScanAdvancePage(ScanGlobalState &g) {
 static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
     auto &bind = data.bind_data->Cast<SalesforceScanBindData>();
     auto &gstate = data.global_state->Cast<ScanGlobalState>();
+
+    // Bulk path: emit decoded CSV rows (already downloaded in InitGlobal).
+    if (gstate.bulk) {
+        idx_t row = 0;
+        while (row < STANDARD_VECTOR_SIZE && gstate.bulk_cursor < gstate.bulk_result.rows.size()) {
+            const auto &cells = gstate.bulk_result.rows[gstate.bulk_cursor];
+            for (idx_t j = 0; j < gstate.column_ids.size(); j++) {
+                column_t col = gstate.column_ids[j];
+                int64_t ci = (col < bind.fields.size()) ? gstate.field_to_csv[col] : -1;
+                if (ci < 0 || static_cast<idx_t>(ci) >= cells.size() || cells[ci].empty()) {
+                    FlatVector::SetNull(output.data[j], row, true); // missing/virtual/empty -> NULL
+                } else {
+                    AppendTypedCell(output.data[j], row, bind.fields[col], cells[ci]);
+                }
+            }
+            gstate.bulk_cursor++;
+            row++;
+        }
+        output.SetCardinality(row);
+        return;
+    }
 
     // Fetch the next page only when the current one is fully drained. Emit at
     // PAGE granularity (one page per call, capped at the chunk size): this lets

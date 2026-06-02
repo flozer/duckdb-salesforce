@@ -27,6 +27,36 @@ ATTACH 'salesforce://production' AS sf (TYPE salesforce,
 SELECT Id, Name FROM sf.Account WHERE Name = 'Acme';
 ```
 
+## Transport: REST vs Bulk (v0.3)
+
+A scan runs over one of two transports, chosen by the `sf_force_transport`
+setting. Both use the **same** optimised SOQL — projection + predicate pushdown
+apply identically — so only the delivery mechanism differs.
+
+```sql
+SET sf_force_transport = 'rest';   -- default: lazy REST /query + queryMore
+SET sf_force_transport = 'bulk';   -- Bulk API 2.0 query job (CSV results)
+```
+
+| | `rest` (default) | `bulk` |
+| --- | --- | --- |
+| Mechanism | `/query` + `queryMore` pages | create job → poll → download CSV (`Sforce-Locator` paging) |
+| Streaming | lazy — stops early on small `LIMIT` | eager — whole result downloaded before the first row is emitted |
+| Best for | interactive queries, small/medium results | large extractions, `CREATE TABLE AS`, `COPY` |
+| 401 handling | refresh-token retry (once) | same — on create, poll, and each results page |
+
+Notes / limitations of the `bulk` path:
+
+- **`LIMIT` is not honoured server-side.** Bulk API 2.0 query jobs ignore SOQL
+  `LIMIT`; the full result set is fetched and `LIMIT` is applied residually by
+  DuckDB. Use `rest` when you want a small `LIMIT` to read little.
+- The result is fetched **eagerly** in `InitGlobal` (all pages, following the
+  `Sforce-Locator`), so memory scales with the result size. v0.3 does not yet
+  stream Bulk pages into the scan.
+- A `Failed`/`Aborted` job raises a clean, secret-free error.
+- Auto-selecting the transport by query shape is deferred (v0.3 §2); for now it
+  is explicit via the setting.
+
 ## Pushdown (v0.1)
 
 Pushdown to SOQL is a best-effort over-fetch optimisation; anything not pushed is

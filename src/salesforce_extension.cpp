@@ -51,6 +51,11 @@ static void LoadInternal(ExtensionLoader &loader) {
     // recent scan fetched (proves lazy pagination, #11). Not a public API.
     loader.RegisterFunction(GetSalesforceLastScanPagesFunction());
 
+    // salesforce_last_bulk_create_body() — DEBUG/TEST ONLY: JSON body of the
+    // most recent Bulk job-create POST, so tests can assert the Bulk job carries
+    // the same projection + predicate SOQL as REST (v0.3). Not a public API.
+    loader.RegisterFunction(GetSalesforceLastBulkCreateBodyFunction());
+
     // salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the
     // attached catalog issued since ATTACH (proves the metadata cache, #12).
     loader.RegisterFunction(GetSalesforceDescribeCallsFunction());
@@ -95,6 +100,34 @@ static void LoadInternal(ExtensionLoader &loader) {
                               LogicalType::VARCHAR, Value("200"));
     config.AddExtensionOption("sf_mock_sobjects_body",
                               "TEST ONLY. Body for mocked global describe (GET /sobjects).",
+                              LogicalType::VARCHAR, Value(""));
+
+    // Transport for catalog scans: 'rest' (default, lazy REST /query) or 'bulk'
+    // (Bulk API 2.0 query path, for large extractions / materialization). #v0.3.
+    config.AddExtensionOption(
+        "sf_force_transport",
+        "Scan transport: 'rest' (default) or 'bulk' (Bulk API 2.0). 'bulk' is for "
+        "large extractions / CREATE TABLE AS / COPY; same SOQL (projection + "
+        "predicate pushdown) either way.",
+        LogicalType::VARCHAR, Value("rest"));
+
+    // Test-only Bulk mock hooks (active when sf_mock_token_status != 0).
+    config.AddExtensionOption("sf_mock_bulk_create_status", "TEST ONLY. Bulk job-create HTTP status.",
+                              LogicalType::BIGINT, Value::BIGINT(200));
+    config.AddExtensionOption("sf_mock_bulk_create_body", "TEST ONLY. Bulk job-create response body.",
+                              LogicalType::VARCHAR, Value("{\"id\":\"JOB1\",\"state\":\"UploadComplete\"}"));
+    config.AddExtensionOption("sf_mock_bulk_status_code", "TEST ONLY. Bulk status HTTP status(es), CSV.",
+                              LogicalType::VARCHAR, Value("200"));
+    config.AddExtensionOption("sf_mock_bulk_status_body",
+                              "TEST ONLY. Bulk status body/bodies ('|~|' per poll).",
+                              LogicalType::VARCHAR, Value("{\"state\":\"JobComplete\"}"));
+    config.AddExtensionOption("sf_mock_bulk_results_status", "TEST ONLY. Bulk results HTTP status(es), CSV.",
+                              LogicalType::VARCHAR, Value("200"));
+    config.AddExtensionOption("sf_mock_bulk_results_body",
+                              "TEST ONLY. Bulk results CSV page(s) ('|~|' per page).",
+                              LogicalType::VARCHAR, Value(""));
+    config.AddExtensionOption("sf_mock_bulk_results_locator",
+                              "TEST ONLY. Sforce-Locator per results page (comma-separated; empty = last).",
                               LogicalType::VARCHAR, Value(""));
 }
 

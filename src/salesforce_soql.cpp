@@ -447,6 +447,62 @@ TableFunction GetSalesforceLastScanPagesFunction() {
                          LastPagesInit);
 }
 
+// --- last Bulk create-job body diagnostic (DEBUG/TEST ONLY) ------------------
+
+static std::mutex g_bulk_body_lock;
+static string g_last_bulk_create_body;
+
+void SetLastBulkCreateBody(const string &body) {
+    std::lock_guard<std::mutex> g(g_bulk_body_lock);
+    g_last_bulk_create_body = body;
+}
+
+namespace {
+
+struct LastBulkBodyGlobalState : public GlobalTableFunctionState {
+    bool emitted = false;
+    idx_t MaxThreads() const override {
+        return 1;
+    }
+};
+
+static unique_ptr<FunctionData> LastBulkBodyBind(ClientContext &, TableFunctionBindInput &,
+                                                 vector<LogicalType> &return_types,
+                                                 vector<string> &names) {
+    names = {"body"};
+    return_types = {LogicalType::VARCHAR};
+    return nullptr;
+}
+
+static unique_ptr<GlobalTableFunctionState> LastBulkBodyInit(ClientContext &,
+                                                             TableFunctionInitInput &) {
+    return make_uniq<LastBulkBodyGlobalState>();
+}
+
+static void LastBulkBodyFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &gstate = data.global_state->Cast<LastBulkBodyGlobalState>();
+    if (gstate.emitted) {
+        output.SetCardinality(0);
+        return;
+    }
+    string body;
+    {
+        std::lock_guard<std::mutex> g(g_bulk_body_lock);
+        body = g_last_bulk_create_body;
+    }
+    FlatVector::GetData<string_t>(output.data[0])[0] =
+        StringVector::AddString(output.data[0], body);
+    gstate.emitted = true;
+    output.SetCardinality(1);
+}
+
+} // namespace
+
+TableFunction GetSalesforceLastBulkCreateBodyFunction() {
+    return TableFunction("salesforce_last_bulk_create_body", {}, LastBulkBodyFunction,
+                         LastBulkBodyBind, LastBulkBodyInit);
+}
+
 // --- describe-call counter (DEBUG/TEST ONLY) ---------------------------------
 
 static std::mutex g_describe_lock;

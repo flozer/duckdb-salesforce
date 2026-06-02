@@ -7,6 +7,7 @@
 namespace duckdb {
 
 struct SalesforceDescribe;
+struct HttpResponse;
 class SalesforceHttpClient;
 
 // Paginated SOQL query result: raw JSON object per record, in fetch order.
@@ -21,6 +22,12 @@ struct SalesforceQueryPage {
     vector<string> records;
     string next_path; // nextRecordsUrl ("" when there are no more pages)
     bool done = true;
+};
+
+// Bulk API 2.0 query result (#v0.3): CSV header + rows (cells as strings).
+struct SalesforceBulkResult {
+    vector<string> columns;      // CSV header (field names)
+    vector<vector<string>> rows; // one vector of cells per record
 };
 
 // A live (mock-injectable) session against one Salesforce org: holds the
@@ -61,10 +68,20 @@ public:
     // pagination state + loop guards (the lazy scan in #11 uses this).
     SalesforceQueryPage FetchPage(const string &path);
 
+    // Bulk API 2.0 query (#v0.3): create a query job, poll to JobComplete,
+    // download CSV result pages (following Sforce-Locator), return header+rows.
+    // Same auth/401-refresh as the REST path. For large extractions.
+    SalesforceBulkResult BulkQuery(const string &soql);
+
 private:
+    // Bearer-authenticated request (GET, or POST with a JSON body) that retries
+    // ONCE on HTTP 401 after re-exchanging the refresh token. Returns the full
+    // response (status + body + headers); the caller decides what is an error.
+    // Authorization is never logged.
+    HttpResponse AuthorizedSend(bool post, const string &path, const string &json_body);
+
     // Authenticated GET returning the 200 body, or throwing a clear,
-    // secret-free error. On HTTP 401 it re-exchanges the refresh token once
-    // and retries the request a single time.
+    // secret-free error (used by describe/query).
     string AuthorizedGet(const string &path);
 
     SalesforceConfig config_;

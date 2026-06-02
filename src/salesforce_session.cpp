@@ -11,10 +11,14 @@
 #include "salesforce_http.hpp"
 #include "salesforce_json.hpp"
 
+#include "salesforce_csv.hpp"
+#include "salesforce_soql.hpp"
 #include "salesforce_url.hpp"
 
 #include "duckdb/common/exception.hpp"
 
+#include <chrono>
+#include <thread>
 #include <unordered_set>
 
 namespace duckdb {
@@ -35,28 +39,32 @@ void SalesforceSession::Authenticate() {
     token_ = SalesforceAuth::ExchangeRefreshToken(config_, client_);
 }
 
-string SalesforceSession::AuthorizedGet(const string &path) {
-    auto do_get = [&]() {
+HttpResponse SalesforceSession::AuthorizedSend(bool post, const string &path,
+                                               const string &json_body) {
+    auto do_req = [&]() {
         HttpRequest req;
         req.url = TrimTrailingSlash(token_.instance_url) + path;
         req.headers = {{"Authorization", "Bearer " + token_.access_token},
                        {"Accept", "application/json"}};
+        if (post) {
+            req.headers.push_back({"Content-Type", "application/json"});
+            req.body = json_body;
+            return client_.Post(req);
+        }
         return client_.Get(req);
     };
 
-    HttpResponse resp = do_get();
+    HttpResponse resp = do_req();
     if (!resp.transport_ok) {
-        // path is not a secret; transport_error is generic.
-        throw IOException("salesforce: GET %s failed to reach the server (%s).", path,
+        throw IOException("salesforce: request to %s failed to reach the server (%s).", path,
                           resp.transport_error);
     }
-
     if (resp.status == 401) {
         // Token may be expired/revoked — refresh once and retry once.
         token_ = SalesforceAuth::ExchangeRefreshToken(config_, client_);
-        resp = do_get();
+        resp = do_req();
         if (!resp.transport_ok) {
-            throw IOException("salesforce: GET %s failed to reach the server (%s).", path,
+            throw IOException("salesforce: request to %s failed to reach the server (%s).", path,
                               resp.transport_error);
         }
         if (resp.status == 401) {
@@ -64,11 +72,14 @@ string SalesforceSession::AuthorizedGet(const string &path) {
                 "salesforce: authentication failed (HTTP 401) after refreshing the token.");
         }
     }
+    return resp;
+}
 
+string SalesforceSession::AuthorizedGet(const string &path) {
+    HttpResponse resp = AuthorizedSend(false, path, "");
     if (resp.status == 200) {
         return resp.body;
     }
-
     // Salesforce REST errors come back as [{"errorCode":"...","message":"..."}].
     // Surface only those fields — never the body wholesale, never a secret.
     string code = sfjson::GetString(resp.body, "errorCode");
@@ -91,6 +102,113 @@ SalesforceDescribe SalesforceSession::Describe(const string &object) {
     // instead of the top-level one.
     d.object_name = object;
     return d;
+}
+
+// JSON-escape a string for embedding the SOQL in the job-create body.
+static string JsonEscape(const string &s) {
+    string out;
+    for (char c : s) {
+        switch (c) {
+        case '"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default: out.push_back(c);
+        }
+    }
+    return out;
+}
+
+// Surface a Bulk error secret-free: HTTP status + Salesforce errorCode/message.
+[[noreturn]] static void ThrowBulkError(const char *stage, const HttpResponse &r) {
+    string code = sfjson::GetString(r.body, "errorCode");
+    string msg = sfjson::GetString(r.body, "message");
+    if (code.empty()) {
+        code = "error";
+    }
+    throw IOException("salesforce bulk %s failed (HTTP %d): %s%s%s.", stage, r.status, code,
+                      msg.empty() ? "" : " - ", msg);
+}
+
+// Parse one CSV result page; first page sets the header, later pages repeat it.
+static void AppendCsvPage(const string &csv, SalesforceBulkResult &result) {
+    auto rows = sfcsv::Parse(csv);
+    if (rows.empty()) {
+        return;
+    }
+    size_t start = 1; // row 0 is the header on every page
+    if (result.columns.empty()) {
+        result.columns = rows[0];
+    }
+    for (size_t r = start; r < rows.size(); r++) {
+        result.rows.push_back(std::move(rows[r]));
+    }
+}
+
+SalesforceBulkResult SalesforceSession::BulkQuery(const string &soql) {
+    const string base = "/services/data/" + config_.api_version + "/jobs/query";
+
+    // 1) create the query job.
+    string create_body = "{\"operation\":\"query\",\"query\":\"" + JsonEscape(soql) +
+                         "\",\"contentType\":\"CSV\",\"lineEnding\":\"LF\"}";
+    SetLastBulkCreateBody(create_body); // DEBUG/TEST diagnostic; no secret in body
+    HttpResponse cr = AuthorizedSend(true, base, create_body);
+    if (cr.status < 200 || cr.status >= 300) {
+        ThrowBulkError("job create", cr);
+    }
+    string job_id = sfjson::GetString(cr.body, "id");
+    if (job_id.empty()) {
+        throw IOException("salesforce bulk: job create returned no id.");
+    }
+    const string job_path = base + "/" + job_id;
+
+    // 2) poll until JobComplete (bounded; short backoff between polls).
+    constexpr int kMaxPolls = 600;
+    for (int i = 0;; i++) {
+        HttpResponse st = AuthorizedSend(false, job_path, "");
+        if (st.status < 200 || st.status >= 300) {
+            ThrowBulkError("job status", st);
+        }
+        string state = sfjson::GetString(st.body, "state");
+        if (state == "JobComplete") {
+            break;
+        }
+        if (state == "Failed" || state == "Aborted") {
+            string msg = sfjson::GetString(st.body, "errorMessage");
+            throw IOException("salesforce bulk: job %s%s%s.", state, msg.empty() ? "" : " - ", msg);
+        }
+        if (i >= kMaxPolls) {
+            throw IOException("salesforce bulk: job did not complete after %d polls.", kMaxPolls);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+
+    // 3) download CSV result pages, following Sforce-Locator.
+    SalesforceBulkResult result;
+    string path = job_path + "/results";
+    std::unordered_set<string> seen;
+    constexpr idx_t kMaxPages = 1000000;
+    idx_t pages = 0;
+    while (true) {
+        HttpResponse rs = AuthorizedSend(false, path, "");
+        if (rs.status < 200 || rs.status >= 300) {
+            ThrowBulkError("job results", rs);
+        }
+        AppendCsvPage(rs.body, result);
+        string loc = rs.GetHeader("Sforce-Locator");
+        if (loc.empty() || loc == "null") {
+            break;
+        }
+        if (++pages >= kMaxPages) {
+            throw IOException("salesforce bulk: exceeded the maximum result page count.");
+        }
+        if (!seen.insert(loc).second) {
+            throw IOException("salesforce bulk: result pagination loop (locator repeated).");
+        }
+        path = job_path + "/results?locator=" + loc;
+    }
+    return result;
 }
 
 vector<string> SalesforceSession::GlobalDescribe() {

@@ -91,7 +91,10 @@ void AppendJsonValue(Vector &vec, idx_t row, const SalesforceField &field,
         FlatVector::SetNull(vec, row, true);
         return;
     }
+    AppendTypedCell(vec, row, field, raw);
+}
 
+void AppendTypedCell(Vector &vec, idx_t row, const SalesforceField &field, const string &raw) {
     const auto &type = field.duckdb_type;
     try {
         // String/blob go through the vector's own string heap (the correct

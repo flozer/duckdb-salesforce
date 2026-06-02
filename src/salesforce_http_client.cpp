@@ -150,6 +150,9 @@ private:
                 r.transport_ok = true;
                 r.status = res->status;
                 r.body = res->body;
+                for (auto &h : res->headers) {
+                    r.headers.emplace_back(h.first, h.second);
+                }
                 return r;
             }
 
@@ -176,28 +179,59 @@ private:
 // operation builds its own client instance.
 class ScriptedMockHttpClient final : public SalesforceHttpClient {
 public:
+    struct BulkMock {
+        int create_status = 200;
+        string create_body;
+        vector<int> status_statuses;
+        vector<string> status_bodies;
+        vector<int> results_statuses;
+        vector<string> results_bodies;
+        vector<string> results_locators;
+    };
+
     ScriptedMockHttpClient(int token_status, string token_body, vector<int> describe_statuses,
                            vector<string> describe_bodies, vector<int> query_statuses,
                            vector<string> query_bodies, vector<int> global_statuses,
-                           vector<string> global_bodies)
+                           vector<string> global_bodies, BulkMock bulk)
         : token_status_(token_status), token_body_(std::move(token_body)),
           describe_statuses_(std::move(describe_statuses)),
           describe_bodies_(std::move(describe_bodies)),
           query_statuses_(std::move(query_statuses)),
           query_bodies_(std::move(query_bodies)),
           global_statuses_(std::move(global_statuses)),
-          global_bodies_(std::move(global_bodies)) {
+          global_bodies_(std::move(global_bodies)), bulk_(std::move(bulk)) {
     }
 
-    HttpResponse Post(const HttpRequest & /*request*/) override {
+    HttpResponse Post(const HttpRequest &request) override {
         HttpResponse r;
         r.transport_ok = true;
-        r.status = token_status_;
-        r.body = token_body_;
+        if (request.url.find("/jobs/query") != string::npos) {
+            r.status = bulk_.create_status; // Bulk job create
+            r.body = bulk_.create_body;
+        } else {
+            r.status = token_status_; // OAuth token exchange / refresh
+            r.body = token_body_;
+        }
         return r;
     }
 
     HttpResponse Get(const HttpRequest &request) override {
+        // Bulk: .../jobs/query/<id>/results vs .../jobs/query/<id> (status).
+        if (request.url.find("/jobs/query") != string::npos) {
+            if (request.url.find("/results") != string::npos) {
+                HttpResponse r = Step(bulk_.results_statuses, bulk_.results_bodies, bulk_results_index_);
+                string loc = (bulk_.results_locators.empty())
+                                 ? string()
+                                 : bulk_.results_locators[bulk_results_index_ - 1 < bulk_.results_locators.size()
+                                                              ? bulk_results_index_ - 1
+                                                              : bulk_.results_locators.size() - 1];
+                if (!loc.empty()) {
+                    r.headers.emplace_back("Sforce-Locator", loc);
+                }
+                return r;
+            }
+            return Step(bulk_.status_statuses, bulk_.status_bodies, bulk_status_index_);
+        }
         // describe URL (.../sobjects/<obj>/describe) contains both tokens, so
         // check /describe first; then /sobjects (global describe); else query.
         if (request.url.find("/describe") != string::npos) {
@@ -228,9 +262,12 @@ private:
     vector<string> query_bodies_;
     vector<int> global_statuses_;
     vector<string> global_bodies_;
+    BulkMock bulk_;
     size_t describe_index_ = 0;
     size_t query_index_ = 0;
     size_t global_index_ = 0;
+    size_t bulk_status_index_ = 0;
+    size_t bulk_results_index_ = 0;
 };
 
 // Split a string on a multi-char sentinel. An empty input yields one empty
@@ -307,10 +344,26 @@ unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &contex
             g_status.push_back(200);
         }
         vector<string> g_body = SplitOn(SettingStr(context, "sf_mock_sobjects_body"), "|~|");
+
+        ScriptedMockHttpClient::BulkMock bulk;
+        bulk.create_status = static_cast<int>(SettingInt(context, "sf_mock_bulk_create_status", 200));
+        bulk.create_body = SettingStr(context, "sf_mock_bulk_create_body");
+        bulk.status_statuses = ParseIntCsv(SettingStr(context, "sf_mock_bulk_status_code"));
+        if (bulk.status_statuses.empty()) {
+            bulk.status_statuses.push_back(200);
+        }
+        bulk.status_bodies = SplitOn(SettingStr(context, "sf_mock_bulk_status_body"), "|~|");
+        bulk.results_statuses = ParseIntCsv(SettingStr(context, "sf_mock_bulk_results_status"));
+        if (bulk.results_statuses.empty()) {
+            bulk.results_statuses.push_back(200);
+        }
+        bulk.results_bodies = SplitOn(SettingStr(context, "sf_mock_bulk_results_body"), "|~|");
+        bulk.results_locators = SplitOn(SettingStr(context, "sf_mock_bulk_results_locator"), ",");
+
         return make_uniq_base<SalesforceHttpClient, ScriptedMockHttpClient>(
             static_cast<int>(token_status), SettingStr(context, "sf_mock_token_body"),
             std::move(d_status), std::move(d_body), std::move(q_status), std::move(q_body),
-            std::move(g_status), std::move(g_body));
+            std::move(g_status), std::move(g_body), std::move(bulk));
     }
     return CreateLiveHttpClient();
 }

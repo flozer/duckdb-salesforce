@@ -23,6 +23,19 @@ struct HttpResponse {
     int status = 0;
     string body;
     string transport_error;
+    // Response headers (e.g. Bulk API 2.0 "Sforce-Locator"). Request headers
+    // such as Authorization are never stored here.
+    vector<std::pair<string, string>> headers;
+
+    // Case-insensitive header lookup; "" if absent.
+    string GetHeader(const string &name) const {
+        for (auto &h : headers) {
+            if (StringUtil::CIEquals(h.first, name)) {
+                return h.second;
+            }
+        }
+        return "";
+    }
 };
 
 class SalesforceHttpClient {
