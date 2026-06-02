@@ -1,0 +1,105 @@
+# name: test/sql/salesforce_relationships.test
+# description: v0.6 §7 — parent relationship traversal (STRUCT columns), opt-in
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Describe sequence (one client per LookupEntry; the parent describe reuses the
+# same client, so the 2nd page is consumed for Account):
+#   page 1 = Contact  (AccountId -> single-target; OwnerId -> polymorphic)
+#   page 2 = Account
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true},{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User","Group"],"filterable":true}]}|~|{"name":"Account","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"},{"name":"AnnualRevenue","type":"currency","precision":18,"scale":2}]}';
+
+# Nested query result: full parent, null parent, missing parent.
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"c1","Account":{"Id":"a1","Name":"Acme","AnnualRevenue":100.00}},{"Id":"c2","Account":null},{"Id":"c3"}]}';
+
+# === default (off): schema is flat, no Account STRUCT ========================
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query I
+SELECT COUNT(*) FROM (DESCRIBE SELECT * FROM sf.Contact) WHERE column_name = 'Account';
+----
+0
+
+# AccountId stays a scalar column.
+query I
+SELECT COUNT(*) FROM (DESCRIBE SELECT * FROM sf.Contact) WHERE column_name = 'AccountId';
+----
+1
+
+statement ok
+DETACH sf;
+
+# === parent: Account exposed as a STRUCT column =============================
+statement ok
+SET sf_relationships = 'parent';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# Account is a STRUCT(Id, Name, AnnualRevenue); polymorphic Owner is NOT expanded.
+query I
+SELECT column_type LIKE 'STRUCT%' AND contains(column_type, 'Name')
+   AND contains(column_type, 'AnnualRevenue DECIMAL(18,2)')
+FROM (DESCRIBE SELECT * FROM sf.Contact) WHERE column_name = 'Account';
+----
+true
+
+query I
+SELECT COUNT(*) FROM (DESCRIBE SELECT * FROM sf.Contact) WHERE column_name = 'Owner';
+----
+0
+
+# Parent describe was reused from cache: Contact + Account = 2 describes.
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
+
+# SELECT Account.Name works (struct field access); SOQL uses dot notation.
+query I
+SELECT Account.Name FROM sf.Contact ORDER BY Id;
+----
+Acme
+NULL
+NULL
+
+query I
+SELECT contains(soql, 'Account.Name') FROM salesforce_last_soql();
+----
+true
+
+# Re-query: no extra describe (schema cached). LIMIT (not an exact WHERE, which
+# the mock ignores) selects the first row.
+query I
+SELECT Account.Name FROM sf.Contact ORDER BY Id LIMIT 1;
+----
+Acme
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
+
+# Whole struct: full parent populated, null + missing parent -> null struct.
+query I
+SELECT Account IS NULL FROM sf.Contact ORDER BY Id;
+----
+false
+true
+true
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_relationships = 'off';

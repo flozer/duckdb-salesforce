@@ -40,6 +40,10 @@ SalesforceDescribe ParseDescribe(const string &json, const string &fallback_obje
         bool unknown = false;
         f.duckdb_type = MapSalesforceType(f.sf_type, f.precision, f.scale, &unknown);
         f.unknown_type = unknown;
+        // Parent relationship metadata (#v0.6 §7); expansion happens later, only
+        // when sf_relationships='parent'.
+        f.relationship_name = sfjson::GetString(obj, "relationshipName");
+        f.reference_to = sfjson::GetStringArray(obj, "referenceTo");
         d.fields.push_back(std::move(f));
     }
     return d;

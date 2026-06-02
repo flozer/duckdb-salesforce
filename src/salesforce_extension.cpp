@@ -202,6 +202,17 @@ static void LoadInternal(ExtensionLoader &loader) {
         "per object on error/absent/ambiguous type; coarser types; fields default "
         "non-filterable unless Tooling marks them filterable).",
         LogicalType::VARCHAR, Value("describe"));
+    // Parent relationship expansion (#v0.6 §7). 'off' (default) leaves the
+    // schema flat (no behaviour change); 'parent' exposes each single-target
+    // parent relationship as a STRUCT column (e.g. Account on sf.Contact ->
+    // SELECT Account.Name). Describe-source only; depth 1; polymorphic skipped.
+    config.AddExtensionOption(
+        "sf_relationships",
+        "Parent relationship traversal: 'off' (default) or 'parent' (expose each "
+        "single-target parent as a STRUCT column, e.g. SELECT Account.Name FROM "
+        "sf.Contact). Depth 1; polymorphic/child relationships not expanded.",
+        LogicalType::VARCHAR, Value("off"));
+
     // Mocked Tooling query (§v0.6). GET .../tooling/query -> this sequence.
     config.AddExtensionOption("sf_mock_tooling_status",
                               "TEST ONLY. Statuses for the mocked GET /tooling/query.",

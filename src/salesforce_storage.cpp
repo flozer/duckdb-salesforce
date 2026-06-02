@@ -189,6 +189,16 @@ public:
         // REST describe (default + fallback): describe once and cache (#12).
         IncDescribeCalls(); // DEBUG/TEST counter — proves describe-once
         SalesforceDescribe describe = session.Describe(object);
+
+        // Parent relationship expansion (#v0.6 §7), opt-in + describe-source only.
+        string relationships = "off";
+        Value rv;
+        if (transaction.GetContext().TryGetCurrentSetting("sf_relationships", rv) && !rv.IsNull()) {
+            relationships = StringUtil::Lower(rv.ToString());
+        }
+        if (relationships == "parent") {
+            ExpandParentRelationships(session, describe);
+        }
         return BuildAndCacheEntry(describe);
     }
 
@@ -227,6 +237,81 @@ private:
         auto *ptr = entry.get();
         tables_.emplace(StringUtil::Lower(describe.object_name), std::move(entry));
         return ptr;
+    }
+
+    // Describe a parent object once, cached for this catalog (reuses the #12
+    // describe budget). Caller holds lock_. Returns nullptr on failure.
+    const SalesforceDescribe *GetParentDescribe(SalesforceSession &session, const string &object) {
+        string key = StringUtil::Lower(object);
+        auto it = parent_describe_cache_.find(key);
+        if (it != parent_describe_cache_.end()) {
+            return &it->second;
+        }
+        try {
+            IncDescribeCalls();
+            SalesforceDescribe pd = session.Describe(object);
+            auto res = parent_describe_cache_.emplace(key, std::move(pd));
+            return &res.first->second;
+        } catch (...) {
+            return nullptr; // un-describable parent -> relationship simply skipped
+        }
+    }
+
+    // Append synthesised parent-relationship STRUCT columns (#v0.6 §7) to a
+    // describe. Depth 1, single-target only (polymorphic + self skipped); the
+    // STRUCT children are the parent's queryable SCALAR fields. Caller holds lock_.
+    void ExpandParentRelationships(SalesforceSession &session, SalesforceDescribe &describe) {
+        vector<SalesforceField> extra;
+        for (auto &f : describe.fields) {
+            if (StringUtil::Lower(f.sf_type) != "reference") {
+                continue;
+            }
+            if (f.relationship_name.empty() || f.reference_to.size() != 1) {
+                continue; // no relationship name, or polymorphic -> skip
+            }
+            const string &parent = f.reference_to[0];
+            if (StringUtil::CIEquals(parent, describe.object_name)) {
+                continue; // self-reference -> skip (avoid trivial cycle, cut 1)
+            }
+            // Avoid colliding with an existing column of the same name.
+            bool collide = false;
+            for (auto &g : describe.fields) {
+                if (StringUtil::CIEquals(g.name, f.relationship_name)) {
+                    collide = true;
+                    break;
+                }
+            }
+            if (collide) {
+                continue;
+            }
+            const SalesforceDescribe *pd = GetParentDescribe(session, parent);
+            if (!pd) {
+                continue;
+            }
+            SalesforceField rel;
+            rel.is_relationship = true;
+            rel.name = f.relationship_name;
+            rel.relationship_name = f.relationship_name;
+            child_list_t<LogicalType> struct_children;
+            for (auto &pf : pd->fields) {
+                if (!IsQueryableField(pf)) {
+                    continue; // drop compound
+                }
+                SalesforceField child = pf; // scalar copy (depth 1: no nesting)
+                child.is_relationship = false;
+                child.children.clear();
+                struct_children.emplace_back(child.name, child.duckdb_type);
+                rel.children.push_back(std::move(child));
+            }
+            if (rel.children.empty()) {
+                continue;
+            }
+            rel.duckdb_type = LogicalType::STRUCT(std::move(struct_children));
+            extra.push_back(std::move(rel));
+        }
+        for (auto &e : extra) {
+            describe.fields.push_back(std::move(e));
+        }
     }
 
     void EmitResolved(CatalogType type, const std::function<void(CatalogEntry &)> &callback) {
@@ -289,6 +374,10 @@ private:
     // described exactly once per ATTACH. Invalidated when the catalog is
     // destroyed at DETACH. In-memory only — never persisted (#12).
     std::unordered_map<string, unique_ptr<SalesforceTableEntry>> tables_;
+    // Parent-object describes for relationship expansion (#v0.6 §7), cached per
+    // catalog so a parent is described once regardless of how many child fields
+    // (or child objects) reference it.
+    std::unordered_map<string, SalesforceDescribe> parent_describe_cache_;
 };
 
 // ---------------------------------------------------------------------------

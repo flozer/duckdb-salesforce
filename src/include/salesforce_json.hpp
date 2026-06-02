@@ -143,6 +143,70 @@ inline int64_t GetInt(const string &json, const string &key, int64_t dflt) {
     }
 }
 
+// Return the balanced "{...}" object that is the value of `key`, or "" if `key`
+// is absent or its value is not an object. (Used for nested relationship +
+// /limits sub-objects.)
+inline string ExtractObject(const string &json, const string &key) {
+    size_t i = FindValue(json, key);
+    if (i == string::npos || i >= json.size() || json[i] != '{') {
+        return "";
+    }
+    size_t start = i;
+    int depth = 0;
+    bool in_str = false;
+    for (; i < json.size(); i++) {
+        char c = json[i];
+        if (in_str) {
+            if (c == '\\') {
+                i++;
+            } else if (c == '"') {
+                in_str = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_str = true;
+        } else if (c == '{') {
+            depth++;
+        } else if (c == '}') {
+            if (--depth == 0) {
+                return json.substr(start, i - start + 1);
+            }
+        }
+    }
+    return "";
+}
+
+// Read a JSON array of strings for `key` (e.g. describe "referenceTo").
+inline vector<string> GetStringArray(const string &json, const string &key) {
+    vector<string> out;
+    size_t v = FindValue(json, key);
+    if (v == string::npos || v >= json.size() || json[v] != '[') {
+        return out;
+    }
+    size_t i = v + 1;
+    for (; i < json.size(); i++) {
+        char c = json[i];
+        if (c == ']') {
+            break;
+        }
+        if (c == '"') {
+            out.push_back(ReadStringAt(json, i));
+            // skip to the closing quote of this string
+            i++;
+            while (i < json.size()) {
+                if (json[i] == '\\') {
+                    i++;
+                } else if (json[i] == '"') {
+                    break;
+                }
+                i++;
+            }
+        }
+    }
+    return out;
+}
+
 // Return each top-level JSON object substring inside the array value of
 // `arrayKey`. String literals are tracked so braces inside strings are ignored.
 inline vector<string> GetObjectArray(const string &json, const string &arrayKey) {

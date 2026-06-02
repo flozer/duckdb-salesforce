@@ -99,7 +99,16 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     vector<string> select_fields;
     for (auto col : input.column_ids) {
         if (col < bind.fields.size()) {
-            select_fields.push_back(bind.fields[col].name);
+            const auto &f = bind.fields[col];
+            if (f.is_relationship) {
+                // Parent STRUCT (#v0.6 §7): emit dotted child fields (over-fetch
+                // all parent scalars — struct-subfield projection isn't exposed).
+                for (auto &child : f.children) {
+                    select_fields.push_back(f.relationship_name + "." + child.name);
+                }
+            } else {
+                select_fields.push_back(f.name);
+            }
         }
     }
     if (select_fields.empty() && !bind.fields.empty()) {
@@ -294,6 +303,34 @@ static bool ScanAdvancePage(ScanGlobalState &g) {
     }
 }
 
+// Decode a parent-relationship STRUCT (#v0.6 §7) from Bulk CSV columns named
+// "<relationship>.<child>". A row with every child cell missing/empty -> null
+// struct; a missing/empty child -> null entry.
+static void AppendBulkStruct(Vector &vec, idx_t row, const SalesforceField &field,
+                             const vector<string> &cells, const vector<string> &columns) {
+    auto &entries = StructVector::GetEntries(vec);
+    bool any = false;
+    for (idx_t c = 0; c < field.children.size() && c < entries.size(); c++) {
+        string header = field.relationship_name + "." + field.children[c].name;
+        int64_t ci = -1;
+        for (idx_t k = 0; k < columns.size(); k++) {
+            if (StringUtil::CIEquals(columns[k], header)) {
+                ci = static_cast<int64_t>(k);
+                break;
+            }
+        }
+        if (ci < 0 || static_cast<idx_t>(ci) >= cells.size() || cells[ci].empty()) {
+            FlatVector::SetNull(*entries[c], row, true);
+        } else {
+            AppendTypedCell(*entries[c], row, field.children[c], cells[ci]);
+            any = true;
+        }
+    }
+    if (!any) {
+        FlatVector::SetNull(vec, row, true); // whole parent absent -> null struct
+    }
+}
+
 static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
     auto &bind = data.bind_data->Cast<SalesforceScanBindData>();
     auto &gstate = data.global_state->Cast<ScanGlobalState>();
@@ -321,6 +358,12 @@ static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &o
             const auto &cells = gstate.bulk_result.rows[gstate.bulk_cursor];
             for (idx_t j = 0; j < gstate.column_ids.size(); j++) {
                 column_t col = gstate.column_ids[j];
+                if (col < bind.fields.size() && bind.fields[col].is_relationship) {
+                    // Parent STRUCT from CSV columns "rel.child" (#v0.6 §7).
+                    AppendBulkStruct(output.data[j], row, bind.fields[col], cells,
+                                     gstate.bulk_result.columns);
+                    continue;
+                }
                 int64_t ci = (col < bind.fields.size()) ? gstate.field_to_csv[col] : -1;
                 if (ci < 0 || static_cast<idx_t>(ci) >= cells.size() || cells[ci].empty()) {
                     FlatVector::SetNull(output.data[j], row, true); // missing/virtual/empty -> NULL

@@ -17,6 +17,16 @@ struct SalesforceField {
     bool filterable = false;
     bool sortable = false;
     bool unknown_type = false; // sf_type not recognised -> mapped to VARCHAR
+
+    // Parent relationship (#v0.6 §7). For a `reference` field, describe carries
+    // the relationship name + target object(s). When relationship expansion is
+    // ON, an extra STRUCT column is synthesised (is_relationship=true) named by
+    // relationship_name, whose `children` are the parent's scalar fields; its
+    // duckdb_type is STRUCT(children...). Depth 1 only; polymorphic skipped.
+    string relationship_name;     // describe "relationshipName"
+    vector<string> reference_to;  // describe "referenceTo" (target sObjects)
+    bool is_relationship = false; // true => synthesised parent STRUCT column
+    vector<SalesforceField> children; // parent scalar fields (for is_relationship)
 };
 
 struct SalesforceDescribe {

@@ -161,6 +161,34 @@ It complements — does not replace — the granular `salesforce_last_soql()`,
 > **Last-scan, best-effort.** It reflects only the most recent scan in the
 > process and is overwritten by the next one; scans are single-threaded.
 
+## Relationship support: parent traversal (v0.6 §7)
+
+Opt-in parent (lookup / master-detail) traversal. With `sf_relationships =
+'parent'`, each **single-target** parent relationship becomes a **STRUCT column**
+named by its Salesforce relationship name, so you can dot into it:
+
+```sql
+SET sf_relationships = 'parent';   -- opt-in; default 'off'
+SELECT Id, Account.Name FROM sf.Contact;
+-- Contact gains a column  Account STRUCT(Id, Name, ...);  SOQL uses Account.Name
+```
+
+Scope + caveats (correctness first; default `off` changes nothing):
+
+- **Default `off`** — schema and `SELECT *` are unchanged unless you opt in.
+- **Parent only, depth 1.** Grandparent (`Account.Owner.Name`), child
+  subqueries, and relationship fan-out are **not** supported. Use DuckDB joins
+  for child/complex cases.
+- **Polymorphic relationships skipped** (e.g. `OwnerId` → User/Group): not
+  expanded.
+- **Over-fetch:** selecting the struct fetches **all** the parent's scalar
+  fields (DuckDB doesn't expose which subfield was accessed).
+- **No subfield pushdown:** `WHERE Account.Name = …` is applied residually by
+  DuckDB (not pushed to SOQL) in this cut.
+- A null/missing parent → null struct; a missing subfield → null.
+- Describe-source only (not Tooling) in this cut; the parent describe reuses the
+  per-attach cache.
+
 ## Fast schema discovery: Tooling API (v0.6 §6)
 
 By default each sObject's schema comes from one **REST describe** (authoritative).

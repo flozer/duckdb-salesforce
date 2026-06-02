@@ -81,8 +81,31 @@ static string NormalizeTime(string s) {
     return s;
 }
 
+// Parent relationship (#v0.6 §7): the nested object {"Account":{"Name":...}} ->
+// a STRUCT vector. A null/missing parent -> null struct; a missing subfield ->
+// null entry. Depth 1 (children are scalars).
+static void AppendRelationshipStruct(Vector &vec, idx_t row, const SalesforceField &field,
+                                     const string &record_json) {
+    auto &entries = StructVector::GetEntries(vec);
+    string nested = sfjson::ExtractObject(record_json, field.relationship_name);
+    if (nested.empty()) {
+        FlatVector::SetNull(vec, row, true); // parent null/missing -> null struct
+        for (auto &child : entries) {
+            FlatVector::SetNull(*child, row, true);
+        }
+        return;
+    }
+    for (idx_t c = 0; c < field.children.size() && c < entries.size(); c++) {
+        AppendJsonValue(*entries[c], row, field.children[c], nested);
+    }
+}
+
 void AppendJsonValue(Vector &vec, idx_t row, const SalesforceField &field,
                      const string &record_json) {
+    if (field.is_relationship) {
+        AppendRelationshipStruct(vec, row, field, record_json);
+        return;
+    }
     string raw;
     bool found = false, is_null = false;
     sfjson::GetValue(record_json, field.name, raw, found, is_null);
