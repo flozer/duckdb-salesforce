@@ -1,8 +1,6 @@
-# Release notes — v0.2 (DRAFT, untagged)
+# Release notes — v0.2.0
 
-> **Status: DRAFT.** Not tagged yet. Tag `v0.2.0` only after a manual live smoke
-> against a maintainer-authorized org on the current build (see
-> [SMOKE.md](../SMOKE.md)). Built + tested against **DuckDB v1.5.3** (also
+> **Status: released (v0.2.0).** Built + tested against **DuckDB v1.5.3** (also
 > verified on v1.5.2). Extensions are **version-locked** to the DuckDB used at
 > build time. Live validation is manual-only; CI never contacts Salesforce.
 
@@ -44,7 +42,18 @@ pushdown (`=, <>, <, <=, >, >=, IS [NOT] NULL, AND`).
 - **Offline suite: 262 assertions across 11 files**, no network in CI (mocked
   HTTP); 4 gated `*_live.test` skipped without `SF_LIVE_*`.
 - Build matrix green on DuckDB v1.5.2 + v1.5.3.
-- v0.1.0 was validated by a manual live smoke against a real org.
+- **Manual live smoke (real maintainer-authorized org)** on the v0.2 build,
+  every new feature confirmed (no secrets/data recorded here):
+  - object listing via `information_schema.tables` returns standard + custom
+    (`__c`) objects (#14);
+  - `DESCRIBE sf.Account` returns its full column schema;
+  - `SELECT … LIMIT 5` returns quickly (lazy scan, #11);
+  - `WHERE Name LIKE 'A%'` and `WHERE Name IN (…)` return the expected filtered
+    rows (pushdown #15, residual-refined);
+  - a full `COUNT(*)` walked all pages — `salesforce_last_scan_pages()` reported
+    the page count (lazy pagination, #11);
+  - `salesforce_global_describe_calls()` = 1 and `salesforce_describe_calls()`
+    counted per-object describes (cache + listing, #12/#14).
 
 ## Limitations (unchanged from v0.1 unless noted)
 
@@ -57,12 +66,11 @@ pushdown (`=, <>, <, <=, >, >=, IS [NOT] NULL, AND`).
 - See the README **Pushdown** and **v0.1 limitations** sections for the full
   CAN/CANNOT detail.
 
-## Before tagging `v0.2.0`
+## Release status
 
-1. Offline suite green (262) — done.
-2. Manual live smoke on the current build per [SMOKE.md](../SMOKE.md), evidence
-   captured (secret-free).
-3. Human go to tag.
+Tagged **`v0.2.0`**: offline suite green (262), build matrix green (v1.5.2 +
+v1.5.3), and a manual live smoke on this build passed against a real
+maintainer-authorized org (above). Human-approved.
 
 ## Not in v0.2 (backlog)
 
