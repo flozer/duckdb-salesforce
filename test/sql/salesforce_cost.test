@@ -1,0 +1,130 @@
+# name: test/sql/salesforce_cost.test
+# description: v0.4 §4 — salesforce_query_cost() last-scan diagnostics
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Note is NOT filterable -> a predicate on it stays residual.
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"Note","type":"string","filterable":false}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"RestRow"}]}';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Name
+b1,BulkRow';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- pushed predicate: where_pushed set, 1 pushed, 0 residual -----------------
+query I
+SELECT Name FROM sf.Account WHERE Name = 'Acme';
+----
+RestRow
+
+query I
+SELECT object = 'Account' AND transport = 'rest'
+   AND pushed_filters = 1 AND residual_filters = 0
+   AND where_pushed <> '' AND rows_emitted = 1
+   AND projected_fields = 1 AND total_fields = 3
+   AND quota_remaining IS NULL AND quota_allowed IS NULL
+FROM salesforce_query_cost();
+----
+true
+
+# soql is the user's own query text (no secret) and is exposed
+query I
+SELECT contains(soql, 'FROM Account') AND contains(soql, 'Acme')
+FROM salesforce_query_cost();
+----
+true
+
+# --- no WHERE: empty where_pushed + full-object guidance ---------------------
+query I
+SELECT Id FROM sf.Account;
+----
+r1
+
+query I
+SELECT where_pushed = '' AND pushed_filters = 0 AND residual_filters = 0
+   AND projected_fields = 1 AND contains(guidance, 'no predicate pushed')
+FROM salesforce_query_cost();
+----
+true
+
+# --- residual filter on a non-filterable field -------------------------------
+query I
+SELECT count(*) FROM sf.Account WHERE Note = 'x';
+----
+0
+
+query I
+SELECT pushed_filters = 0 AND residual_filters = 1 AND where_pushed = ''
+   AND contains(guidance, 'residually')
+FROM salesforce_query_cost();
+----
+true
+
+# --- multi-page REST: pages_fetched + rows_emitted reflect delivery ----------
+statement ok
+SET sf_mock_query_body = '{"done":false,"nextRecordsUrl":"/services/data/v64.0/query/01g-2","records":[{"Id":"a","Name":"A"}]}|~|{"done":true,"records":[{"Id":"b","Name":"B"}]}';
+
+query I
+SELECT count(*) FROM sf.Account;
+----
+2
+
+query I
+SELECT pages_fetched = 2 AND rows_emitted = 2 AND bulk = false
+FROM salesforce_query_cost();
+----
+true
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"RestRow"}]}';
+
+# --- auto: transport resolved + est_rows + reason ----------------------------
+statement ok
+SET sf_force_transport = 'auto';
+
+statement ok
+SET sf_mock_count_body = '{"totalSize":10,"done":true,"records":[]}';
+
+query I
+SELECT Name FROM sf.Account;
+----
+RestRow
+
+query I
+SELECT transport = 'rest' AND est_rows = 10 AND contains(transport_reason, 'auto')
+FROM salesforce_query_cost();
+----
+true
+
+# --- Bulk: bulk=true, pages NULL, quota populated, rows delivered ------------
+statement ok
+SET sf_force_transport = 'bulk';
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query I
+SELECT bulk = true AND pages_fetched IS NULL AND rows_emitted = 1
+   AND quota_remaining = 99000 AND quota_allowed = true
+   AND contains(guidance, 'Bulk')
+FROM salesforce_query_cost();
+----
+true
+
+statement ok
+DETACH sf;

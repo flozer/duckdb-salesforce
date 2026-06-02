@@ -21,6 +21,10 @@ struct SalesforceScanBindData : public FunctionData {
     vector<LogicalType> column_types;
     // Pushed-down SOQL WHERE (set by pushdown_complex_filter; #9). Empty => none.
     string pushed_where;
+    // Query-cost diagnostics (#v0.4 §4): how many conjunctive filters were
+    // pushed to SOQL vs left residual for DuckDB. Set by pushdown_complex_filter.
+    int64_t pushed_filter_count = 0;
+    int64_t residual_filter_count = 0;
 
     unique_ptr<FunctionData> Copy() const override;
     bool Equals(const FunctionData &other) const override;

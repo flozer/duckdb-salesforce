@@ -7,6 +7,7 @@
 #include "salesforce_value.hpp"
 #include "salesforce_soql.hpp"
 #include "salesforce_quota.hpp"
+#include "salesforce_diag.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
@@ -65,6 +66,12 @@ static void LoadInternal(ExtensionLoader &loader) {
     // salesforce_last_quota() — DEBUG/diagnostic: the last quota-governor
     // decision (limit_name, max, remaining, threshold, allowed, reason). v0.4.
     loader.RegisterFunction(GetSalesforceLastQuotaFunction());
+
+    // salesforce_query_cost() — unified LAST-SCAN cost view (#v0.4 §4): SOQL,
+    // transport, projection ratio, pushed/residual filter counts, pages, rows
+    // delivered, quota, and short selectivity guidance. Aggregates the granular
+    // salesforce_last_* diagnostics; does not replace them.
+    loader.RegisterFunction(GetSalesforceQueryCostFunction());
 
     // salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the
     // attached catalog issued since ATTACH (proves the metadata cache, #12).

@@ -127,6 +127,40 @@ Notes:
 - Errors never include a bearer token, secret, or raw response body.
 - `DailyBulkV2QueryJobs` is also honoured when the org reports it.
 
+## Query cost diagnostics (v0.4 §4)
+
+`salesforce_query_cost()` returns a **single row** describing the **last scan**
+(not a history) — what SOQL it generated, how much was pushed down, and short,
+actionable selectivity guidance:
+
+```sql
+SELECT Id, Name FROM sf.Account WHERE Name = 'Acme';
+SELECT * FROM salesforce_query_cost();
+```
+
+| column | meaning |
+| --- | --- |
+| `object` | scanned sObject |
+| `soql` | the SOQL sent (your own query text — no secret) |
+| `transport` | resolved `rest` / `bulk` |
+| `est_rows` | `auto` row estimate (NULL if no probe ran) |
+| `transport_reason` | why that transport |
+| `projected_fields` / `total_fields` | projection-pushdown ratio |
+| `pushed_filters` / `residual_filters` | predicates pushed to SOQL vs applied by DuckDB |
+| `where_pushed` | the SOQL `WHERE` (empty → none) |
+| `pages_fetched` | REST query pages (**NULL for Bulk** — Bulk paging is internal) |
+| `rows_emitted` | rows **delivered to DuckDB** (not rows downloaded) |
+| `bulk` | Bulk transport? |
+| `quota_remaining` / `quota_allowed` | governor decision (NULL when quota was not consulted, e.g. REST) |
+| `guidance` | short selectivity hints (e.g. "no predicate pushed", "N filter(s) residual — over-fetch") |
+
+It complements — does not replace — the granular `salesforce_last_soql()`,
+`salesforce_last_transport()`, `salesforce_last_quota()`, and
+`salesforce_last_scan_pages()` functions.
+
+> **Last-scan, best-effort.** It reflects only the most recent scan in the
+> process and is overwritten by the next one; scans are single-threaded.
+
 ## Pushdown (v0.1)
 
 Pushdown to SOQL is a best-effort over-fetch optimisation; anything not pushed is

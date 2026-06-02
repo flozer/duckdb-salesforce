@@ -4,6 +4,7 @@
 // small query). Errors are clear and secret-free: never a bearer/body/secret.
 
 #include "salesforce_quota.hpp"
+#include "salesforce_diag.hpp"
 #include "salesforce_session.hpp"
 
 #include "duckdb/common/exception.hpp"
@@ -161,10 +162,12 @@ void QuotaGuardBulkStart(ClientContext &context, SalesforceSession &session,
         if (fail_open) {
             RecordDecision("", -1, -1, -1, true,
                            string("limits unavailable -> allowed (fail-open)") + src);
+            DiagSetQuota(-1, true);
             return;
         }
         RecordDecision("", -1, -1, -1, false,
                        string("limits unavailable -> blocked (fail-closed)") + src);
+        DiagSetQuota(-1, false);
         throw IOException(
             "salesforce quota guard: /limits is unavailable and sf_quota_fail_open=false — "
             "refusing to start a Bulk job. Set sf_quota_fail_open=true to proceed, or "
@@ -187,6 +190,7 @@ void QuotaGuardBulkStart(ClientContext &context, SalesforceSession &session,
         RecordDecision("DailyApiRequests", snap.api_max, snap.api_remaining, threshold, true,
                        StringUtil::Format("allowed: Remaining %lld > threshold %lld%s",
                                           (long long)snap.api_remaining, (long long)threshold, src));
+        DiagSetQuota(snap.api_remaining, true);
         return;
     }
 
@@ -198,10 +202,12 @@ void QuotaGuardBulkStart(ClientContext &context, SalesforceSession &session,
     if (!enforce) {
         RecordDecision("DailyApiRequests", snap.api_max, snap.api_remaining, threshold, true,
                        "WARN (sf_quota_enforce=false), proceeding: " + reason);
+        DiagSetQuota(snap.api_remaining, true);
         return; // warn-only: do not block
     }
 
     RecordDecision("DailyApiRequests", snap.api_max, snap.api_remaining, threshold, false, reason);
+    DiagSetQuota(snap.api_remaining, false);
     throw IOException(
         "salesforce quota guard: %s — refusing to start a Bulk job. SET sf_quota_enforce=false "
         "to warn-only, sf_quota_enabled=false to disable, raise sf_quota_reserve_pct/"

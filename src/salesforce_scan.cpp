@@ -9,6 +9,7 @@
 // preserved. LIMIT is NOT pushed to SOQL — it is applied residually by DuckDB.
 
 #include "salesforce_scan.hpp"
+#include "salesforce_diag.hpp"
 #include "salesforce_http.hpp"
 #include "salesforce_quota.hpp"
 #include "salesforce_session.hpp"
@@ -180,6 +181,14 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     }
     SetLastTransport(effective, est_rows, reason);
 
+    // Query-cost diagnostics (#v0.4 §4): record the per-scan facts known now.
+    // pages start at 0 for REST, NULL (-1) for Bulk (Bulk paging is internal).
+    DiagRecordScan(bind.object, soql, effective, est_rows, reason,
+                   static_cast<int64_t>(select_fields.size()),
+                   static_cast<int64_t>(bind.fields.size()), bind.pushed_filter_count,
+                   bind.residual_filter_count, bind.pushed_where, effective == "bulk",
+                   effective == "bulk" ? -1 : 0);
+
     if (effective == "bulk") {
         gstate->bulk = true;
         // Quota governor (#v0.4): gate the Bulk job START on the org's API
@@ -215,6 +224,7 @@ static bool ScanAdvancePage(ScanGlobalState &g) {
         SalesforceQueryPage pg = g.session->FetchPage(g.next_path);
         g.pages_fetched++;
         SetLastScanPages(g.pages_fetched);
+        DiagSetPages(static_cast<int64_t>(g.pages_fetched));
         g.page = std::move(pg.records);
         g.cursor = 0;
 
@@ -265,6 +275,7 @@ static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &o
             row++;
         }
         output.SetCardinality(row);
+        DiagAddRowsEmitted(static_cast<int64_t>(row)); // rows delivered to DuckDB
         return;
     }
 
@@ -296,6 +307,7 @@ static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &o
         row++;
     }
     output.SetCardinality(row);
+    DiagAddRowsEmitted(static_cast<int64_t>(row)); // rows delivered to DuckDB
 }
 
 // Predicate pushdown: translate the safe subset of the conjunctive filter list
@@ -312,7 +324,12 @@ static void ScanPushdownComplexFilter(ClientContext &, LogicalGet &get, Function
     for (auto &ci : get.GetColumnIds()) {
         projection_to_field.push_back(ci.GetPrimaryIndex());
     }
+    idx_t before = filters.size();
     PushdownToSoql(bind.fields, projection_to_field, bind.pushed_where, filters);
+    // Filters removed by PushdownToSoql were translated to SOQL; the rest stay
+    // residual for DuckDB. Recorded for salesforce_query_cost() (#v0.4 §4).
+    bind.pushed_filter_count = static_cast<int64_t>(before - filters.size());
+    bind.residual_filter_count = static_cast<int64_t>(filters.size());
 }
 
 } // namespace
