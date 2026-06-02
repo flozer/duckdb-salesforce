@@ -64,6 +64,12 @@ void ResetDescribeCalls();
 void IncDescribeCalls();
 TableFunction GetSalesforceDescribeCallsFunction();
 
+// DEBUG / TEST ONLY. Count of Tooling API schema queries (#v0.6 §6) since the
+// last ATTACH (reset on ATTACH). Proves Tooling fast-schema is used + batched.
+void ResetToolingCalls();
+void IncToolingCalls();
+TableFunction GetSalesforceToolingCallsFunction();
+
 // DEBUG / TEST ONLY. Count of GLOBAL describe (GET /sobjects) calls since the
 // last ATTACH (reset on ATTACH). Proves the object-list discovery runs once and
 // not at ATTACH (#14). Not a stable/public API.

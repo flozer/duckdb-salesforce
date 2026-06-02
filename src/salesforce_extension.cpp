@@ -81,6 +81,10 @@ static void LoadInternal(ExtensionLoader &loader) {
     // (GET /sobjects) since ATTACH (proves object-list discovery, #14).
     loader.RegisterFunction(GetSalesforceGlobalDescribeCallsFunction());
 
+    // salesforce_tooling_calls() — DEBUG/TEST ONLY: Tooling API schema queries
+    // since ATTACH (proves fast-schema use + batching, #v0.6 §6).
+    loader.RegisterFunction(GetSalesforceToolingCallsFunction());
+
     // Test-only hooks for the OAuth exchange (#3). When sf_mock_token_status is
     // non-zero, ATTACH uses a mock HTTP client returning that status and
     // sf_mock_token_body instead of the live transport, so sqllogictest can
@@ -187,6 +191,24 @@ static void LoadInternal(ExtensionLoader &loader) {
                               "Quota governor: in-memory TTL for a cached /limits snapshot, per "
                               "instance_url (default 60; 0 disables caching).",
                               LogicalType::BIGINT, Value::BIGINT(60));
+
+    // Schema discovery source (#v0.6 §6): 'describe' (default, REST sObject
+    // describe — authoritative) or 'tooling' (fast, batched Tooling API
+    // FieldDefinition with per-object REST fallback on error/absent/unmapped).
+    config.AddExtensionOption(
+        "sf_schema_source",
+        "Schema discovery: 'describe' (default, REST, authoritative) or 'tooling' "
+        "(fast batched Tooling API FieldDefinition; falls back to REST describe "
+        "per object on error/absent/ambiguous type; coarser types; fields default "
+        "non-filterable unless Tooling marks them filterable).",
+        LogicalType::VARCHAR, Value("describe"));
+    // Mocked Tooling query (§v0.6). GET .../tooling/query -> this sequence.
+    config.AddExtensionOption("sf_mock_tooling_status",
+                              "TEST ONLY. Statuses for the mocked GET /tooling/query.",
+                              LogicalType::VARCHAR, Value("200"));
+    config.AddExtensionOption("sf_mock_tooling_body",
+                              "TEST ONLY. Body/pages for the mocked GET /tooling/query ('|~|').",
+                              LogicalType::VARCHAR, Value(""));
 
     // Test-only Bulk mock hooks (active when sf_mock_token_status != 0).
     config.AddExtensionOption("sf_mock_bulk_create_status", "TEST ONLY. Bulk job-create HTTP status.",

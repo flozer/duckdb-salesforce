@@ -4,6 +4,8 @@
 #include "salesforce_auth.hpp"
 #include "salesforce_config.hpp"
 
+#include <unordered_map>
+
 namespace duckdb {
 
 struct SalesforceDescribe;
@@ -62,6 +64,17 @@ public:
 
     // GET /services/data/<api_version>/sobjects/<object>/describe -> schema.
     SalesforceDescribe Describe(const string &object);
+
+    // Tooling API fast schema discovery (#v0.6 §6). One (chunked, paginated)
+    // Tooling SOQL over FieldDefinition fetches the fields of MANY objects at
+    // once, mapping the coarse DataType display strings. Compound fields are
+    // dropped; fields with an ambiguous/unmapped DataType get unknown_type=true
+    // so the caller falls back to the authoritative REST Describe per object.
+    // Returns false on a transport/HTTP failure (caller falls back fully).
+    // Result is keyed by lower-cased object name. Increments the tooling-call
+    // counter per Tooling query issued.
+    bool ToolingDescribe(const vector<string> &objects,
+                         std::unordered_map<string, SalesforceDescribe> &out);
 
     // GET /services/data/<api_version>/sobjects -> names of queryable sObjects
     // (global describe; names + flags only, no fields). For object listing (#14).

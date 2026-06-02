@@ -1,0 +1,168 @@
+# name: test/sql/salesforce_tooling.test
+# description: v0.6 §6 — Tooling API fast schema discovery (FieldDefinition)
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true},{"name":"Contact","queryable":true}]}';
+
+# REST describe (authoritative / fallback): Id + Name.
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"A"}]}';
+
+# Tooling FieldDefinition: Account (5 scalar + 1 compound) + Contact.
+statement ok
+SET sf_mock_tooling_body = '{"done":true,"records":[{"EntityDefinition":{"QualifiedApiName":"Account"},"QualifiedApiName":"Id","DataType":"Lookup(Account)","IsCompound":false,"IsFilterable":true},{"EntityDefinition":{"QualifiedApiName":"Account"},"QualifiedApiName":"Name","DataType":"Text(255)","IsCompound":false,"IsFilterable":true},{"EntityDefinition":{"QualifiedApiName":"Account"},"QualifiedApiName":"AnnualRevenue","DataType":"Currency(18,2)","IsCompound":false,"IsFilterable":true},{"EntityDefinition":{"QualifiedApiName":"Account"},"QualifiedApiName":"Active","DataType":"Checkbox","IsCompound":false,"IsFilterable":false},{"EntityDefinition":{"QualifiedApiName":"Account"},"QualifiedApiName":"Created","DataType":"Date/Time","IsCompound":false,"IsFilterable":true},{"EntityDefinition":{"QualifiedApiName":"Account"},"QualifiedApiName":"BillingAddress","DataType":"Address","IsCompound":true,"IsFilterable":false},{"EntityDefinition":{"QualifiedApiName":"Contact"},"QualifiedApiName":"Id","DataType":"Lookup(Contact)","IsCompound":false,"IsFilterable":true},{"EntityDefinition":{"QualifiedApiName":"Contact"},"QualifiedApiName":"Email","DataType":"Email","IsCompound":false,"IsFilterable":true}]}';
+
+# === default (describe): NO Tooling call ====================================
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+statement ok
+SELECT Id FROM sf.Account;
+
+query I
+SELECT calls FROM salesforce_tooling_calls();
+----
+0
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+statement ok
+DETACH sf;
+
+# === tooling: batch warm (Account + Contact) in ONE Tooling query ===========
+statement ok
+SET sf_schema_source = 'tooling';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# Load the object list so the batch warm knows about Contact too.
+query I
+SELECT table_name FROM duckdb_tables() WHERE database_name = 'sf' ORDER BY table_name;
+----
+Account
+Contact
+
+# Resolving Account warms Account + Contact in one Tooling query; coarse types
+# mapped; compound BillingAddress dropped.
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM sf.Account) ORDER BY column_name;
+----
+Active	BOOLEAN
+AnnualRevenue	DECIMAL(18,2)
+Created	TIMESTAMP
+Id	VARCHAR
+Name	VARCHAR
+
+query I
+SELECT calls FROM salesforce_tooling_calls();
+----
+1
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+0
+
+# Contact came from the same batch -> cache hit, no extra Tooling/describe call.
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM sf.Contact) ORDER BY column_name;
+----
+Email	VARCHAR
+Id	VARCHAR
+
+query I
+SELECT calls FROM salesforce_tooling_calls();
+----
+1
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+0
+
+# filterability (verify-then-conservative): Name IsFilterable=true -> pushed;
+# Active IsFilterable=false -> stays residual.
+statement ok
+SELECT Id FROM sf.Account WHERE Name = 'x';
+
+query I
+SELECT pushed_filters = 1 AND where_pushed <> '' FROM salesforce_query_cost();
+----
+true
+
+statement ok
+SELECT Id FROM sf.Account WHERE Active = true;
+
+query I
+SELECT pushed_filters = 0 AND residual_filters = 1 AND where_pushed = ''
+FROM salesforce_query_cost();
+----
+true
+
+statement ok
+DETACH sf;
+
+# === fallback: Tooling HTTP error -> authoritative REST describe ============
+statement ok
+SET sf_mock_tooling_status = '500';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM sf.Account) ORDER BY column_name;
+----
+Id	VARCHAR
+Name	VARCHAR
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_mock_tooling_status = '200';
+
+# === fallback: unmapped DataType (Formula) -> REST describe per object =======
+statement ok
+SET sf_mock_tooling_body = '{"done":true,"records":[{"EntityDefinition":{"QualifiedApiName":"Account"},"QualifiedApiName":"Id","DataType":"Lookup(Account)","IsCompound":false,"IsFilterable":true},{"EntityDefinition":{"QualifiedApiName":"Account"},"QualifiedApiName":"Score","DataType":"Formula (Number)","IsCompound":false,"IsFilterable":false}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# Account has an ambiguous Formula type -> fall back to REST describe (Id, Name).
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM sf.Account) ORDER BY column_name;
+----
+Id	VARCHAR
+Name	VARCHAR
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_schema_source = 'describe';

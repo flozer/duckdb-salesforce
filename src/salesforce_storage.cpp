@@ -138,32 +138,58 @@ public:
             return it->second.get();
         }
 
-        // Cache miss: describe this sObject once and cache its schema below.
-        // (tables_ is the per-catalog in-memory metadata cache; #12.)
-        IncDescribeCalls(); // DEBUG/TEST counter — proves describe-once
         auto client = BuildHttpClientForContext(transaction.GetContext());
         SalesforceSession session(config_, *client);
         session.SetToken(token_);
-        SalesforceDescribe describe = session.Describe(object);
 
-        CreateTableInfo info(catalog.GetName(), this->name, describe.object_name);
-        vector<SalesforceField> queryable;
-        for (auto &f : describe.fields) {
-            if (!IsQueryableField(f)) {
-                continue;
-            }
-            info.columns.AddColumn(ColumnDefinition(f.name, f.duckdb_type));
-            if (!f.nillable) {
-                info.constraints.push_back(
-                    make_uniq<NotNullConstraint>(LogicalIndex(queryable.size())));
-            }
-            queryable.push_back(f);
+        // Schema source (#v0.6 §6): 'describe' (default, REST, authoritative) or
+        // 'tooling' (fast batched FieldDefinition, with per-object REST fallback).
+        string schema_source = "describe";
+        Value sv;
+        if (transaction.GetContext().TryGetCurrentSetting("sf_schema_source", sv) && !sv.IsNull()) {
+            schema_source = StringUtil::Lower(sv.ToString());
         }
-        auto entry = make_uniq<SalesforceTableEntry>(catalog, *this, info, config_, token_,
-                                                     std::move(queryable));
-        auto *ptr = entry.get();
-        tables_.emplace(key, std::move(entry));
-        return ptr;
+
+        if (schema_source == "tooling") {
+            // Batch-warm: the requested object + any already-listed objects not
+            // yet described, in one/few Tooling queries.
+            vector<string> batch;
+            batch.push_back(object);
+            for (auto &kv : listing_) {
+                if (tables_.find(kv.first) == tables_.end() && kv.first != key) {
+                    batch.push_back(kv.second->name);
+                }
+            }
+            std::unordered_map<string, SalesforceDescribe> got;
+            if (session.ToolingDescribe(batch, got)) {
+                for (auto &kv : got) {
+                    if (tables_.find(kv.first) != tables_.end() || kv.second.fields.empty()) {
+                        continue;
+                    }
+                    bool any_unknown = false;
+                    for (auto &f : kv.second.fields) {
+                        if (f.unknown_type) {
+                            any_unknown = true;
+                            break;
+                        }
+                    }
+                    if (any_unknown) {
+                        continue; // ambiguous type -> leave for REST fallback (lazy)
+                    }
+                    BuildAndCacheEntry(kv.second);
+                }
+                auto hit = tables_.find(key);
+                if (hit != tables_.end()) {
+                    return hit->second.get(); // requested object served from Tooling
+                }
+            }
+            // Tooling failed / object absent / ambiguous type -> authoritative REST.
+        }
+
+        // REST describe (default + fallback): describe once and cache (#12).
+        IncDescribeCalls(); // DEBUG/TEST counter — proves describe-once
+        SalesforceDescribe describe = session.Describe(object);
+        return BuildAndCacheEntry(describe);
     }
 
     optional_ptr<CatalogEntry> CreateFunction(CatalogTransaction, CreateFunctionInfo &) override { Unsupported("CREATE FUNCTION"); }
@@ -180,6 +206,29 @@ public:
     void Alter(CatalogTransaction, AlterInfo &) override { Unsupported("ALTER"); }
 
 private:
+    // Build a table entry from a described schema and insert it into the cache.
+    // Caller MUST hold lock_. Drops compound fields; sets NOT NULL constraints.
+    SalesforceTableEntry *BuildAndCacheEntry(const SalesforceDescribe &describe) {
+        CreateTableInfo info(catalog.GetName(), this->name, describe.object_name);
+        vector<SalesforceField> queryable;
+        for (auto &f : describe.fields) {
+            if (!IsQueryableField(f)) {
+                continue;
+            }
+            info.columns.AddColumn(ColumnDefinition(f.name, f.duckdb_type));
+            if (!f.nillable) {
+                info.constraints.push_back(
+                    make_uniq<NotNullConstraint>(LogicalIndex(queryable.size())));
+            }
+            queryable.push_back(f);
+        }
+        auto entry = make_uniq<SalesforceTableEntry>(catalog, *this, info, config_, token_,
+                                                     std::move(queryable));
+        auto *ptr = entry.get();
+        tables_.emplace(StringUtil::Lower(describe.object_name), std::move(entry));
+        return ptr;
+    }
+
     void EmitResolved(CatalogType type, const std::function<void(CatalogEntry &)> &callback) {
         if (type != CatalogType::TABLE_ENTRY) {
             return;
@@ -256,6 +305,7 @@ public:
     void Initialize(bool) override {
         ResetDescribeCalls();       // DEBUG/TEST: baseline per-catalog describe counter
         ResetGlobalDescribeCalls(); // DEBUG/TEST: baseline global describe counter
+        ResetToolingCalls();        // DEBUG/TEST: baseline Tooling-query counter
         CreateSchemaInfo info;
         info.schema = SALESFORCE_MAIN_SCHEMA;
         info.on_conflict = OnCreateConflict::ERROR_ON_CONFLICT;

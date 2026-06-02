@@ -161,6 +161,33 @@ It complements — does not replace — the granular `salesforce_last_soql()`,
 > **Last-scan, best-effort.** It reflects only the most recent scan in the
 > process and is overwritten by the next one; scans are single-threaded.
 
+## Fast schema discovery: Tooling API (v0.6 §6)
+
+By default each sObject's schema comes from one **REST describe** (authoritative).
+For orgs where you touch many tables, `sf_schema_source = 'tooling'` switches
+discovery to the **Tooling API** (`FieldDefinition`), which fetches the fields of
+**many objects in one query** — collapsing N describes into one/few calls.
+
+```sql
+SET sf_schema_source = 'tooling';   -- opt-in; default is 'describe'
+SELECT table_name FROM duckdb_tables() WHERE database_name = 'sf';  -- warms the list
+SELECT * FROM sf.Account;           -- resolves Account (+ other listed objects) in one Tooling query
+SELECT calls FROM salesforce_tooling_calls();   -- proves Tooling use / batching
+```
+
+Caveats (correctness is preserved — REST describe is always the safety net):
+
+- **Coarser types.** Tooling `DataType` is a display string (`Text(255)`,
+  `Number(18,0)`, `Date/Time`, …); it is mapped best-effort. An **ambiguous /
+  unmapped** type (`Formula`, `Roll-Up Summary`, unknown) makes that object
+  **fall back to REST describe**. Tooling failure or an object absent from the
+  result also falls back, per object.
+- **Reduced pushdown.** `FieldDefinition` filterability is treated
+  conservatively: a field is only pushable if Tooling marks it filterable —
+  otherwise predicates stay **residual** (correct, just less pushdown).
+- Compound fields are dropped, same as describe.
+- Default stays `'describe'` (authoritative) — `'tooling'` is purely opt-in.
+
 ## Aggregate pushdown: COUNT (v0.5 §5)
 
 A scan that needs only the **row count and zero real columns** — `COUNT(*)`,

@@ -13,9 +13,11 @@
 
 #include "salesforce_csv.hpp"
 #include "salesforce_soql.hpp"
+#include "salesforce_types.hpp"
 #include "salesforce_url.hpp"
 
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/string_util.hpp"
 
 #include <chrono>
 #include <thread>
@@ -195,6 +197,108 @@ SalesforceDescribe SalesforceSession::Describe(const string &object) {
     // instead of the top-level one.
     d.object_name = object;
     return d;
+}
+
+bool SalesforceSession::ToolingDescribe(const vector<string> &objects,
+                                        std::unordered_map<string, SalesforceDescribe> &out) {
+    if (objects.empty()) {
+        return true;
+    }
+    // Bound the IN list so the Tooling WHERE stays small ("few queries").
+    constexpr size_t kChunk = 100;
+    for (size_t start = 0; start < objects.size(); start += kChunk) {
+        size_t end = std::min(objects.size(), start + kChunk);
+        string in_list;
+        for (size_t i = start; i < end; i++) {
+            // Object API names are [A-Za-z0-9_], but escape defensively.
+            string name = objects[i];
+            string esc;
+            for (char c : name) {
+                if (c == '\\' || c == '\'') {
+                    esc.push_back('\\');
+                }
+                esc.push_back(c);
+            }
+            in_list += (i > start ? ",'" : "'");
+            in_list += esc;
+            in_list += "'";
+        }
+        string soql = "SELECT EntityDefinition.QualifiedApiName, QualifiedApiName, DataType, "
+                      "IsCompound, IsFilterable FROM FieldDefinition WHERE "
+                      "EntityDefinition.QualifiedApiName IN (" +
+                      in_list + ")";
+        string path =
+            "/services/data/" + config_.api_version + "/tooling/query?q=" + UrlEncodeComponent(soql);
+
+        std::unordered_set<string> seen;
+        int guard = 0;
+        while (true) {
+            IncToolingCalls(); // one Tooling HTTP query (chunk page)
+            HttpResponse resp = AuthorizedSend(false, path, "");
+            if (resp.status != 200) {
+                return false; // caller falls back to REST describe entirely
+            }
+            for (auto &rec : sfjson::GetObjectArray(resp.body, "records")) {
+                // Relationship field comes back nested:
+                // {"EntityDefinition":{"QualifiedApiName":...},"QualifiedApiName":...}.
+                // The nested object holds the OBJECT name; the top-level
+                // QualifiedApiName holds the FIELD name. A flat key reader would
+                // pick the nested one first, so read the object name from the
+                // nested block and the field keys from the record with that
+                // block stripped out.
+                string ent = ExtractObject(rec, "EntityDefinition");
+                string obj = ent.empty() ? string() : sfjson::GetString(ent, "QualifiedApiName");
+                string rec_flat = rec;
+                size_t ep = rec_flat.find("\"EntityDefinition\"");
+                if (ep != string::npos) {
+                    size_t br = rec_flat.find('{', ep);
+                    if (br != string::npos) {
+                        int depth = 0;
+                        size_t i = br;
+                        for (; i < rec_flat.size(); i++) {
+                            if (rec_flat[i] == '{') {
+                                depth++;
+                            } else if (rec_flat[i] == '}' && --depth == 0) {
+                                i++;
+                                break;
+                            }
+                        }
+                        rec_flat.erase(ep, i - ep);
+                    }
+                }
+                string fname = sfjson::GetString(rec_flat, "QualifiedApiName");
+                if (obj.empty() || fname.empty()) {
+                    continue;
+                }
+                if (sfjson::GetBool(rec_flat, "IsCompound", false)) {
+                    continue; // compound fields are not SOQL-selectable — drop
+                }
+                SalesforceField f;
+                f.name = fname;
+                f.sf_type = sfjson::GetString(rec_flat, "DataType");
+                bool ok = true;
+                f.duckdb_type = MapToolingDataType(f.sf_type, &ok);
+                f.unknown_type = !ok; // ambiguous -> caller falls back per object
+                // verify-then-conservative: only filterable if Tooling says so.
+                f.filterable = sfjson::GetBool(rec_flat, "IsFilterable", false);
+                auto &desc = out[StringUtil::Lower(obj)];
+                if (desc.object_name.empty()) {
+                    desc.object_name = obj;
+                }
+                desc.fields.push_back(std::move(f));
+            }
+            bool done = sfjson::GetBool(resp.body, "done", true);
+            string next = sfjson::GetString(resp.body, "nextRecordsUrl");
+            if (done || next.empty()) {
+                break;
+            }
+            if (++guard > 100000 || !seen.insert(next).second) {
+                break; // pagination guard
+            }
+            path = next;
+        }
+    }
+    return true;
 }
 
 // JSON-escape a string for embedding the SOQL in the job-create body.
