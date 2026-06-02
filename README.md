@@ -74,12 +74,30 @@ Pinned via the `duckdb` and `extension-ci-tools` submodules to the
 - `duckdb` @ `14eca11bd9` (release **v1.5.3**)
 - `extension-ci-tools` @ `18c54662`
 
-DuckDB extensions are **version-locked**: a `.duckdb_extension` built against
-v1.5.3 loads in DuckDB v1.5.3. Supporting newer DuckDB releases ("1.5.3
-onward") means rebuilding per release — tracked as a build-matrix task. The
-`StorageExtension::Register` path and the `attach` + `create_transaction_manager`
-dispatch requirement are verified against this build (see
-`src/salesforce_storage.cpp`).
+DuckDB extensions are **version-locked**: a `.duckdb_extension` built against a
+given DuckDB release only loads in that release. "Supporting 1.5.3 onward" means
+**rebuilding + testing per release**, not shipping one universal binary.
+
+## Supported DuckDB versions
+
+| DuckDB release | Status |
+| --- | --- |
+| **v1.5.3** | ✅ baseline (committed submodule pin), build + offline suite green |
+| v1.5.2 | ✅ build + offline suite green (matrix) |
+
+The repo's `duckdb` submodule pins **v1.5.3** (`14eca11bd9`); `extension-ci-tools`
+pins `18c54662`. To build/test against a matrix of releases locally (each in its
+own `build/matrix/<tag>` dir, the committed pin restored at the end):
+
+```powershell
+pwsh -File scripts/build_matrix.ps1            # default: v1.5.2, v1.5.3
+```
+
+Newer releases are added to the matrix as they ship; if a future release needs
+an API adaptation, that is tracked as its own issue (the baseline must stay
+green). The `StorageExtension::Register` path and the `attach` +
+`create_transaction_manager` dispatch requirement are verified against this
+build (see `src/salesforce_storage.cpp`).
 
 ## Testing
 
