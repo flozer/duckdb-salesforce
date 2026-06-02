@@ -4,6 +4,8 @@ How to create a Connected App and mint a **refresh token** so you can run the
 [SMOKE.md](../SMOKE.md) validation. **Sandbox / scratch / Developer Edition
 only.** Never paste any secret into an issue, chat, log, or commit.
 
+> 🇧🇷 Versão em português: [CONNECTED_APP.pt-BR.md](CONNECTED_APP.pt-BR.md)
+
 ## Why not username + password?
 
 The username-password OAuth flow is **not usable** here:
