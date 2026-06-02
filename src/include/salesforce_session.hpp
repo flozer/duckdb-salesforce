@@ -16,6 +16,13 @@ struct SalesforceQueryResult {
     idx_t page_count = 0;
 };
 
+// One page of a SOQL query (used by the lazy/streaming scan, #11).
+struct SalesforceQueryPage {
+    vector<string> records;
+    string next_path; // nextRecordsUrl ("" when there are no more pages)
+    bool done = true;
+};
+
 // A live (mock-injectable) session against one Salesforce org: holds the
 // OAuth token and performs authenticated GETs with a single
 // 401 -> refresh -> retry. Token is in memory only and never logged.
@@ -37,10 +44,18 @@ public:
     // GET /services/data/<api_version>/sobjects/<object>/describe -> schema.
     SalesforceDescribe Describe(const string &object);
 
-    // Run a SOQL query: GET /services/data/<api_version>/query?q=<encoded>, then
-    // follow nextRecordsUrl (opaque, used verbatim) until done. Records are
-    // collected in fetch order. Guards against pagination loops.
+    // Run a SOQL query eagerly: fetch every page (used by salesforce_query #6).
+    // Implemented over FetchPage. Guards against pagination loops.
     SalesforceQueryResult Query(const string &soql);
+
+    // Initial query path for a SOQL string:
+    // /services/data/<api_version>/query?q=<url-encoded>.
+    string QueryPath(const string &soql) const;
+
+    // Fetch ONE page — the initial query path or an opaque nextRecordsUrl —
+    // authenticated GET with 401 -> refresh -> retry. The caller owns
+    // pagination state + loop guards (the lazy scan in #11 uses this).
+    SalesforceQueryPage FetchPage(const string &path);
 
 private:
     // Authenticated GET returning the 200 body, or throwing a clear,

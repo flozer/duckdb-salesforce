@@ -1,0 +1,84 @@
+# name: test/sql/salesforce_lazy.test
+# description: v0.2 #11 — lazy/streaming scan: small LIMIT stops before later pages
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+
+# Two pages: page 1 (done=false + nextRecordsUrl, 10 rows), page 2 (done=true, 2 rows).
+statement ok
+SET sf_mock_query_status = '200,200';
+
+statement ok
+SET sf_mock_query_body = '{"done":false,"nextRecordsUrl":"/services/data/v60.0/query/01g-2000","records":[{"Id":"001"},{"Id":"002"},{"Id":"003"},{"Id":"004"},{"Id":"005"},{"Id":"006"},{"Id":"007"},{"Id":"008"},{"Id":"009"},{"Id":"010"}]}|~|{"done":true,"records":[{"Id":"011"},{"Id":"012"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- LIMIT 5 returns 5 rows and fetches only the FIRST page ------------------
+query I
+SELECT COUNT(*) FROM (SELECT Id FROM sf.Account LIMIT 5);
+----
+5
+
+query I
+SELECT pages FROM salesforce_last_scan_pages();
+----
+1
+
+# --- no LIMIT: full scan walks both pages, order preserved -------------------
+query I
+SELECT Id FROM sf.Account;
+----
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+
+query I
+SELECT pages FROM salesforce_last_scan_pages();
+----
+2
+
+# --- COUNT(*) still walks all pages -----------------------------------------
+query I
+SELECT COUNT(*) FROM sf.Account;
+----
+12
+
+query I
+SELECT pages FROM salesforce_last_scan_pages();
+----
+2
+
+# --- 401 on the second page mid-pagination: re-auth + continue --------------
+# GET page1 (200), GET page2 -> 401 -> refresh -> GET page2 (200).
+statement ok
+SET sf_mock_query_status = '200,401,200';
+
+statement ok
+SET sf_mock_query_body = '{"done":false,"nextRecordsUrl":"/services/data/v60.0/query/01g-2000","records":[{"Id":"001"}]}|~||~|{"done":true,"records":[{"Id":"002"}]}';
+
+query I
+SELECT COUNT(*) FROM sf.Account;
+----
+2
+
+statement ok
+DETACH sf;

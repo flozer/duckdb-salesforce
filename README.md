@@ -41,7 +41,7 @@ applied by DuckDB residually, so results are always correct.
 | `OR`, `IN`, `LIKE`, functions, casts, nested expr | ⛔ residual (DuckDB) |
 | Predicate on a non-filterable field | ⛔ residual |
 | `WHERE` longer than 4000 chars | ⛔ residualised (guard) |
-| `LIMIT n` | ⛔ residual — this DuckDB build does not expose the query LIMIT to a table function (applied by DuckDB after the scan) |
+| `LIMIT n` | ⚠️ not pushed to SOQL (this DuckDB build exposes no LIMIT hook), **but the scan is lazy** — it streams pages and may stop before fetching later pages, so a small LIMIT no longer reads the whole object |
 
 ## Architecture
 
@@ -104,9 +104,10 @@ Known and intentional for this cut (see `docs/ARCHITECTURE.md` Appendix C):
 - **Live validation is manual-only.** Run only against an org you are
   authorized to use; automated CI never contacts Salesforce or uses secrets.
   Not production-hardened.
-- **`LIMIT` is residual**, not SOQL pushdown — this DuckDB build does not expose
-  the query `LIMIT` to a table function, so DuckDB applies it after the scan
-  (correct, but the full page is still fetched).
+- **`LIMIT` is not pushed to SOQL** (this DuckDB build exposes no LIMIT hook),
+  but the **scan is lazy**: it streams query pages and may stop before fetching
+  later pages, so a small `LIMIT` no longer reads the whole object. A full
+  `COUNT(*)`/unfiltered scan still walks every page.
 - **`SHOW TABLES` is lazy / partial.** Objects resolve on first reference; there
   is no upfront global object listing, so the catalog only lists sObjects
   already referenced this session.

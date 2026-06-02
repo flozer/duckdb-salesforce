@@ -38,4 +38,10 @@ void PushdownToSoql(const vector<SalesforceField> &fields,
 void SetLastSoql(const string &soql);
 TableFunction GetSalesforceLastSoqlFunction();
 
+// DEBUG / TEST ONLY. Number of query pages the most recent scan fetched, so
+// tests can prove the lazy/streaming scan (#11) stopped before later pages.
+// Not a stable/public API.
+void SetLastScanPages(idx_t pages);
+TableFunction GetSalesforceLastScanPagesFunction();
+
 } // namespace duckdb

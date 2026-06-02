@@ -1,16 +1,20 @@
-// Catalog-driven sObject scan (issue #8).
+// Catalog-driven sObject scan (issues #8/#9/#11).
 //
-// InitGlobal runs the SOQL query for the bound object (SELECT <all queryable
-// fields> FROM <object>) via SalesforceSession (auth token reused from ATTACH,
-// pagination + 401 refresh from #6), collecting raw JSON records. The scan
-// function decodes each record into the output chunk with AppendJsonValue (#7).
-// No pushdown — the full field list is always selected (pushdown is #9).
+// InitGlobal builds the SOQL (projection #9 + WHERE #9) and keeps the session +
+// pagination state alive, but fetches NOTHING yet. ScanFunction streams pages
+// LAZILY (#11): it fetches the next page (queryMore) only when the current page
+// is exhausted and the chunk still needs rows. So a query with a small LIMIT
+// makes DuckDB stop pulling after the first chunk and later pages are never
+// fetched. Records decode with AppendJsonValue (#7); 401 refresh + loop guards
+// preserved. LIMIT is NOT pushed to SOQL — it is applied residually by DuckDB.
 
 #include "salesforce_scan.hpp"
 #include "salesforce_http.hpp"
 #include "salesforce_session.hpp"
 #include "salesforce_soql.hpp"
 #include "salesforce_value.hpp"
+
+#include <unordered_set>
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -38,9 +42,22 @@ bool SalesforceScanBindData::Equals(const FunctionData &other_p) const {
 
 namespace {
 
+// Bounds a misbehaving server cursor (same ceiling as the eager Query path).
+static constexpr idx_t kScanMaxPages = 1000000;
+
 struct ScanGlobalState : public GlobalTableFunctionState {
-    vector<string> records;
-    idx_t cursor = 0;
+    // Declared before `session` so the client outlives the session that
+    // references it (destruction is reverse declaration order).
+    unique_ptr<SalesforceHttpClient> client;
+    unique_ptr<SalesforceSession> session;
+
+    string next_path;        // initial query path, then each nextRecordsUrl
+    bool done = false;       // no more pages after the current one is drained
+    vector<string> page;     // current page's raw records
+    idx_t cursor = 0;        // index into `page`
+    idx_t pages_fetched = 0;
+    std::unordered_set<string> seen; // queryMore cursors seen (loop guard)
+
     // DuckDB-level projection: which source field each output column maps to.
     vector<column_t> column_ids;
     idx_t MaxThreads() const override {
@@ -81,20 +98,72 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     string soql = BuildSelectSoql(bind.object, select_fields, bind.pushed_where, optional_idx());
     SetLastSoql(soql);
 
-    auto client = BuildHttpClientForContext(context);
-    SalesforceSession session(bind.config, *client);
-    session.SetToken(bind.token); // reuse ATTACH token (refreshes on 401)
-    gstate->records = session.Query(soql).records;
+    // Build the session + initial page path, but fetch NOTHING yet (lazy, #11).
+    gstate->client = BuildHttpClientForContext(context);
+    gstate->session = make_uniq<SalesforceSession>(bind.config, *gstate->client);
+    gstate->session->SetToken(bind.token); // reuse ATTACH token (refreshes on 401)
+    gstate->next_path = gstate->session->QueryPath(soql);
+    SetLastScanPages(0);
     return std::move(gstate);
+}
+
+// Fetch the next page into gstate. Returns false when there are no more rows.
+// Skips empty-but-not-done pages (advancing the cursor) and guards against a
+// repeated nextRecordsUrl or runaway page count.
+static bool ScanAdvancePage(ScanGlobalState &g) {
+    while (true) {
+        if (g.done) {
+            return false;
+        }
+        SalesforceQueryPage pg = g.session->FetchPage(g.next_path);
+        g.pages_fetched++;
+        SetLastScanPages(g.pages_fetched);
+        g.page = std::move(pg.records);
+        g.cursor = 0;
+
+        bool last = pg.done || pg.next_path.empty();
+        if (!last) {
+            if (g.pages_fetched >= kScanMaxPages) {
+                throw IOException("salesforce scan: exceeded the maximum page count (%llu).",
+                                  static_cast<unsigned long long>(kScanMaxPages));
+            }
+            if (!g.seen.insert(pg.next_path).second) {
+                throw IOException(
+                    "salesforce scan: pagination loop detected (nextRecordsUrl repeated).");
+            }
+            g.next_path = pg.next_path;
+        } else {
+            g.done = true;
+        }
+
+        if (!g.page.empty()) {
+            return true;
+        }
+        if (g.done) {
+            return false; // empty final page
+        }
+        // empty page but more to come -> loop to fetch the next one
+    }
 }
 
 static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
     auto &bind = data.bind_data->Cast<SalesforceScanBindData>();
     auto &gstate = data.global_state->Cast<ScanGlobalState>();
 
+    // Fetch the next page only when the current one is fully drained. Emit at
+    // PAGE granularity (one page per call, capped at the chunk size): this lets
+    // DuckDB's LIMIT operator stop pulling between calls, so a small LIMIT never
+    // triggers the next-page fetch.
+    if (gstate.cursor >= gstate.page.size()) {
+        if (!ScanAdvancePage(gstate)) {
+            output.SetCardinality(0);
+            return;
+        }
+    }
+
     idx_t row = 0;
-    while (row < STANDARD_VECTOR_SIZE && gstate.cursor < gstate.records.size()) {
-        const string &record = gstate.records[gstate.cursor];
+    while (row < STANDARD_VECTOR_SIZE && gstate.cursor < gstate.page.size()) {
+        const string &record = gstate.page[gstate.cursor];
         // One output vector per projected column; a column_id beyond the field
         // list is a virtual column (e.g. the COUNT(*) row marker) -> set NULL.
         for (idx_t j = 0; j < gstate.column_ids.size(); j++) {

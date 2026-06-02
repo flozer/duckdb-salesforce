@@ -93,26 +93,36 @@ SalesforceDescribe SalesforceSession::Describe(const string &object) {
     return d;
 }
 
+string SalesforceSession::QueryPath(const string &soql) const {
+    return "/services/data/" + config_.api_version + "/query?q=" + UrlEncodeComponent(soql);
+}
+
+SalesforceQueryPage SalesforceSession::FetchPage(const string &path) {
+    string body = AuthorizedGet(path);
+    SalesforceQueryPage pg;
+    for (auto &rec : sfjson::GetObjectArray(body, "records")) {
+        pg.records.push_back(std::move(rec));
+    }
+    pg.done = sfjson::GetBool(body, "done", true);
+    pg.next_path = sfjson::GetString(body, "nextRecordsUrl"); // opaque; used verbatim
+    return pg;
+}
+
 SalesforceQueryResult SalesforceSession::Query(const string &soql) {
-    // Defensive ceiling: at the default 2,000 records/page this is ~2 billion
-    // rows — far beyond any real query, but bounds a misbehaving cursor.
+    // Eager: fetch every page. Defensive ceiling bounds a misbehaving cursor.
     constexpr idx_t kMaxPages = 1000000;
 
     SalesforceQueryResult result;
-    string path =
-        "/services/data/" + config_.api_version + "/query?q=" + UrlEncodeComponent(soql);
-
+    string path = QueryPath(soql);
     std::unordered_set<string> seen_cursors;
     while (true) {
-        string body = AuthorizedGet(path);
-        for (auto &rec : sfjson::GetObjectArray(body, "records")) {
+        SalesforceQueryPage pg = FetchPage(path);
+        for (auto &rec : pg.records) {
             result.records.push_back(std::move(rec));
         }
         result.page_count++;
 
-        bool done = sfjson::GetBool(body, "done", true);
-        string next = sfjson::GetString(body, "nextRecordsUrl");
-        if (done || next.empty()) {
+        if (pg.done || pg.next_path.empty()) {
             break;
         }
         if (result.page_count >= kMaxPages) {
@@ -120,13 +130,12 @@ SalesforceQueryResult SalesforceSession::Query(const string &soql) {
                 "salesforce query aborted: exceeded the maximum page count (%llu).",
                 static_cast<unsigned long long>(kMaxPages));
         }
-        if (!seen_cursors.insert(next).second) {
+        if (!seen_cursors.insert(pg.next_path).second) {
             throw IOException(
                 "salesforce query aborted: pagination loop detected (nextRecordsUrl "
                 "repeated).");
         }
-        // nextRecordsUrl is an opaque server-provided path — used verbatim.
-        path = next;
+        path = pg.next_path;
     }
     return result;
 }

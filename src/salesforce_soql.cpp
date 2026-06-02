@@ -282,4 +282,59 @@ TableFunction GetSalesforceLastSoqlFunction() {
     return TableFunction("salesforce_last_soql", {}, LastSoqlFunction, LastSoqlBind, LastSoqlInit);
 }
 
+// --- last-scan-pages diagnostic (DEBUG/TEST ONLY) ----------------------------
+
+static std::mutex g_pages_lock;
+static int64_t g_last_scan_pages = 0;
+
+void SetLastScanPages(idx_t pages) {
+    std::lock_guard<std::mutex> g(g_pages_lock);
+    g_last_scan_pages = static_cast<int64_t>(pages);
+}
+
+namespace {
+
+struct LastPagesGlobalState : public GlobalTableFunctionState {
+    bool emitted = false;
+    idx_t MaxThreads() const override {
+        return 1;
+    }
+};
+
+static unique_ptr<FunctionData> LastPagesBind(ClientContext &, TableFunctionBindInput &,
+                                              vector<LogicalType> &return_types,
+                                              vector<string> &names) {
+    names = {"pages"};
+    return_types = {LogicalType::BIGINT};
+    return nullptr;
+}
+
+static unique_ptr<GlobalTableFunctionState> LastPagesInit(ClientContext &,
+                                                          TableFunctionInitInput &) {
+    return make_uniq<LastPagesGlobalState>();
+}
+
+static void LastPagesFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &gstate = data.global_state->Cast<LastPagesGlobalState>();
+    if (gstate.emitted) {
+        output.SetCardinality(0);
+        return;
+    }
+    int64_t pages;
+    {
+        std::lock_guard<std::mutex> g(g_pages_lock);
+        pages = g_last_scan_pages;
+    }
+    FlatVector::GetData<int64_t>(output.data[0])[0] = pages;
+    gstate.emitted = true;
+    output.SetCardinality(1);
+}
+
+} // namespace
+
+TableFunction GetSalesforceLastScanPagesFunction() {
+    return TableFunction("salesforce_last_scan_pages", {}, LastPagesFunction, LastPagesBind,
+                         LastPagesInit);
+}
+
 } // namespace duckdb

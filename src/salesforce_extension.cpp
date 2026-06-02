@@ -47,6 +47,10 @@ static void LoadInternal(ExtensionLoader &loader) {
     // generated (projection + predicate pushdown). Used by tests.
     loader.RegisterFunction(GetSalesforceLastSoqlFunction());
 
+    // salesforce_last_scan_pages() — DEBUG/TEST ONLY: query pages the most
+    // recent scan fetched (proves lazy pagination, #11). Not a public API.
+    loader.RegisterFunction(GetSalesforceLastScanPagesFunction());
+
     // Test-only hooks for the OAuth exchange (#3). When sf_mock_token_status is
     // non-zero, ATTACH uses a mock HTTP client returning that status and
     // sf_mock_token_body instead of the live transport, so sqllogictest can
