@@ -178,12 +178,15 @@ class ScriptedMockHttpClient final : public SalesforceHttpClient {
 public:
     ScriptedMockHttpClient(int token_status, string token_body, vector<int> describe_statuses,
                            vector<string> describe_bodies, vector<int> query_statuses,
-                           vector<string> query_bodies)
+                           vector<string> query_bodies, vector<int> global_statuses,
+                           vector<string> global_bodies)
         : token_status_(token_status), token_body_(std::move(token_body)),
           describe_statuses_(std::move(describe_statuses)),
           describe_bodies_(std::move(describe_bodies)),
           query_statuses_(std::move(query_statuses)),
-          query_bodies_(std::move(query_bodies)) {
+          query_bodies_(std::move(query_bodies)),
+          global_statuses_(std::move(global_statuses)),
+          global_bodies_(std::move(global_bodies)) {
     }
 
     HttpResponse Post(const HttpRequest & /*request*/) override {
@@ -195,9 +198,13 @@ public:
     }
 
     HttpResponse Get(const HttpRequest &request) override {
-        bool is_describe = request.url.find("/describe") != string::npos;
-        if (is_describe) {
+        // describe URL (.../sobjects/<obj>/describe) contains both tokens, so
+        // check /describe first; then /sobjects (global describe); else query.
+        if (request.url.find("/describe") != string::npos) {
             return Step(describe_statuses_, describe_bodies_, describe_index_);
+        }
+        if (request.url.find("/sobjects") != string::npos) {
+            return Step(global_statuses_, global_bodies_, global_index_);
         }
         return Step(query_statuses_, query_bodies_, query_index_);
     }
@@ -219,8 +226,11 @@ private:
     vector<string> describe_bodies_;
     vector<int> query_statuses_;
     vector<string> query_bodies_;
+    vector<int> global_statuses_;
+    vector<string> global_bodies_;
     size_t describe_index_ = 0;
     size_t query_index_ = 0;
+    size_t global_index_ = 0;
 };
 
 // Split a string on a multi-char sentinel. An empty input yields one empty
@@ -292,9 +302,15 @@ unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &contex
             q_status.push_back(200);
         }
         vector<string> q_body = SplitOn(SettingStr(context, "sf_mock_query_body"), "|~|");
+        vector<int> g_status = ParseIntCsv(SettingStr(context, "sf_mock_sobjects_status"));
+        if (g_status.empty()) {
+            g_status.push_back(200);
+        }
+        vector<string> g_body = SplitOn(SettingStr(context, "sf_mock_sobjects_body"), "|~|");
         return make_uniq_base<SalesforceHttpClient, ScriptedMockHttpClient>(
             static_cast<int>(token_status), SettingStr(context, "sf_mock_token_body"),
-            std::move(d_status), std::move(d_body), std::move(q_status), std::move(q_body));
+            std::move(d_status), std::move(d_body), std::move(q_status), std::move(q_body),
+            std::move(g_status), std::move(g_body));
     }
     return CreateLiveHttpClient();
 }

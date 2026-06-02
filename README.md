@@ -108,9 +108,12 @@ Known and intentional for this cut (see `docs/ARCHITECTURE.md` Appendix C):
   but the **scan is lazy**: it streams query pages and may stop before fetching
   later pages, so a small `LIMIT` no longer reads the whole object. A full
   `COUNT(*)`/unfiltered scan still walks every page.
-- **`SHOW TABLES` is lazy / partial.** Objects resolve on first reference; there
-  is no upfront global object listing, so the catalog only lists sObjects
-  already referenced this session.
+- **Object listing** is available via `duckdb_tables()` and
+  `information_schema.tables` — the first listing runs one global describe
+  (`GET /sobjects`, queryable objects only), cached until DETACH. **Columns are
+  lazy**: `information_schema.columns` is empty for an object until it is
+  referenced (then a per-object describe fills its schema). `SHOW ALL TABLES`
+  does not show name-only (unreferenced) entries — use `duckdb_tables()`.
 - **REST only.** No Bulk API 2.0, GraphQL, Tooling or Metadata API yet; no
   relationship/join traversal.
 - **Metadata cache is in-memory only.** Each sObject's schema (describe) is

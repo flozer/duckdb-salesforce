@@ -93,6 +93,22 @@ SalesforceDescribe SalesforceSession::Describe(const string &object) {
     return d;
 }
 
+vector<string> SalesforceSession::GlobalDescribe() {
+    string path = "/services/data/" + config_.api_version + "/sobjects";
+    string body = AuthorizedGet(path);
+    vector<string> names;
+    for (auto &obj : sfjson::GetObjectArray(body, "sobjects")) {
+        if (!sfjson::GetBool(obj, "queryable", false)) {
+            continue; // list only objects we can SOQL-query
+        }
+        string name = sfjson::GetString(obj, "name");
+        if (!name.empty()) {
+            names.push_back(name);
+        }
+    }
+    return names;
+}
+
 string SalesforceSession::QueryPath(const string &soql) const {
     return "/services/data/" + config_.api_version + "/query?q=" + UrlEncodeComponent(soql);
 }

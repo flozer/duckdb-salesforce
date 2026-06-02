@@ -44,6 +44,10 @@ public:
     // GET /services/data/<api_version>/sobjects/<object>/describe -> schema.
     SalesforceDescribe Describe(const string &object);
 
+    // GET /services/data/<api_version>/sobjects -> names of queryable sObjects
+    // (global describe; names + flags only, no fields). For object listing (#14).
+    vector<string> GlobalDescribe();
+
     // Run a SOQL query eagerly: fetch every page (used by salesforce_query #6).
     // Implemented over FetchPage. Guards against pagination loops.
     SalesforceQueryResult Query(const string &soql);

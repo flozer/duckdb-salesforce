@@ -109,11 +109,15 @@ public:
         : SchemaCatalogEntry(catalog, info), config_(std::move(config)),
           token_(std::move(token)) {}
 
-    void Scan(ClientContext &, CatalogType type,
+    void Scan(ClientContext &context, CatalogType type,
               const std::function<void(CatalogEntry &)> &callback) override {
+        if (type == CatalogType::TABLE_ENTRY) {
+            EnsureObjectListLoaded(context); // one global describe (#14), cached
+        }
         EmitResolved(type, callback);
     }
     void Scan(CatalogType type, const std::function<void(CatalogEntry &)> &callback) override {
+        // No context to fetch the object list here; emit whatever is cached.
         EmitResolved(type, callback);
     }
 
@@ -181,9 +185,41 @@ private:
             return;
         }
         std::lock_guard<std::mutex> g(lock_);
+        // Resolved objects: full-schema entries.
         for (auto &kv : tables_) {
             callback(*kv.second);
         }
+        // Discovered-but-unreferenced objects: name-only (0-column) listing
+        // entries, skipping any already resolved above (avoid duplicates).
+        for (auto &kv : listing_) {
+            if (tables_.find(kv.first) == tables_.end()) {
+                callback(*kv.second);
+            }
+        }
+    }
+
+    // One-time global object discovery (GET /sobjects, queryable only) into the
+    // 0-column listing_ entries. Triggered by Scan (SHOW TABLES / duckdb_tables /
+    // information_schema.tables) — never at ATTACH. Field schema stays lazy.
+    void EnsureObjectListLoaded(ClientContext &context) {
+        std::lock_guard<std::mutex> g(lock_);
+        if (object_list_loaded_) {
+            return;
+        }
+        auto client = BuildHttpClientForContext(context);
+        SalesforceSession session(config_, *client);
+        session.SetToken(token_);
+        IncGlobalDescribeCalls(); // DEBUG/TEST counter
+        for (auto &obj : session.GlobalDescribe()) {
+            string key = StringUtil::Lower(obj);
+            if (tables_.find(key) != tables_.end() || listing_.find(key) != listing_.end()) {
+                continue;
+            }
+            CreateTableInfo info(catalog.GetName(), this->name, obj);
+            listing_.emplace(key, make_uniq<SalesforceTableEntry>(catalog, *this, info, config_,
+                                                                  token_, vector<SalesforceField>{}));
+        }
+        object_list_loaded_ = true;
     }
 
     [[noreturn]] static void Unsupported(const char *op) {
@@ -195,6 +231,10 @@ private:
     SalesforceConfig config_;
     SalesforceTokenSet token_;
     std::mutex lock_;
+    // Global object listing (#14): name-only (0-column) entries for enumeration.
+    // Populated once by EnsureObjectListLoaded; in-memory, dropped at DETACH.
+    bool object_list_loaded_ = false;
+    std::unordered_map<string, unique_ptr<SalesforceTableEntry>> listing_;
     // Per-catalog in-memory metadata cache: lower(object) -> described schema
     // (a TableCatalogEntry). Populated lazily on first reference; an object is
     // described exactly once per ATTACH. Invalidated when the catalog is
@@ -214,7 +254,8 @@ public:
     string GetCatalogType() override { return "salesforce"; }
 
     void Initialize(bool) override {
-        ResetDescribeCalls(); // DEBUG/TEST: baseline the per-catalog describe counter
+        ResetDescribeCalls();       // DEBUG/TEST: baseline per-catalog describe counter
+        ResetGlobalDescribeCalls(); // DEBUG/TEST: baseline global describe counter
         CreateSchemaInfo info;
         info.schema = SALESFORCE_MAIN_SCHEMA;
         info.on_conflict = OnCreateConflict::ERROR_ON_CONFLICT;

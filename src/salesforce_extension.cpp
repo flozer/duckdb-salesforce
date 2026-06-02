@@ -55,6 +55,10 @@ static void LoadInternal(ExtensionLoader &loader) {
     // attached catalog issued since ATTACH (proves the metadata cache, #12).
     loader.RegisterFunction(GetSalesforceDescribeCallsFunction());
 
+    // salesforce_global_describe_calls() — DEBUG/TEST ONLY: global describes
+    // (GET /sobjects) since ATTACH (proves object-list discovery, #14).
+    loader.RegisterFunction(GetSalesforceGlobalDescribeCallsFunction());
+
     // Test-only hooks for the OAuth exchange (#3). When sf_mock_token_status is
     // non-zero, ATTACH uses a mock HTTP client returning that status and
     // sf_mock_token_body instead of the live transport, so sqllogictest can
@@ -85,6 +89,12 @@ static void LoadInternal(ExtensionLoader &loader) {
                               LogicalType::VARCHAR, Value("200"));
     config.AddExtensionOption("sf_mock_query_body",
                               "TEST ONLY. Bodies for mocked query GET pages ('|~|'-separated).",
+                              LogicalType::VARCHAR, Value(""));
+    config.AddExtensionOption("sf_mock_sobjects_status",
+                              "TEST ONLY. Statuses for mocked global describe (GET /sobjects).",
+                              LogicalType::VARCHAR, Value("200"));
+    config.AddExtensionOption("sf_mock_sobjects_body",
+                              "TEST ONLY. Body for mocked global describe (GET /sobjects).",
                               LogicalType::VARCHAR, Value(""));
 }
 

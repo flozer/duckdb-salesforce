@@ -397,4 +397,64 @@ TableFunction GetSalesforceDescribeCallsFunction() {
                          DescribeCallsBind, DescribeCallsInit);
 }
 
+// --- global-describe-call counter (DEBUG/TEST ONLY) --------------------------
+
+static std::mutex g_global_lock;
+static int64_t g_global_describe_calls = 0;
+
+void ResetGlobalDescribeCalls() {
+    std::lock_guard<std::mutex> g(g_global_lock);
+    g_global_describe_calls = 0;
+}
+
+void IncGlobalDescribeCalls() {
+    std::lock_guard<std::mutex> g(g_global_lock);
+    g_global_describe_calls++;
+}
+
+namespace {
+
+struct GlobalCallsGlobalState : public GlobalTableFunctionState {
+    bool emitted = false;
+    idx_t MaxThreads() const override {
+        return 1;
+    }
+};
+
+static unique_ptr<FunctionData> GlobalCallsBind(ClientContext &, TableFunctionBindInput &,
+                                                vector<LogicalType> &return_types,
+                                                vector<string> &names) {
+    names = {"calls"};
+    return_types = {LogicalType::BIGINT};
+    return nullptr;
+}
+
+static unique_ptr<GlobalTableFunctionState> GlobalCallsInit(ClientContext &,
+                                                            TableFunctionInitInput &) {
+    return make_uniq<GlobalCallsGlobalState>();
+}
+
+static void GlobalCallsFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &gstate = data.global_state->Cast<GlobalCallsGlobalState>();
+    if (gstate.emitted) {
+        output.SetCardinality(0);
+        return;
+    }
+    int64_t calls;
+    {
+        std::lock_guard<std::mutex> g(g_global_lock);
+        calls = g_global_describe_calls;
+    }
+    FlatVector::GetData<int64_t>(output.data[0])[0] = calls;
+    gstate.emitted = true;
+    output.SetCardinality(1);
+}
+
+} // namespace
+
+TableFunction GetSalesforceGlobalDescribeCallsFunction() {
+    return TableFunction("salesforce_global_describe_calls", {}, GlobalCallsFunction,
+                         GlobalCallsBind, GlobalCallsInit);
+}
+
 } // namespace duckdb

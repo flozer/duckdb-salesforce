@@ -1,0 +1,112 @@
+# name: test/sql/salesforce_listing.test
+# description: v0.2 #14 — global object listing (queryable) via duckdb_tables /
+#              information_schema.tables; lazy fields; cold/warm
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Global describe (GET /sobjects): two queryable + one not.
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true},{"name":"Contact","queryable":true},{"name":"NonQueryable","queryable":false}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"001","Name":"Acme"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# ATTACH is cheap: no global describe yet.
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+0
+
+# First listing: one global describe, queryable objects only (NonQueryable dropped).
+query I
+SELECT table_name FROM duckdb_tables() WHERE database_name = 'sf' ORDER BY table_name;
+----
+Account
+Contact
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# information_schema.tables lists them too.
+query I
+SELECT table_name FROM information_schema.tables WHERE table_catalog = 'sf' ORDER BY table_name;
+----
+Account
+Contact
+
+# Second listing: warm, no extra global describe.
+query I
+SELECT COUNT(*) FROM duckdb_tables() WHERE database_name = 'sf';
+----
+2
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# Listing did NOT trigger any per-object describe.
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+0
+
+# Referencing an object describes it once (per-object, lazy).
+statement ok
+SELECT Id FROM sf.Account;
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# Still 2 listed — no duplicate for the now-resolved Account.
+query I
+SELECT COUNT(*) FROM duckdb_tables() WHERE database_name = 'sf';
+----
+2
+
+# DETACH + re-ATTACH: cache + counters reset, re-discovered.
+statement ok
+DETACH sf;
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+0
+
+query I
+SELECT COUNT(*) FROM duckdb_tables() WHERE database_name = 'sf';
+----
+2
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+statement ok
+DETACH sf;
