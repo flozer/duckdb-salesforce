@@ -337,4 +337,64 @@ TableFunction GetSalesforceLastScanPagesFunction() {
                          LastPagesInit);
 }
 
+// --- describe-call counter (DEBUG/TEST ONLY) ---------------------------------
+
+static std::mutex g_describe_lock;
+static int64_t g_describe_calls = 0;
+
+void ResetDescribeCalls() {
+    std::lock_guard<std::mutex> g(g_describe_lock);
+    g_describe_calls = 0;
+}
+
+void IncDescribeCalls() {
+    std::lock_guard<std::mutex> g(g_describe_lock);
+    g_describe_calls++;
+}
+
+namespace {
+
+struct DescribeCallsGlobalState : public GlobalTableFunctionState {
+    bool emitted = false;
+    idx_t MaxThreads() const override {
+        return 1;
+    }
+};
+
+static unique_ptr<FunctionData> DescribeCallsBind(ClientContext &, TableFunctionBindInput &,
+                                                  vector<LogicalType> &return_types,
+                                                  vector<string> &names) {
+    names = {"calls"};
+    return_types = {LogicalType::BIGINT};
+    return nullptr;
+}
+
+static unique_ptr<GlobalTableFunctionState> DescribeCallsInit(ClientContext &,
+                                                              TableFunctionInitInput &) {
+    return make_uniq<DescribeCallsGlobalState>();
+}
+
+static void DescribeCallsFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &gstate = data.global_state->Cast<DescribeCallsGlobalState>();
+    if (gstate.emitted) {
+        output.SetCardinality(0);
+        return;
+    }
+    int64_t calls;
+    {
+        std::lock_guard<std::mutex> g(g_describe_lock);
+        calls = g_describe_calls;
+    }
+    FlatVector::GetData<int64_t>(output.data[0])[0] = calls;
+    gstate.emitted = true;
+    output.SetCardinality(1);
+}
+
+} // namespace
+
+TableFunction GetSalesforceDescribeCallsFunction() {
+    return TableFunction("salesforce_describe_calls", {}, DescribeCallsFunction,
+                         DescribeCallsBind, DescribeCallsInit);
+}
+
 } // namespace duckdb

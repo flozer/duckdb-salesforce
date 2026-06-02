@@ -51,6 +51,10 @@ static void LoadInternal(ExtensionLoader &loader) {
     // recent scan fetched (proves lazy pagination, #11). Not a public API.
     loader.RegisterFunction(GetSalesforceLastScanPagesFunction());
 
+    // salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the
+    // attached catalog issued since ATTACH (proves the metadata cache, #12).
+    loader.RegisterFunction(GetSalesforceDescribeCallsFunction());
+
     // Test-only hooks for the OAuth exchange (#3). When sf_mock_token_status is
     // non-zero, ATTACH uses a mock HTTP client returning that status and
     // sf_mock_token_body instead of the live transport, so sqllogictest can

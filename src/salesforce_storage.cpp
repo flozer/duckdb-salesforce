@@ -20,6 +20,7 @@
 #include "salesforce_describe.hpp"
 #include "salesforce_scan.hpp"
 #include "salesforce_session.hpp"
+#include "salesforce_soql.hpp"
 
 #include <mutex>
 #include <unordered_map>
@@ -133,7 +134,9 @@ public:
             return it->second.get();
         }
 
-        // Lazily describe this sObject and build its DuckDB schema.
+        // Cache miss: describe this sObject once and cache its schema below.
+        // (tables_ is the per-catalog in-memory metadata cache; #12.)
+        IncDescribeCalls(); // DEBUG/TEST counter — proves describe-once
         auto client = BuildHttpClientForContext(transaction.GetContext());
         SalesforceSession session(config_, *client);
         session.SetToken(token_);
@@ -192,6 +195,10 @@ private:
     SalesforceConfig config_;
     SalesforceTokenSet token_;
     std::mutex lock_;
+    // Per-catalog in-memory metadata cache: lower(object) -> described schema
+    // (a TableCatalogEntry). Populated lazily on first reference; an object is
+    // described exactly once per ATTACH. Invalidated when the catalog is
+    // destroyed at DETACH. In-memory only — never persisted (#12).
     std::unordered_map<string, unique_ptr<SalesforceTableEntry>> tables_;
 };
 
@@ -207,6 +214,7 @@ public:
     string GetCatalogType() override { return "salesforce"; }
 
     void Initialize(bool) override {
+        ResetDescribeCalls(); // DEBUG/TEST: baseline the per-catalog describe counter
         CreateSchemaInfo info;
         info.schema = SALESFORCE_MAIN_SCHEMA;
         info.on_conflict = OnCreateConflict::ERROR_ON_CONFLICT;

@@ -112,7 +112,10 @@ Known and intentional for this cut (see `docs/ARCHITECTURE.md` Appendix C):
   is no upfront global object listing, so the catalog only lists sObjects
   already referenced this session.
 - **REST only.** No Bulk API 2.0, GraphQL, Tooling or Metadata API yet; no
-  relationship/join traversal; no persisted metadata cache.
+  relationship/join traversal.
+- **Metadata cache is in-memory only.** Each sObject's schema (describe) is
+  cached per ATTACH and reused (described once per object); nothing is persisted
+  to disk, and record/data are never cached. The cache is dropped on DETACH.
 - **Read-only.** All catalog mutations (CREATE/INSERT/UPDATE/DELETE/...) throw.
 
 ## Community publication

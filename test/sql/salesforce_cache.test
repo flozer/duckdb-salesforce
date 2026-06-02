@@ -1,0 +1,71 @@
+# name: test/sql/salesforce_cache.test
+# description: v0.2 #12 — per-catalog in-memory metadata (describe) cache
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"001","Name":"Acme"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# First reference describes Account; second reference is a cache hit (no describe).
+statement ok
+SELECT Id FROM sf.Account;
+
+statement ok
+SELECT Name FROM sf.Account;
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# A different object describes once more.
+statement ok
+SELECT Id FROM sf.Contact;
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
+
+# Cache hit again for both -> still 2.
+statement ok
+SELECT Id FROM sf.Account;
+
+statement ok
+SELECT Id FROM sf.Contact;
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
+
+statement ok
+DETACH sf;
+
+# Re-ATTACH = fresh catalog: cache invalidated, counter reset, object re-described.
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+statement ok
+SELECT Id FROM sf.Account;
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+statement ok
+DETACH sf;

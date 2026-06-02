@@ -44,4 +44,11 @@ TableFunction GetSalesforceLastSoqlFunction();
 void SetLastScanPages(idx_t pages);
 TableFunction GetSalesforceLastScanPagesFunction();
 
+// DEBUG / TEST ONLY. Count of sObject describe calls the attached catalog has
+// issued since the last ATTACH (reset on ATTACH). Proves the per-catalog
+// metadata cache (#12) describes each object once. Not a stable/public API.
+void ResetDescribeCalls();
+void IncDescribeCalls();
+TableFunction GetSalesforceDescribeCallsFunction();
+
 } // namespace duckdb
