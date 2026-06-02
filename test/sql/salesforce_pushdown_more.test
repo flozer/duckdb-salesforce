@@ -1,0 +1,111 @@
+# name: test/sql/salesforce_pushdown_more.test
+# description: v0.2 #15 — IN / LIKE / OR pushdown as residual-safe superset prefilters
+# group: [salesforce]
+#
+# IN/LIKE/OR are pushed to SOQL to improve selectivity but are NOT removed from
+# the residual filter set: DuckDB reapplies them, so a Salesforce superset (e.g.
+# case-insensitive LIKE) is refined locally and the result equals DuckDB's.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"Secret","type":"string","filterable":false}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- IN: pushed to SOQL, and residual refines the mock superset --------------
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"1","Name":"Acme"},{"Id":"2","Name":"Globex"},{"Id":"3","Name":"Initech"}]}';
+
+query I
+SELECT Name FROM sf.Account WHERE Name IN ('Acme','Globex') ORDER BY Name;
+----
+Acme
+Globex
+
+query I
+SELECT contains(soql, 'Name IN (''Acme'', ''Globex'')') FROM salesforce_last_soql();
+----
+true
+
+# --- LIKE: pushed as prefilter; case-sensitive residual refines superset -----
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"1","Name":"Acme"},{"Id":"2","Name":"apple"},{"Id":"3","Name":"Banana"}]}';
+
+query I
+SELECT Name FROM sf.Account WHERE Name LIKE 'A%' ORDER BY Name;
+----
+Acme
+
+query I
+SELECT contains(soql, 'Name LIKE ''A%''') FROM salesforce_last_soql();
+----
+true
+
+# --- OR (all children safe): pushed; residual refines ------------------------
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"1","Name":"Acme"},{"Id":"2","Name":"Globex"},{"Id":"3","Name":"Initech"}]}';
+
+query I
+SELECT Name FROM sf.Account WHERE Name = 'Acme' OR Name = 'Globex' ORDER BY Name;
+----
+Acme
+Globex
+
+query I
+SELECT contains(soql, '(Name = ''Acme'' OR Name = ''Globex'')') FROM salesforce_last_soql();
+----
+true
+
+# --- OR with one untranslatable child: NOT pushed, still correct via residual -
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"1","Name":"Acme"},{"Id":"2","Name":"Globex"}]}';
+
+query I
+SELECT Name FROM sf.Account WHERE Name = 'Acme' OR upper(Name) = 'GLOBEX' ORDER BY Name;
+----
+Acme
+Globex
+
+query I
+SELECT contains(soql, ' OR ') FROM salesforce_last_soql();
+----
+false
+
+# --- non-filterable field: IN not pushed; residual still filters -------------
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"1","Name":"Acme","Secret":"s1"},{"Id":"2","Name":"Globex","Secret":"s2"}]}';
+
+query I
+SELECT Name FROM sf.Account WHERE Secret IN ('s1');
+----
+Acme
+
+query I
+SELECT contains(soql, 'IN (') FROM salesforce_last_soql();
+----
+false
+
+# --- huge IN (> cap) residualizes: not pushed, but DuckDB still applies it ----
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"1","Name":"Acme"},{"Id":"2","Name":"Globex"}]}';
+
+query I
+SELECT COUNT(*) FROM sf.Account WHERE Name IN ('v1','v2','v3','v4','v5','v6','v7','v8','v9','v10','v11','v12','v13','v14','v15','v16','v17','v18','v19','v20','v21','v22','v23','v24','v25','v26','v27','v28','v29','v30','v31','v32','v33','v34','v35','v36','v37','v38','v39','v40','v41','v42','v43','v44','v45','v46','v47','v48','v49','v50','v51','v52','v53','v54','v55','v56','v57','v58','v59','v60','v61','v62','v63','v64','v65','v66','v67','v68','v69','v70','v71','v72','v73','v74','v75','v76','v77','v78','v79','v80','v81','v82','v83','v84','v85','v86','v87','v88','v89','v90','v91','v92','v93','v94','v95','v96','v97','v98','v99','v100','v101','v102','v103','v104','v105','v106','v107','v108','v109','v110','v111','v112','v113','v114','v115','v116','v117','v118','v119','v120','v121','v122','v123','v124','v125','v126','v127','v128','v129','v130','v131','v132','v133','v134','v135','v136','v137','v138','v139','v140','v141','v142','v143','v144','v145','v146','v147','v148','v149','v150','v151','v152','v153','v154','v155','v156','v157','v158','v159','v160','v161','v162','v163','v164','v165','v166','v167','v168','v169','v170','v171','v172','v173','v174','v175','v176','v177','v178','v179','v180','v181','v182','v183','v184','v185','v186','v187','v188','v189','v190','v191','v192','v193','v194','v195','v196','v197','v198','v199','v200','v201');
+----
+0
+
+query I
+SELECT contains(soql, 'IN (') FROM salesforce_last_soql();
+----
+false
+
+statement ok
+DETACH sf;

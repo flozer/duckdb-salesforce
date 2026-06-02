@@ -76,14 +76,15 @@ SELECT soql LIKE '%Name = ''Acme''%' AND soql LIKE '%AnnualRevenue > 100%' AND s
 ----
 true
 
-# --- unsupported predicate (LIKE) -> residual: correct result, NOT in SOQL ---
+# --- unsupported predicate (function on column) -> residual: correct, not SOQL -
+# (LIKE/IN/OR pushdown is covered by salesforce_pushdown_more.test.)
 query I
-SELECT Name FROM sf.Account WHERE Name LIKE 'A%' ORDER BY Name;
+SELECT Name FROM sf.Account WHERE upper(Name) = 'ACME' ORDER BY Name;
 ----
 Acme
 
 query I
-SELECT soql NOT LIKE '%LIKE%' AND soql NOT LIKE '%WHERE%' FROM salesforce_last_soql();
+SELECT soql NOT LIKE '%WHERE%' FROM salesforce_last_soql();
 ----
 true
 

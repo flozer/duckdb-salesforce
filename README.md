@@ -38,7 +38,10 @@ applied by DuckDB residually, so results are always correct.
 | Predicate `=, <>, <, <=, >, >=` (filterable field, constant) | ✅ pushed |
 | `IS NULL` / `IS NOT NULL` | ✅ pushed (`= null` / `!= null`) |
 | `AND` of pushable predicates | ✅ pushed |
-| `OR`, `IN`, `LIKE`, functions, casts, nested expr | ⛔ residual (DuckDB) |
+| `IN (...)` (constant list, up to 200 items) | ✅ pushed as a superset **prefilter**, kept residual (DuckDB refines) |
+| `LIKE 'A%'` / `'%z'` / `'%m%'` | ✅ pushed as a superset **prefilter**, kept residual — Salesforce `LIKE` is case-insensitive, so DuckDB re-applies it locally to refine |
+| `OR` of pushable predicates (all children safe) | ✅ pushed as superset, kept residual; mixed safe/unsafe → whole `OR` residual |
+| functions / casts / `NOT` / regex / nested-unsupported | ⛔ residual (DuckDB) |
 | Predicate on a non-filterable field | ⛔ residual |
 | `WHERE` longer than 4000 chars | ⛔ residualised (guard) |
 | `LIMIT n` | ⚠️ not pushed to SOQL (this DuckDB build exposes no LIMIT hook), **but the scan is lazy** — it streams pages and may stop before fetching later pages, so a small LIMIT no longer reads the whole object |

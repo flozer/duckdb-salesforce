@@ -13,7 +13,9 @@
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression/bound_comparison_expression.hpp"
+#include "duckdb/planner/expression/bound_conjunction_expression.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
+#include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression/bound_operator_expression.hpp"
 
 #include <mutex>
@@ -23,24 +25,26 @@ namespace duckdb {
 // Max generated WHERE length before we give up and residualise (Appendix A).
 static constexpr size_t kMaxWhereChars = 4000;
 
+// Single-quote a string as a SOQL literal, escaping backslash and quote.
+static string SoqlString(const string &s) {
+    string out = "'";
+    for (char c : s) {
+        if (c == '\\' || c == '\'') {
+            out.push_back('\\');
+        }
+        out.push_back(c);
+    }
+    out.push_back('\'');
+    return out;
+}
+
 string SoqlLiteral(const Value &value) {
     if (value.IsNull()) {
         return "null";
     }
     switch (value.type().id()) {
-    case LogicalTypeId::VARCHAR: {
-        // Single-quote + escape backslash and quote.
-        const string &s = StringValue::Get(value);
-        string out = "'";
-        for (char c : s) {
-            if (c == '\\' || c == '\'') {
-                out.push_back('\\');
-            }
-            out.push_back(c);
-        }
-        out.push_back('\'');
-        return out;
-    }
+    case LogicalTypeId::VARCHAR:
+        return SoqlString(StringValue::Get(value));
     case LogicalTypeId::BOOLEAN:
         return value.GetValue<bool>() ? "true" : "false";
     case LogicalTypeId::TINYINT:
@@ -121,25 +125,35 @@ static bool FieldFor(const Expression &expr, const vector<SalesforceField> &fiel
     return true;
 }
 
+// Defensive cap: a huge IN list bloats the WHERE and isn't worth pushing.
+static constexpr idx_t kMaxInItems = 200;
+
 // Translate one conjunct into a SOQL predicate. Returns false (=> residual) for
-// anything outside the safe subset. Never throws.
+// anything outside the safe subset. Sets `exact` true only when the SOQL clause
+// matches DuckDB semantics exactly (safe to remove from the residual filter set);
+// false when it is a SUPERSET prefilter (IN/LIKE/OR) that MUST stay residual so
+// DuckDB refines the result. Never throws.
 static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> &fields,
-                          const vector<idx_t> &projection_to_field, string &out) {
+                          const vector<idx_t> &projection_to_field, string &out, bool &exact) {
+    exact = true;
     try {
-        if (expr.GetExpressionClass() == ExpressionClass::BOUND_COMPARISON) {
+        auto klass = expr.GetExpressionClass();
+        auto etype = expr.GetExpressionType();
+
+        // column <cmp> constant (exact).
+        if (klass == ExpressionClass::BOUND_COMPARISON) {
             auto &cmp_expr = expr.Cast<BoundComparisonExpression>();
             const Expression &l = *cmp_expr.left;
             const Expression &r = *cmp_expr.right;
-
             string field;
-            ExpressionType cmp = expr.GetExpressionType();
+            ExpressionType cmp = etype;
             const Expression *constant = nullptr;
             if (FieldFor(l, fields, projection_to_field, field) &&
                 r.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT) {
                 constant = &r;
             } else if (FieldFor(r, fields, projection_to_field, field) &&
                        l.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT) {
-                if (!FlipComparison(expr.GetExpressionType(), cmp)) {
+                if (!FlipComparison(etype, cmp)) {
                     return false;
                 }
                 constant = &l;
@@ -154,9 +168,11 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
                   SoqlLiteral(constant->Cast<BoundConstantExpression>().value);
             return true;
         }
-        if (expr.GetExpressionClass() == ExpressionClass::BOUND_OPERATOR &&
-            (expr.GetExpressionType() == ExpressionType::OPERATOR_IS_NULL ||
-             expr.GetExpressionType() == ExpressionType::OPERATOR_IS_NOT_NULL)) {
+
+        // IS NULL / IS NOT NULL (exact).
+        if (klass == ExpressionClass::BOUND_OPERATOR &&
+            (etype == ExpressionType::OPERATOR_IS_NULL ||
+             etype == ExpressionType::OPERATOR_IS_NOT_NULL)) {
             auto &oe = expr.Cast<BoundOperatorExpression>();
             if (oe.children.size() != 1) {
                 return false;
@@ -166,10 +182,97 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
                 return false;
             }
             out = field +
-                  (expr.GetExpressionType() == ExpressionType::OPERATOR_IS_NULL ? " = null" : " != null");
+                  (etype == ExpressionType::OPERATOR_IS_NULL ? " = null" : " != null");
             return true;
         }
-        return false; // OR / IN / LIKE / functions / ... -> residual
+
+        // col IN (c1, c2, ...) — SUPERSET prefilter, keep residual.
+        if (klass == ExpressionClass::BOUND_OPERATOR && etype == ExpressionType::COMPARE_IN) {
+            auto &oe = expr.Cast<BoundOperatorExpression>();
+            if (oe.children.size() < 2) {
+                return false;
+            }
+            string field;
+            if (!FieldFor(*oe.children[0], fields, projection_to_field, field)) {
+                return false;
+            }
+            if (oe.children.size() - 1 > kMaxInItems) {
+                return false; // huge IN -> residual
+            }
+            string list;
+            for (idx_t k = 1; k < oe.children.size(); k++) {
+                if (oe.children[k]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+                    return false;
+                }
+                if (k > 1) {
+                    list += ", ";
+                }
+                list += SoqlLiteral(oe.children[k]->Cast<BoundConstantExpression>().value);
+            }
+            out = field + " IN (" + list + ")";
+            exact = false;
+            return true;
+        }
+
+        // LIKE. DuckDB's optimizer rewrites col LIKE 'A%' -> prefix(col,'A'),
+        // '%z' -> suffix(col,'z'), '%m%' -> contains(col,'m'); complex patterns
+        // stay as the "~~" function. Map each back to a SOQL LIKE. Treating any
+        // literal % / _ in the substring as wildcards only BROADENS the match
+        // (superset) -> safe because we keep it residual. SF LIKE is also
+        // case-insensitive (another superset). Keep residual.
+        if (klass == ExpressionClass::BOUND_FUNCTION) {
+            auto &fe = expr.Cast<BoundFunctionExpression>();
+            const string &fn = fe.function.name;
+            bool like = (fn == "~~"), pre = (fn == "prefix"), suf = (fn == "suffix"),
+                 con = (fn == "contains");
+            if (!(like || pre || suf || con) || fe.children.size() != 2) {
+                return false;
+            }
+            string field;
+            if (!FieldFor(*fe.children[0], fields, projection_to_field, field)) {
+                return false;
+            }
+            if (fe.children[1]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+                return false;
+            }
+            const Value &v = fe.children[1]->Cast<BoundConstantExpression>().value;
+            if (v.IsNull() || v.type().id() != LogicalTypeId::VARCHAR) {
+                return false;
+            }
+            string sub = StringValue::Get(v);
+            string pattern = like ? sub : pre ? sub + "%" : suf ? "%" + sub : "%" + sub + "%";
+            out = field + " LIKE " + SoqlString(pattern);
+            exact = false;
+            return true;
+        }
+
+        // (a OR b ...) — push only if EVERY child translates; SUPERSET, keep residual.
+        // (a AND b ...) — nested AND (e.g. inside an OR); exact iff all children exact.
+        if (klass == ExpressionClass::BOUND_CONJUNCTION &&
+            (etype == ExpressionType::CONJUNCTION_OR ||
+             etype == ExpressionType::CONJUNCTION_AND)) {
+            auto &cj = expr.Cast<BoundConjunctionExpression>();
+            bool all_exact = true;
+            string combined;
+            for (idx_t k = 0; k < cj.children.size(); k++) {
+                string cout;
+                bool cexact = true;
+                if (!TranslateExpr(*cj.children[k], fields, projection_to_field, cout, cexact)) {
+                    return false; // any untranslatable child -> whole conjunction residual
+                }
+                all_exact = all_exact && cexact;
+                if (k > 0) {
+                    combined += (etype == ExpressionType::CONJUNCTION_OR) ? " OR " : " AND ";
+                }
+                combined += cout;
+            }
+            out = "(" + combined + ")";
+            // OR is always a superset prefilter; AND is exact only if all children are.
+            exact = (etype == ExpressionType::CONJUNCTION_AND) && all_exact;
+            return true;
+        }
+
+        return false; // functions/casts/NOT/regex/... -> residual
     } catch (...) {
         return false;
     }
@@ -179,13 +282,18 @@ void PushdownToSoql(const vector<SalesforceField> &fields,
                     const vector<idx_t> &projection_to_field, string &out_where,
                     vector<unique_ptr<Expression>> &filters) {
     out_where.clear();
-    vector<bool> handled(filters.size(), false);
+    // Per conjunct: was it translated, and is it EXACT (safe to remove from the
+    // residual set) or a superset prefilter (must stay residual)?
+    vector<bool> translated(filters.size(), false);
+    vector<bool> exact(filters.size(), false);
     vector<string> clauses;
     for (idx_t i = 0; i < filters.size(); i++) {
         string clause;
-        if (filters[i] && TranslateExpr(*filters[i], fields, projection_to_field, clause)) {
+        bool ex = true;
+        if (filters[i] && TranslateExpr(*filters[i], fields, projection_to_field, clause, ex)) {
             clauses.push_back(clause);
-            handled[i] = true;
+            translated[i] = true;
+            exact[i] = ex;
         }
     }
     string where;
@@ -196,12 +304,14 @@ void PushdownToSoql(const vector<SalesforceField> &fields,
         where += clauses[i];
     }
     if (where.size() > kMaxWhereChars) {
-        return; // guard: over-long -> push nothing, leave all residual
+        return; // guard: over-long -> push nothing, leave ALL residual
     }
     out_where = where;
+    // Remove ONLY exact-translated conjuncts; superset prefilters (IN/LIKE/OR)
+    // stay in `filters` so DuckDB reapplies them and refines the result.
     vector<unique_ptr<Expression>> remaining;
     for (idx_t i = 0; i < filters.size(); i++) {
-        if (!handled[i]) {
+        if (!(translated[i] && exact[i])) {
             remaining.push_back(std::move(filters[i]));
         }
     }
