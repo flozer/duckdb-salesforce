@@ -26,6 +26,7 @@ struct ScanCost {
     int64_t pages_fetched = -1; // -1 -> NULL (e.g. Bulk)
     int64_t rows_emitted = 0;
     bool bulk = false;
+    bool count_pushdown = false;
     bool quota_consulted = false; // false -> quota_* NULL
     int64_t quota_remaining = -1;
     bool quota_allowed = false;
@@ -51,6 +52,11 @@ string BuildGuidance(const ScanCost &c) {
     if (c.bulk) {
         hints.push_back("Bulk downloads the whole result eagerly (LIMIT is not server-side)");
     }
+    if (c.count_pushdown) {
+        hints.push_back(StringUtil::Format(
+            "count pushdown: emitted %lld rows from SELECT COUNT(), no records fetched",
+            (long long)c.rows_emitted));
+    }
     if (hints.empty()) {
         hints.push_back("ok: predicate + projection pushed down");
     }
@@ -72,14 +78,15 @@ unique_ptr<FunctionData> QueryCostBind(ClientContext &, TableFunctionBindInput &
              "total_fields",    "pushed_filters",
              "residual_filters", "where_pushed",
              "pages_fetched",   "rows_emitted",
-             "bulk",            "quota_remaining",
-             "quota_allowed",   "guidance"};
+             "bulk",            "count_pushdown",
+             "quota_remaining", "quota_allowed",
+             "guidance"};
     return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
                     LogicalType::BIGINT,  LogicalType::VARCHAR, LogicalType::BIGINT,
                     LogicalType::BIGINT,  LogicalType::BIGINT,  LogicalType::BIGINT,
                     LogicalType::VARCHAR, LogicalType::BIGINT,  LogicalType::BIGINT,
-                    LogicalType::BOOLEAN, LogicalType::BIGINT,  LogicalType::BOOLEAN,
-                    LogicalType::VARCHAR};
+                    LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::BIGINT,
+                    LogicalType::BOOLEAN, LogicalType::VARCHAR};
     return nullptr;
 }
 
@@ -122,14 +129,15 @@ void QueryCostFunction(ClientContext &, TableFunctionInput &data, DataChunk &out
     IntOrNull(output, 10, c.pages_fetched);
     FlatVector::GetData<int64_t>(output.data[11])[0] = c.rows_emitted;
     FlatVector::GetData<bool>(output.data[12])[0] = c.bulk;
+    FlatVector::GetData<bool>(output.data[13])[0] = c.count_pushdown;
     if (c.quota_consulted) {
-        IntOrNull(output, 13, c.quota_remaining);
-        FlatVector::GetData<bool>(output.data[14])[0] = c.quota_allowed;
+        IntOrNull(output, 14, c.quota_remaining);
+        FlatVector::GetData<bool>(output.data[15])[0] = c.quota_allowed;
     } else {
-        FlatVector::SetNull(output.data[13], 0, true);
         FlatVector::SetNull(output.data[14], 0, true);
+        FlatVector::SetNull(output.data[15], 0, true);
     }
-    Str(output, 15, BuildGuidance(c));
+    Str(output, 16, BuildGuidance(c));
     gstate.emitted = true;
     output.SetCardinality(1);
 }
@@ -139,7 +147,8 @@ void QueryCostFunction(ClientContext &, TableFunctionInput &data, DataChunk &out
 void DiagRecordScan(const string &object, const string &soql, const string &transport,
                     int64_t est_rows, const string &transport_reason, int64_t projected_fields,
                     int64_t total_fields, int64_t pushed_filters, int64_t residual_filters,
-                    const string &where_pushed, bool bulk, int64_t pages_init) {
+                    const string &where_pushed, bool bulk, int64_t pages_init,
+                    bool count_pushdown) {
     std::lock_guard<std::mutex> g(g_lock);
     g_cost = ScanCost{};
     g_cost.object = object;
@@ -154,6 +163,7 @@ void DiagRecordScan(const string &object, const string &soql, const string &tran
     g_cost.where_pushed = where_pushed;
     g_cost.bulk = bulk;
     g_cost.pages_fetched = pages_init;
+    g_cost.count_pushdown = count_pushdown;
 }
 
 void DiagSetPages(int64_t pages) {

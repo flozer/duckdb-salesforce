@@ -74,16 +74,19 @@ FROM salesforce_query_cost();
 true
 
 # --- multi-page REST: pages_fetched + rows_emitted reflect delivery ----------
+# A data scan (selects Id) — not COUNT(*), which would take the count-pushdown
+# path and never page (see salesforce_count.test).
 statement ok
 SET sf_mock_query_body = '{"done":false,"nextRecordsUrl":"/services/data/v64.0/query/01g-2","records":[{"Id":"a","Name":"A"}]}|~|{"done":true,"records":[{"Id":"b","Name":"B"}]}';
 
 query I
-SELECT count(*) FROM sf.Account;
+SELECT Id FROM sf.Account ORDER BY Id;
 ----
-2
+a
+b
 
 query I
-SELECT pages_fetched = 2 AND rows_emitted = 2 AND bulk = false
+SELECT pages_fetched = 2 AND rows_emitted = 2 AND bulk = false AND count_pushdown = false
 FROM salesforce_query_cost();
 ----
 true

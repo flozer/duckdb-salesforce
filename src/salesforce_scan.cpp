@@ -34,6 +34,8 @@ unique_ptr<FunctionData> SalesforceScanBindData::Copy() const {
     r->column_names = column_names;
     r->column_types = column_types;
     r->pushed_where = pushed_where;
+    r->pushed_filter_count = pushed_filter_count;
+    r->residual_filter_count = residual_filter_count;
     return std::move(r);
 }
 
@@ -66,6 +68,13 @@ struct ScanGlobalState : public GlobalTableFunctionState {
     vector<int64_t> field_to_csv; // field index -> CSV column index (-1 if absent)
     idx_t bulk_cursor = 0;
 
+    // COUNT pushdown (#v0.5 §5): an aggregate-only scan (zero real columns, no
+    // residual filter) emits `count_total` empty rows from a single SELECT
+    // COUNT() instead of paging records. DuckDB's COUNT(*) counts them.
+    bool count_only = false;
+    int64_t count_total = 0;
+    int64_t count_cursor = 0;
+
     // DuckDB-level projection: which source field each output column maps to.
     vector<column_t> column_ids;
     idx_t MaxThreads() const override {
@@ -95,6 +104,17 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     }
     if (select_fields.empty() && !bind.fields.empty()) {
         select_fields.push_back(bind.fields[0].name);
+    }
+
+    // Aggregate-only scan: DuckDB asked for ZERO real columns (COUNT(*),
+    // SELECT 1, EXISTS-style). Then the scan's only contract is its row COUNT —
+    // used for transport selection (#v0.3 §2) and COUNT pushdown (#v0.5 §5).
+    bool aggregate_only = true;
+    for (auto col : input.column_ids) {
+        if (col < bind.fields.size()) {
+            aggregate_only = false;
+            break;
+        }
     }
 
     // Predicate pushdown: the WHERE was translated in pushdown_complex_filter
@@ -134,14 +154,7 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     if (transport == "auto") {
         // Aggregate-only scan (COUNT(*) etc.): no real field projected. A Bulk
         // job is pointless here, so stay on REST.
-        bool only_virtual = true;
-        for (auto col : input.column_ids) {
-            if (col < bind.fields.size()) {
-                only_virtual = false;
-                break;
-            }
-        }
-        if (input.column_ids.empty() || only_virtual) {
+        if (aggregate_only) {
             effective = "rest";
             reason = "auto: aggregate-only -> rest";
         } else {
@@ -181,13 +194,41 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     }
     SetLastTransport(effective, est_rows, reason);
 
-    // Query-cost diagnostics (#v0.4 §4): record the per-scan facts known now.
-    // pages start at 0 for REST, NULL (-1) for Bulk (Bulk paging is internal).
-    DiagRecordScan(bind.object, soql, effective, est_rows, reason,
+    // COUNT pushdown (#v0.5 §5): a zero-real-column scan with NO residual filter
+    // needs only the row count. Run a single SELECT COUNT() and emit that many
+    // empty rows (see ScanFunction) instead of paging records. Forced 'bulk'
+    // honours the force and is NOT overridden. Any uncertainty (probe failure)
+    // falls back to the normal scan, which is always correct.
+    string reported_soql = soql;
+    int64_t reported_pages = (effective == "bulk") ? -1 : 0;
+    if (aggregate_only && bind.residual_filter_count == 0 && effective != "bulk") {
+        string count_soql = "SELECT COUNT() FROM " + bind.object;
+        if (!bind.pushed_where.empty()) {
+            count_soql += " WHERE " + bind.pushed_where;
+        }
+        int64_t n = 0;
+        if (gstate->session->TryEstimateCount(count_soql, n)) {
+            gstate->count_only = true;
+            gstate->count_total = n;
+            reported_soql = count_soql;
+            reported_pages = 0;
+            SetLastSoql(count_soql);    // reflect the COUNT() SOQL actually sent
+            SetLastScanPages(0);        // no data pages fetched
+        }
+        // probe failed -> leave count_only=false; fall through to the normal scan
+    }
+
+    // Query-cost diagnostics (#v0.4 §4 / §5): record the per-scan facts now.
+    // pages = 0 for REST/COUNT, NULL (-1) for Bulk (Bulk paging is internal).
+    DiagRecordScan(bind.object, reported_soql, effective, est_rows, reason,
                    static_cast<int64_t>(select_fields.size()),
                    static_cast<int64_t>(bind.fields.size()), bind.pushed_filter_count,
                    bind.residual_filter_count, bind.pushed_where, effective == "bulk",
-                   effective == "bulk" ? -1 : 0);
+                   reported_pages, gstate->count_only);
+
+    if (gstate->count_only) {
+        return std::move(gstate); // no records to fetch; ScanFunction emits the count
+    }
 
     if (effective == "bulk") {
         gstate->bulk = true;
@@ -257,6 +298,22 @@ static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &o
     auto &bind = data.bind_data->Cast<SalesforceScanBindData>();
     auto &gstate = data.global_state->Cast<ScanGlobalState>();
 
+    // COUNT pushdown (#v0.5 §5): emit count_total empty rows (all-NULL virtual
+    // columns) so DuckDB's COUNT(*) counts the right number — no records fetched.
+    if (gstate.count_only) {
+        idx_t row = 0;
+        while (row < STANDARD_VECTOR_SIZE && gstate.count_cursor < gstate.count_total) {
+            for (idx_t j = 0; j < gstate.column_ids.size(); j++) {
+                FlatVector::SetNull(output.data[j], row, true);
+            }
+            gstate.count_cursor++;
+            row++;
+        }
+        output.SetCardinality(row);
+        DiagAddRowsEmitted(static_cast<int64_t>(row));
+        return;
+    }
+
     // Bulk path: emit decoded CSV rows (already downloaded in InitGlobal).
     if (gstate.bulk) {
         idx_t row = 0;
@@ -324,11 +381,24 @@ static void ScanPushdownComplexFilter(ClientContext &, LogicalGet &get, Function
     for (auto &ci : get.GetColumnIds()) {
         projection_to_field.push_back(ci.GetPrimaryIndex());
     }
+    // DuckDB may invoke this hook MORE THAN ONCE (e.g. for an aggregate plan it
+    // calls again with an empty list after the first call consumed the filter).
+    // PushdownToSoql clears its out_where, so a naive call would WIPE the WHERE
+    // built by an earlier call. Skip empty calls and ACCUMULATE instead, so the
+    // pushed WHERE survives — otherwise COUNT(*) ... WHERE silently over-counts.
     idx_t before = filters.size();
-    PushdownToSoql(bind.fields, projection_to_field, bind.pushed_where, filters);
-    // Filters removed by PushdownToSoql were translated to SOQL; the rest stay
-    // residual for DuckDB. Recorded for salesforce_query_cost() (#v0.4 §4).
-    bind.pushed_filter_count = static_cast<int64_t>(before - filters.size());
+    if (before == 0) {
+        return;
+    }
+    string where_part;
+    PushdownToSoql(bind.fields, projection_to_field, where_part, filters);
+    if (!where_part.empty()) {
+        bind.pushed_where =
+            bind.pushed_where.empty() ? where_part : bind.pushed_where + " AND " + where_part;
+    }
+    // Translated filters were removed; the rest stay residual for DuckDB.
+    // Recorded for salesforce_query_cost() (#v0.4 §4).
+    bind.pushed_filter_count += static_cast<int64_t>(before - filters.size());
     bind.residual_filter_count = static_cast<int64_t>(filters.size());
 }
 

@@ -39,7 +39,11 @@ AnnualRevenue	DECIMAL(18,2)
 Id	VARCHAR
 Name	VARCHAR
 
-# Row count.
+# Row count. COUNT(*) takes the count-pushdown path (#v0.5 §5): it issues
+# SELECT COUNT() (the count mock), not a data scan.
+statement ok
+SET sf_mock_count_body = '{"totalSize":2,"done":true,"records":[]}';
+
 query I
 SELECT COUNT(*) FROM sf.Account;
 ----

@@ -143,13 +143,18 @@ FROM salesforce_last_transport();
 true
 
 # --- auto + aggregate-only (COUNT(*)) -> REST, no probe ---------------------
+# COUNT(*) takes the count-pushdown path (#v0.5 §5): the result comes from the
+# COUNT() mock, not a data scan. Transport still resolves to REST.
 statement ok
 SET sf_force_transport = 'auto';
+
+statement ok
+SET sf_mock_count_body = '{"totalSize":7,"done":true,"records":[]}';
 
 query I
 SELECT COUNT(*) FROM sf.Account;
 ----
-1
+7
 
 query I
 SELECT transport = 'rest' AND est_rows IS NULL AND contains(reason, 'aggregate-only')

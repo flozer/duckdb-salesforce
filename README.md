@@ -161,6 +161,32 @@ It complements — does not replace — the granular `salesforce_last_soql()`,
 > **Last-scan, best-effort.** It reflects only the most recent scan in the
 > process and is overwritten by the next one; scans are single-threaded.
 
+## Aggregate pushdown: COUNT (v0.5 §5)
+
+A scan that needs only the **row count and zero real columns** — `COUNT(*)`,
+`SELECT 1 FROM …`, `EXISTS`-style — runs a single `SELECT COUNT() FROM <obj>
+[WHERE …]` and emits that many empty rows for DuckDB to count, instead of paging
+every record. The 54k-row / 9s `COUNT(*)` becomes one cheap call.
+
+```sql
+SELECT COUNT(*) FROM sf.Account WHERE Name = 'Acme';
+-- sends: SELECT COUNT() FROM Account WHERE Name = 'Acme'  (no data pages)
+SELECT count_pushdown, pages_fetched, rows_emitted FROM salesforce_query_cost();
+-- true, 0, <totalSize>
+```
+
+Applies only when **all** hold (otherwise the normal scan runs — always correct):
+
+- zero real columns projected (pure row-count);
+- **no residual filter** (a non-pushable predicate forces a real scan);
+- the `COUNT()` probe succeeds (on failure it falls back to a full scan);
+- `sf_force_transport` is not forced to `'bulk'` — a forced Bulk is **honoured**,
+  not overridden (use `rest`/`auto` to get COUNT pushdown).
+
+> **COUNT-only for now.** `COUNT(field)` (non-null count), `GROUP BY`, `SUM`,
+> `AVG`, `MIN`, `MAX` are **not** pushed in this cut — they run as a normal scan
+> with DuckDB aggregating locally.
+
 ## Pushdown (v0.1)
 
 Pushdown to SOQL is a best-effort over-fetch optimisation; anything not pushed is

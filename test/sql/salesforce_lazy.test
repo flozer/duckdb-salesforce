@@ -24,10 +24,16 @@ statement ok
 ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
 
 # --- LIMIT 5 returns 5 rows and fetches only the FIRST page ------------------
+# Data scan (selects Id), not COUNT(*): a zero-column COUNT(*) would take the
+# count-pushdown path (#v0.5 §5) and never page. This exercises lazy paging.
 query I
-SELECT COUNT(*) FROM (SELECT Id FROM sf.Account LIMIT 5);
+SELECT Id FROM sf.Account LIMIT 5;
 ----
-5
+001
+002
+003
+004
+005
 
 query I
 SELECT pages FROM salesforce_last_scan_pages();
@@ -56,19 +62,13 @@ SELECT pages FROM salesforce_last_scan_pages();
 ----
 2
 
-# --- COUNT(*) still walks all pages -----------------------------------------
-query I
-SELECT COUNT(*) FROM sf.Account;
-----
-12
-
-query I
-SELECT pages FROM salesforce_last_scan_pages();
-----
-2
+# (COUNT(*) over a full scan no longer walks pages — it takes the count-pushdown
+# path; see salesforce_count.test. The full data scan above already proves the
+# two-page walk.)
 
 # --- 401 on the second page mid-pagination: re-auth + continue --------------
-# GET page1 (200), GET page2 -> 401 -> refresh -> GET page2 (200).
+# GET page1 (200), GET page2 -> 401 -> refresh -> GET page2 (200). Data scan so
+# it actually pages through the 401.
 statement ok
 SET sf_mock_query_status = '200,401,200';
 
@@ -76,9 +76,10 @@ statement ok
 SET sf_mock_query_body = '{"done":false,"nextRecordsUrl":"/services/data/v60.0/query/01g-2000","records":[{"Id":"001"}]}|~||~|{"done":true,"records":[{"Id":"002"}]}';
 
 query I
-SELECT COUNT(*) FROM sf.Account;
+SELECT Id FROM sf.Account ORDER BY Id;
 ----
-2
+001
+002
 
 statement ok
 DETACH sf;
