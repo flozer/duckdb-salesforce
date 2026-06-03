@@ -112,7 +112,7 @@ FROM salesforce_query_cost();
 ----
 true
 
-# --- Bulk: bulk=true, pages NULL, quota populated, rows delivered ------------
+# --- Bulk: bulk=true, real page count (streamed), quota populated, rows -------
 statement ok
 SET sf_force_transport = 'bulk';
 
@@ -122,7 +122,7 @@ SELECT Name FROM sf.Account;
 BulkRow
 
 query I
-SELECT bulk = true AND pages_fetched IS NULL AND rows_emitted = 1
+SELECT bulk = true AND pages_fetched = 1 AND rows_emitted = 1
    AND quota_remaining = 99000 AND quota_allowed = true
    AND contains(guidance, 'Bulk')
 FROM salesforce_query_cost();

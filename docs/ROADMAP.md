@@ -1,10 +1,13 @@
 # duckdb-salesforce Roadmap
 
-Status: planned roadmap after `v0.2.0`.
+Status: planned roadmap. Updated after `v0.6.0`.
 
-`v0.2.0` is the current validated release: read-only REST, OAuth/TLS, schema
-describe, lazy scans, in-memory metadata cache, global object listing, projection
-pushdown, residual-safe predicate pushdown, and DuckDB release build matrix.
+`v0.6.0` is the current validated release: read-only REST and Bulk, OAuth/TLS,
+schema describe, Tooling schema discovery, lazy REST scans, Bulk query jobs,
+quota governance for Bulk starts, query cost diagnostics, COUNT pushdown,
+in-memory metadata cache, global object listing, parent relationship traversal,
+projection pushdown, residual-safe predicate pushdown, and DuckDB release build
+matrix.
 
 This roadmap schedules the remaining capabilities needed before broad
 distribution. `duckdb/community-extensions` remains blocked by the C.5 human
@@ -162,11 +165,130 @@ Acceptance:
 - Local join workflow remains documented and tested.
 - Unsupported relationship predicates fall back or fail clearly.
 
-## v0.7: Distribution Hardening
+## v0.7: Bulk Streaming And Chunking
+
+Goal: make large Bulk extraction memory-bounded and optionally parallel.
+
+### 8. Lazy Bulk Result Streaming
+
+Scope:
+
+- Stream Bulk `Sforce-Locator` result pages during scan instead of eagerly
+  fetching all CSV rows in `InitGlobal`.
+- Keep typed CSV decoding and existing Bulk job lifecycle.
+- Preserve quota governor behavior before job start.
+- Keep `LIMIT` caveat honest: Bulk still does not receive server-side LIMIT.
+
+Acceptance:
+
+- Large mock Bulk result does not materialize all pages before first output.
+- `salesforce_query_cost()` reports Bulk rows/pages consistently.
+- Existing forced/auto Bulk tests remain green.
+- Manual smoke shows lower memory pressure or equivalent behavior.
+
+### 9. PK Chunking / Parallel Bulk Extraction
+
+Scope:
+
+- Split large object reads into key/range chunks where Salesforce supports it.
+- Run chunks with bounded parallelism.
+- Preserve ordering caveats and residual correctness.
+- Keep single-thread path available as fallback.
+
+Acceptance:
+
+- Chunked extraction returns the same rows as unchunked extraction in mocks.
+- Parallelism is configurable and bounded.
+- Failures in one chunk surface clearly.
+- Docs explain when PK chunking applies and when it does not.
+
+## v0.8: Materialization And Snapshot Correctness
+
+Goal: make repeatable local snapshots practical.
+
+### 10. Incremental Materialization / Vault Mode
+
+Scope:
+
+- Add documented workflows for materializing Salesforce objects into local DuckDB
+  tables or Parquet.
+- Support incremental refresh keyed by `SystemModstamp` with a configurable
+  lookback window.
+- Store checkpoint metadata locally only when the user explicitly chooses a
+  materialization workflow.
+
+Acceptance:
+
+- Initial materialization works for a selected object.
+- Incremental refresh re-reads the lookback window and avoids missed edge rows.
+- Checkpoint state is inspectable and resettable.
+- Docs explain snapshot boundaries and operational safety.
+
+### 11. `queryAll` / Deleted Record Coverage
+
+Scope:
+
+- Add an opt-in path for deleted/archived records where Salesforce supports it.
+- Keep default query path unchanged.
+- Integrate with materialization workflows.
+
+Acceptance:
+
+- `queryAll` smoke covers records that `/query` omits.
+- Default scans remain unchanged.
+- Docs explain deleted/archived semantics.
+
+### 12. Bulk CSV Edge-Case Hardening
+
+Scope:
+
+- Add regression tests for known Bulk CSV datetime/epoch edge cases from the
+  research log.
+- Keep JSON and CSV cast paths aligned.
+
+Acceptance:
+
+- Datetime CSV variants decode correctly or fail with clear field-level errors.
+- Existing REST and Bulk decoding tests remain green.
+
+## v0.9: Resumability And Operator UX
+
+Goal: handle quota/rate pressure without losing progress.
+
+### 13. Rate-Limit Early-Exit And Resume
+
+Scope:
+
+- Convert quota pressure during materialization into a graceful checkpointed
+  stop when possible.
+- Resume from the checkpoint in the next run.
+- Keep ad-hoc interactive scans simple.
+
+Acceptance:
+
+- Mock low-quota run exits with checkpoint rather than partial silent failure.
+- Resume continues from the recorded state.
+- Diagnostics explain why the run stopped.
+
+### 14. Auth UX Improvements
+
+Scope:
+
+- Evaluate SFDX auth URL input for faster local setup.
+- Evaluate JWT Bearer for headless/CI-style environments.
+- Keep refresh-token flow as the default documented path.
+
+Acceptance:
+
+- New auth mode is opt-in and secret-safe.
+- Existing auth tests remain green.
+- Docs describe when each auth mode is appropriate.
+
+## v1.0: Distribution Hardening
 
 Goal: prepare for wider distribution while preserving C.5.
 
-### 8. CI Matrix: Windows And Linux
+### 15. CI Matrix: Windows And Linux
 
 Scope:
 
@@ -180,7 +302,7 @@ Acceptance:
 - CI never requires Salesforce secrets.
 - Failures by DuckDB release are visible and version-scoped.
 
-### 9. Package And Release Review
+### 16. Package And Release Review
 
 Scope:
 
@@ -207,4 +329,3 @@ Before any community action:
 - Package/release review is complete.
 - Security docs are reviewed.
 - Human maintainer gives explicit go/no-go.
-

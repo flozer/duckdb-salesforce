@@ -26,10 +26,13 @@ struct SalesforceQueryPage {
     bool done = true;
 };
 
-// Bulk API 2.0 query result (#v0.3): CSV header + rows (cells as strings).
-struct SalesforceBulkResult {
-    vector<string> columns;      // CSV header (field names)
-    vector<vector<string>> rows; // one vector of cells per record
+// One Bulk API 2.0 result CSV page (#v0.7 §8 — lazy streaming). `columns` is the
+// page's header; `rows` the data rows (header stripped); `next_locator` is the
+// Sforce-Locator for the next page ("" when this is the last page).
+struct SalesforceBulkPage {
+    vector<string> columns;
+    vector<vector<string>> rows;
+    string next_locator;
 };
 
 // Snapshot of the org's REST /limits relevant to the quota governor (#v0.4).
@@ -93,10 +96,13 @@ public:
     // pagination state + loop guards (the lazy scan in #11 uses this).
     SalesforceQueryPage FetchPage(const string &path);
 
-    // Bulk API 2.0 query (#v0.3): create a query job, poll to JobComplete,
-    // download CSV result pages (following Sforce-Locator), return header+rows.
-    // Same auth/401-refresh as the REST path. For large extractions.
-    SalesforceBulkResult BulkQuery(const string &soql);
+    // Bulk API 2.0, lazy result streaming (#v0.7 §8). BulkStartJob creates the
+    // query job and polls to JobComplete (Failed/Aborted -> clean error), then
+    // returns the base /results path — NO result pages are downloaded. The scan
+    // then calls BulkFetchResultPage ON DEMAND, following the Sforce-Locator,
+    // so memory no longer scales with the full result. Same auth/401-refresh.
+    string BulkStartJob(const string &soql);
+    SalesforceBulkPage BulkFetchResultPage(const string &path);
 
     // Auto-transport probe (#v0.3 §2): estimate the row count for a COUNT() SOQL
     // via one REST /query call (reads `totalSize`; zero row egress). Returns

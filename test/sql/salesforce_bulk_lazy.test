@@ -1,0 +1,78 @@
+# name: test/sql/salesforce_bulk_lazy.test
+# description: v0.7 §8 — Bulk result pages stream lazily (LIMIT stops early)
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true}]}';
+
+statement ok
+SET sf_force_transport = 'bulk';
+
+# Two result pages via Sforce-Locator: page 1 = 001,002,003 ; page 2 = 004,005.
+statement ok
+SET sf_mock_bulk_results_body = 'Id
+001
+002
+003|~|Id
+004
+005';
+
+statement ok
+SET sf_mock_bulk_results_locator = 'loc1,';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- full scan: both pages fetched, order preserved -------------------------
+query I
+SELECT Id FROM sf.Account ORDER BY Id;
+----
+001
+002
+003
+004
+005
+
+query I
+SELECT pages_fetched = 2 AND rows_emitted = 5 AND bulk = true
+FROM salesforce_query_cost();
+----
+true
+
+# --- LIMIT within page 1: page 2 is NEVER downloaded (lazy streaming) -------
+query I
+SELECT Id FROM sf.Account LIMIT 2;
+----
+001
+002
+
+query I
+SELECT pages_fetched = 1 FROM salesforce_query_cost();
+----
+true
+
+# --- locator loop guard: a repeated locator errors cleanly ------------------
+statement ok
+SET sf_mock_bulk_results_body = 'Id
+001|~|Id
+002|~|Id
+003';
+
+statement ok
+SET sf_mock_bulk_results_locator = 'dup,dup,dup';
+
+statement error
+SELECT Id FROM sf.Account;
+----
+pagination loop
+
+statement ok
+DETACH sf;

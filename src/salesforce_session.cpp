@@ -328,22 +328,7 @@ static string JsonEscape(const string &s) {
                       msg.empty() ? "" : " - ", msg);
 }
 
-// Parse one CSV result page; first page sets the header, later pages repeat it.
-static void AppendCsvPage(const string &csv, SalesforceBulkResult &result) {
-    auto rows = sfcsv::Parse(csv);
-    if (rows.empty()) {
-        return;
-    }
-    size_t start = 1; // row 0 is the header on every page
-    if (result.columns.empty()) {
-        result.columns = rows[0];
-    }
-    for (size_t r = start; r < rows.size(); r++) {
-        result.rows.push_back(std::move(rows[r]));
-    }
-}
-
-SalesforceBulkResult SalesforceSession::BulkQuery(const string &soql) {
+string SalesforceSession::BulkStartJob(const string &soql) {
     const string base = "/services/data/" + config_.api_version + "/jobs/query";
 
     // 1) create the query job.
@@ -360,7 +345,8 @@ SalesforceBulkResult SalesforceSession::BulkQuery(const string &soql) {
     }
     const string job_path = base + "/" + job_id;
 
-    // 2) poll until JobComplete (bounded; short backoff between polls).
+    // 2) poll until JobComplete (bounded; short backoff). The server must finish
+    // the job before any results exist — only the result DOWNLOAD is lazy (#8).
     constexpr int kMaxPolls = 600;
     for (int i = 0;; i++) {
         HttpResponse st = AuthorizedSend(false, job_path, "");
@@ -381,31 +367,28 @@ SalesforceBulkResult SalesforceSession::BulkQuery(const string &soql) {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
 
-    // 3) download CSV result pages, following Sforce-Locator.
-    SalesforceBulkResult result;
-    string path = job_path + "/results";
-    std::unordered_set<string> seen;
-    constexpr idx_t kMaxPages = 1000000;
-    idx_t pages = 0;
-    while (true) {
-        HttpResponse rs = AuthorizedSend(false, path, "");
-        if (rs.status < 200 || rs.status >= 300) {
-            ThrowBulkError("job results", rs);
-        }
-        AppendCsvPage(rs.body, result);
-        string loc = rs.GetHeader("Sforce-Locator");
-        if (loc.empty() || loc == "null") {
-            break;
-        }
-        if (++pages >= kMaxPages) {
-            throw IOException("salesforce bulk: exceeded the maximum result page count.");
-        }
-        if (!seen.insert(loc).second) {
-            throw IOException("salesforce bulk: result pagination loop (locator repeated).");
-        }
-        path = job_path + "/results?locator=" + loc;
+    // Base /results path; the scan fetches pages lazily from here.
+    return job_path + "/results";
+}
+
+SalesforceBulkPage SalesforceSession::BulkFetchResultPage(const string &path) {
+    HttpResponse rs = AuthorizedSend(false, path, "");
+    if (rs.status < 200 || rs.status >= 300) {
+        ThrowBulkError("job results", rs);
     }
-    return result;
+    SalesforceBulkPage page;
+    auto rows = sfcsv::Parse(rs.body);
+    if (!rows.empty()) {
+        page.columns = std::move(rows[0]); // row 0 is the header on every page
+        for (size_t r = 1; r < rows.size(); r++) {
+            page.rows.push_back(std::move(rows[r]));
+        }
+    }
+    string loc = rs.GetHeader("Sforce-Locator");
+    if (loc != "null") {
+        page.next_locator = loc;
+    }
+    return page;
 }
 
 vector<string> SalesforceSession::GlobalDescribe() {

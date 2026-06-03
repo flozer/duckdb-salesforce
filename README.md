@@ -49,12 +49,18 @@ SET sf_force_transport = 'auto';   -- opt-in: probe row count, pick rest/bulk
 Notes / limitations of the `bulk` path:
 
 - **`LIMIT` is not honoured server-side.** Bulk API 2.0 query jobs ignore SOQL
-  `LIMIT`; the full result set is fetched and `LIMIT` is applied residually by
-  DuckDB. Use `rest` when you want a small `LIMIT` to read little.
-- The result is fetched **eagerly** in `InitGlobal` (all pages, following the
-  `Sforce-Locator`), so memory scales with the result size. v0.3 does not yet
-  stream Bulk pages into the scan.
-- A `Failed`/`Aborted` job raises a clean, secret-free error.
+  `LIMIT`; the job still runs to completion server-side. But since v0.7 §8 the
+  result **pages stream lazily**, so a small `LIMIT` stops pulling early and
+  later result pages are **never downloaded** (`salesforce_query_cost()` shows a
+  smaller `pages_fetched`). The job's server-side execution time is unchanged.
+- **Lazy result streaming (v0.7 §8).** The job is created and polled to
+  `JobComplete` in `InitGlobal` (a Bulk job must finish before results exist),
+  but result CSV pages are fetched **on demand** as the scan drains them
+  (following the `Sforce-Locator`) — memory no longer scales with the full
+  result. `salesforce_query_cost().pages_fetched` reports the real Bulk page
+  count (it was `NULL` before v0.7).
+- A `Failed`/`Aborted` job, a results HTTP error, or a repeated locator each
+  raise a clean, secret-free error.
 
 ### Auto-selection (`'auto'`, v0.3 §2)
 
@@ -148,7 +154,7 @@ SELECT * FROM salesforce_query_cost();
 | `projected_fields` / `total_fields` | projection-pushdown ratio |
 | `pushed_filters` / `residual_filters` | predicates pushed to SOQL vs applied by DuckDB |
 | `where_pushed` | the SOQL `WHERE` (empty → none) |
-| `pages_fetched` | REST query pages (**NULL for Bulk** — Bulk paging is internal) |
+| `pages_fetched` | query pages fetched — REST `queryMore` pages, or (since v0.7 §8) Bulk `/results` pages streamed |
 | `rows_emitted` | rows **delivered to DuckDB** (not rows downloaded) |
 | `bulk` | Bulk transport? |
 | `quota_remaining` / `quota_allowed` | governor decision (NULL when quota was not consulted, e.g. REST) |
