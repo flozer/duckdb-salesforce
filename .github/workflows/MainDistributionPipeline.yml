@@ -39,5 +39,7 @@ jobs:
       extension_name: salesforce
       duckdb_version: ${{ matrix.duckdb_version }}
       ci_tools_version: 18c54662c5326c5e74b6a3589ee0ea7d3faa6fc4
-      # Keep only linux_amd64 + windows_amd64 (exclude musl/arm/osx/wasm/mingw).
-      exclude_archs: "linux_amd64_musl;linux_arm64;linux_arm64_musl;osx_amd64;osx_arm64;wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw;windows_arm64"
+      # Keep linux_amd64 + windows_amd64 + osx_arm64 (native on macOS runners).
+      # osx_amd64 stays excluded (cross-compile, deferred); musl/arm-linux/wasm/
+      # mingw excluded.
+      exclude_archs: "linux_amd64_musl;linux_arm64;linux_arm64_musl;osx_amd64;wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw;windows_arm64"
