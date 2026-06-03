@@ -99,11 +99,16 @@ Done as a local audit. **No PR/push/branch on `duckdb/community-extensions`.**
    `osx_amd64` (cross-compile), arm-linux, musl, wasm, mingw remain excluded —
    a documented, conscious scope choice. **CI proves the macOS build + offline
    tests, NOT live Salesforce TLS on macOS** (see #5).
-5. ⚠️ **Live-TLS on macOS — known gap.** OpenSSL-via-vcpkg on macOS does not read
-   the macOS **Keychain**, so a *live* TLS connect may fail certificate
-   verification at runtime. CI never does live TLS, so this is not exercised by
-   the green osx_arm64 job. Future fix: load the macOS system trust store (as the
-   Windows `wincrypt` path does). Documented; not a blocker for build/test parity.
+5. ⚠️ **Live-TLS on macOS — known gap (ACCEPTED, not a blocker).** Maintainer
+   decision: ship as a documented gap; do not implement the macOS trust store or
+   run a macOS live smoke now. Status:
+   - macOS build + offline (mock) tests: **green** (osx_arm64, v1.5.2/v1.5.3).
+   - live Salesforce TLS on macOS: **not validated**.
+   - workaround: point OpenSSL at a CA bundle via `SSL_CERT_FILE` for live use.
+   - **not a blocker** for package / community readiness (CI is mock-only;
+     community parity is met by the linux_amd64 + windows_amd64 baseline).
+   - future fix (optional): load the macOS system trust store, mirroring the
+     Windows `wincrypt` path.
 6. ℹ️ **Signing** — community extensions are signed by DuckDB's pipeline; local
    builds stay unsigned (documented in INSTALL.md). No action until submission.
 7. ℹ️ **Submission mechanics** — a PR to `duckdb/community-extensions` adds
