@@ -1,0 +1,48 @@
+# Submission file for https://github.com/duckdb/community-extensions
+#
+# To publish via `INSTALL salesforce FROM community; LOAD salesforce;`, copy this
+# file to community-extensions/extensions/salesforce/description.yml in a fork of
+# duckdb/community-extensions and open a PR. The community CI builds + signs the
+# extension for every supported platform from the pinned repo ref below.
+#
+# STAGED in flozer/duckdb-salesforce only. Submitting it is HUMAN-GATED (gate
+# C.5) and has NOT been done.
+
+extension:
+  name: salesforce
+  description: Read-only access to Salesforce orgs as DuckDB SQL tables over the official REST and Bulk APIs — OAuth refresh-token auth, native ATTACH, projection + predicate pushdown, COUNT pushdown, lazy/auto/Bulk transports with PK chunking, a per-job API quota governor, parent-relationship STRUCT columns, and Tooling-API fast schema.
+  version: 0.8.1
+  language: C++
+  build: cmake
+  license: MIT
+  # Maintainer: Fernando Lozer — https://github.com/flozer
+  maintainers:
+    - flozer
+  # CI-validated platforms: linux_amd64 + windows_amd64 (baseline) + osx_arm64
+  # (extra). The rest stay excluded until built/tested (osx_amd64 = cross-compile;
+  # wasm has no sockets; mingw/arm/musl not validated). OpenSSL is the only
+  # third-party dependency, resolved from vcpkg.json by the community CI.
+  excluded_platforms: "osx_amd64;wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw;linux_amd64_musl;linux_arm64;linux_arm64_musl;windows_arm64"
+
+repo:
+  github: flozer/duckdb-salesforce
+  # community-extensions CI checks out exactly this ref to build + sign.
+  ref: v0.8.1
+
+docs:
+  hello_world: |
+    -- Published build is signed: INSTALL salesforce FROM community; LOAD salesforce;
+    -- Connect with an OAuth refresh-token Connected App:
+    ATTACH 'salesforce://myorg' AS sf (TYPE salesforce,
+        client_id 'xxx', client_secret 'xxx', refresh_token 'xxx');
+    SELECT Id, Name FROM sf.Account WHERE Name = 'Acme' LIMIT 10;
+  extended_description: |
+    duckdb-salesforce attaches a Salesforce org as a read-only DuckDB catalog.
+    Tables map to sObjects; SELECT runs over REST /query, Bulk API 2.0
+    (lazy-streamed, optional parallel PK chunking), or an auto-selected
+    transport, with SOQL projection + predicate pushdown, COUNT pushdown, a
+    per-job API quota governor, opt-in parent-relationship STRUCT columns, and
+    Tooling-API fast schema discovery. Authentication is OAuth 2.0
+    refresh-token only; credentials stay in memory and are never logged; TLS
+    server-certificate verification is always on. Read-only: all mutating
+    catalog operations throw.

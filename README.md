@@ -418,7 +418,7 @@ Docs are split by language under `docs/en/` (English, primary) and `docs/pt/`
 **Not yet submitted.** Per `docs/ARCHITECTURE.md` Appendix C.5, there is **no**
 push, PR, tag, or release to `duckdb/community-extensions` without an explicit
 human go/no-go. A staged descriptor lives at
-[docs/community/description.yml.draft](docs/community/description.yml.draft);
+[docs/community/description.yml](docs/community/description.yml);
 readiness is tracked in
 [docs/PRE_COMMUNITY_CHECKLIST.md](docs/PRE_COMMUNITY_CHECKLIST.md). Until then,
 build + load locally (see [docs/INSTALL.md](docs/INSTALL.md)).

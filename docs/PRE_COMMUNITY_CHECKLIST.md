@@ -39,7 +39,7 @@ auditable, and distributable**. Tick every box first.
 
 ## Metadata & legal (required by community-extensions)
 
-- [x] `description.yml` drafted (`docs/community/description.yml.draft`) — name,
+- [x] `description.yml` drafted (`docs/community/description.yml`) — name,
       description, version, maintainers, repo, license, language. (Staged, not
       submitted.)
 - [x] LICENSE present and compatible (MIT).
@@ -82,7 +82,7 @@ Done as a local audit. **No PR/push/branch on `duckdb/community-extensions`.**
 - ✅ **Version stamps** aligned to 0.8.0 (`vcpkg.json`).
 - ✅ **Read-only** + secret-free errors + TLS-on verified earlier.
 - ✅ **description.yml** drafted (staged at
-  [`community/description.yml.draft`](community/description.yml.draft)) — NOT
+  [`community/description.yml`](community/description.yml)) — NOT
   submitted.
 
 ### Gaps — status
