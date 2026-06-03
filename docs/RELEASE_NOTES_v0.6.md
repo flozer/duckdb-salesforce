@@ -1,10 +1,12 @@
-# Release Notes — v0.6.0 (DRAFT)
+# Release Notes — v0.6.0
 
-> **STATUS: DRAFT — NOT TAGGED.** Covers the v0.6 §6 (Tooling fast schema) +
-> §7 (parent relationship support) work landed on `flozer/duckdb-salesforce`
-> `main`. Do not tag until the **Before tagging** checklist is complete and a
-> human gives the go. Nothing in this cycle touches
-> `duckdb/community-extensions` (gate C.5).
+> **STATUS: VALIDATED — tagged `v0.6.0`.** Validated by maintainer-provided
+> manual live smoke evidence against an authorized org, plus a green offline
+> suite. The DEV did **not** independently rerun the live smoke (no `SF_LIVE_*`
+> credentials were present); the live validation is attributed to the
+> maintainer's reviewed evidence. Covers the v0.6 §6 (Tooling fast schema) + §7
+> (parent relationship support) work on `flozer/duckdb-salesforce` `main`.
+> Nothing in this cycle touches `duckdb/community-extensions` (gate C.5).
 
 Commits: `f0710b0` (§6 Tooling), `32cddcf` (§7 relationships).
 
@@ -102,16 +104,38 @@ must never contact Salesforce or require secrets.
 
 ---
 
-## Before tagging
+## Validation record (for tagging)
 
-All must be true before tagging `v0.6.0`:
+Gate status at tag time — all satisfied:
 
-- [ ] Offline test suite green (all `test/sql/*.test`).
-- [ ] Manual smoke: default-off (schema unchanged).
-- [ ] Manual smoke: Tooling fast schema.
-- [ ] Manual smoke: relationship `Contact.Account.Name`.
-- [ ] Human go.
+- [x] Offline test suite green — 19 `test/sql/*.test` files, verified by the DEV.
+- [x] Manual smoke: default-off (normal `Id, Name` rows, no STRUCT) — maintainer-attested.
+- [x] Manual smoke: Tooling fast schema (`salesforce_tooling_calls()` = 1) — maintainer-attested.
+- [x] Manual smoke: relationship `Contact.Account.Name` — maintainer-attested.
+- [x] Human go — maintainer authorized the tag.
 
-Only then: tag `v0.6.0` on `flozer/duckdb-salesforce`. **Nothing** in
+Maintainer smoke evidence (secret-free; reviewed from live captures against an
+authorized org):
+
+- `DESCRIBE sf.Contact` shows `Account` as `STRUCT(...)` (and other single-target
+  parents: `Owner`, `CreatedBy`, `LastModifiedBy`) → `sf_relationships='parent'`
+  active.
+- `SELECT … (Account).Name AS AccountName …` returned real parent names
+  (e.g. "CUMAR INC", "RIO STONES INC", "GREENE MARBLE & GRANITE CO.",
+  "LOUISIANA STONE LLC") with no errors → struct field access works.
+- A normal query returned flat `Id, Name` (no struct) → default/off flow intact.
+- `salesforce_tooling_calls()` = 1 from the prior Tooling capture → Tooling
+  fast-schema active.
+
+Attribution / honesty notes:
+
+- The live smoke was **not** independently rerun by the DEV — no `SF_LIVE_*`
+  credentials were present. The live validation is the **maintainer's** reviewed
+  evidence.
+- No secrets, tokens, org identifiers, or response bodies are recorded here
+  (parent account names above are maintainer-approved sample output).
+- Automated CI never contacts Salesforce and never requires secrets.
+
+Tag: annotated `v0.6.0` on `flozer/duckdb-salesforce`. **Nothing** pushed to
 `duckdb/community-extensions` (gate C.5). v0.7 (CI Win/Linux + package/release
 review) comes only after the tag.
