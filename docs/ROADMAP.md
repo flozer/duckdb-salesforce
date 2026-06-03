@@ -288,7 +288,7 @@ Acceptance:
 
 Goal: prepare for wider distribution while preserving C.5.
 
-### 15. CI Matrix: Windows And Linux
+### 15. CI Matrix: Linux + Windows (+ macOS arm64)
 
 Scope:
 
@@ -296,9 +296,17 @@ Scope:
 - Build/test against supported DuckDB releases.
 - Keep live Salesforce tests skipped in CI.
 
+Platform policy (delivered):
+
+- **Required baseline**: `linux_amd64` + `windows_amd64` (matches the
+  duckdb-firebird platform parity).
+- **Extra coverage**: `osx_arm64`.
+- **Excluded for now**: `osx_amd64`, `linux_arm64`/musl, `wasm`, `mingw`.
+
 Acceptance:
 
-- Windows and Linux builds pass offline tests.
+- Linux, Windows, and macOS (arm64) builds pass the offline (mock) tests on
+  DuckDB v1.5.2 + v1.5.3.
 - CI never requires Salesforce secrets.
 - Failures by DuckDB release are visible and version-scoped.
 

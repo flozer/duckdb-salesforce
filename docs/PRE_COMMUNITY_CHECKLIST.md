@@ -12,7 +12,10 @@ auditable, and distributable**. Tick every box first.
 ## Build & test
 
 - [ ] Offline (mock) test suite green on **all** `test/sql/*.test`.
-- [ ] CI green on the full matrix: **Windows + Linux × DuckDB v1.5.2, v1.5.3**.
+- [ ] CI green on the platform matrix: **Linux + Windows (required baseline) +
+      macOS arm64 (extra) × DuckDB v1.5.2, v1.5.3**. Salesforce thus covers the
+      duckdb-firebird platform parity (linux_amd64 + windows_amd64) **plus**
+      `osx_arm64`. `osx_amd64`/arm-linux/musl/wasm/mingw excluded for now.
 - [ ] First **Linux** build proven (Ubuntu CI job) — was not provable in the
       maintainer's local box; CI is the proof.
 - [ ] Clean build from a fresh `git submodule update --init --recursive`.

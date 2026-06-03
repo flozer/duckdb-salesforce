@@ -947,7 +947,8 @@ These six are flagged now so v0.1–v0.7 implementations avoid baking in live-on
 > **HISTORICAL.** This appendix records the original v0.1 vertical slice and its
 > gates. v0.1 shipped; the project is now at **v0.8** (REST + Bulk + auto, quota
 > governor, COUNT pushdown, parent relationships, Tooling schema, PK chunking,
-> Win/Linux CI). Items deferred to "v0.2" below landed across v0.2–v0.8. The
+> Linux/Windows/macOS-arm64 CI). Items deferred to "v0.2" below landed across
+> v0.2–v0.8. The
 > **security gate (C.4/C.5) remains in force** for every release. Kept verbatim
 > for provenance — not rewritten.
 >

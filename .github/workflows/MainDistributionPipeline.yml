@@ -6,8 +6,10 @@
 # This workflow does not set SF_LIVE_* and must never do so.
 #
 # Delegates to DuckDB's standard reusable extension pipeline (extension-ci-tools,
-# pinned to the same commit as the submodule). Restricted to linux_amd64 +
-# windows_amd64. Nothing here touches duckdb/community-extensions (gate C.5):
+# pinned to the same commit as the submodule). Platforms: linux_amd64 +
+# windows_amd64 (required baseline) + osx_arm64 (extra coverage); osx_amd64 /
+# linux-arm / musl / wasm / mingw stay excluded. Nothing here touches
+# duckdb/community-extensions (gate C.5):
 # it builds + tests on the flozer repo only.
 #
 # NOTE: the Linux build was not provable in the maintainer's local box
