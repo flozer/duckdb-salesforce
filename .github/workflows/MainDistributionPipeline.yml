@@ -1,0 +1,43 @@
+# CI — build + offline test matrix (#v0.8 distribution hardening).
+#
+# MOCK-ONLY by construction: the SQL suite under test/sql/*.test uses the
+# sf_mock_* hooks; it NEVER contacts Salesforce and needs NO secrets. The
+# *_live.test files are `require`-gated and skip when no live org is configured.
+# This workflow does not set SF_LIVE_* and must never do so.
+#
+# Delegates to DuckDB's standard reusable extension pipeline (extension-ci-tools,
+# pinned to the same commit as the submodule). Restricted to linux_amd64 +
+# windows_amd64. Nothing here touches duckdb/community-extensions (gate C.5):
+# it builds + tests on the flozer repo only.
+#
+# NOTE: the Linux build was not provable in the maintainer's local box
+# (no Linux toolchain); the Ubuntu/linux_amd64 job here is the FIRST Linux build
+# proof. Accepted for v0.8 hardening.
+
+name: Main Distribution Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: DuckDB ${{ matrix.duckdb_version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Cut 1 matrix (v0.8): the two proven DuckDB versions only.
+        duckdb_version: ["v1.5.2", "v1.5.3"]
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@18c54662c5326c5e74b6a3589ee0ea7d3faa6fc4
+    with:
+      extension_name: salesforce
+      duckdb_version: ${{ matrix.duckdb_version }}
+      ci_tools_version: 18c54662c5326c5e74b6a3589ee0ea7d3faa6fc4
+      # Keep only linux_amd64 + windows_amd64 (exclude musl/arm/osx/wasm/mingw).
+      exclude_archs: "linux_amd64_musl;linux_arm64;linux_arm64_musl;osx_amd64;osx_arm64;wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw;windows_arm64"
