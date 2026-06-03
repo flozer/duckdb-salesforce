@@ -33,7 +33,7 @@ lê os resultados; nunca grava de volta no Salesforce.
 ### `ATTACH 'salesforce://<org>' AS sf (TYPE salesforce, ...)`
 
 Anexa uma org do Salesforce como um catálogo DuckDB somente leitura. Os
-sObjects são expostos como tabelas e resolvidos de forma preguiçosa — um
+sObjects são expostos como tabelas e resolvidos sob demanda (lazy) — um
 sObject só é descrito quando é referenciado pela primeira vez, não no
 momento do attach.
 
@@ -73,7 +73,7 @@ Notas de comportamento:
 - **Fluxo OAuth de refresh token.** A extensão troca o refresh token por um
   access token de curta duração e pela URL da instância; renova conforme
   necessário.
-- **Resolução preguiçosa de sObject.** O schema de um sObject é buscado no
+- **Lazy sObject Resolution.** O schema de um sObject é buscado sob demanda, no
   primeiro uso, então anexar uma org grande é barato.
 - Use `login_url` para apontar para um sandbox
   (`https://test.salesforce.com`) ou um host de login de My Domain.
@@ -208,9 +208,9 @@ Colunas de saída:
 | `transport_reason` | VARCHAR | Por que este transporte foi escolhido |
 | `projected_fields` | BIGINT | Campos requisitados no SELECT |
 | `total_fields` | BIGINT | Total de campos no sObject |
-| `pushed_filters` | BIGINT | Predicados empurrados para o SOQL |
+| `pushed_filters` | BIGINT | Predicados com pushdown para o SOQL |
 | `residual_filters` | BIGINT | Predicados mantidos e avaliados no DuckDB |
-| `where_pushed` | VARCHAR | A cláusula WHERE efetivamente empurrada |
+| `where_pushed` | VARCHAR | A cláusula WHERE efetivamente enviada via pushdown |
 | `pages_fetched` | BIGINT | Páginas de resultado da API buscadas |
 | `rows_emitted` | BIGINT | Linhas retornadas ao DuckDB |
 | `bulk` | BOOLEAN | Se o transporte Bulk foi usado |
@@ -333,28 +333,28 @@ nomeados de credencial se aplicam).
 
 ## Referência de pushdown
 
-O planejador de scan empurra para o SOQL o máximo da consulta que for
+O planejador de scan aplica pushdown ao SOQL do máximo da consulta que for
 seguro, e mantém o restante como um filtro **residual** avaliado no DuckDB.
 Um filtro residual nunca altera a correção — significa apenas que mais
 linhas são buscadas do que o estritamente necessário.
 
-Empurrado para o SOQL:
+Com pushdown para o SOQL:
 
 - **Projeção** — apenas os campos referenciados são requisitados.
 - **Comparações** — `=`, `<>`, `<`, `<=`, `>`, `>=`.
 - **Testes de nulo** — `IS NULL`, `IS NOT NULL`.
-- **`AND`** de predicados empurráveis.
+- **`AND`** de predicados elegíveis a pushdown.
 
-Empurrado como pré-filtro superconjunto e depois mantido como residual (o
+Pushdown como pré-filtro superconjunto e depois mantido como residual (o
 DuckDB reavalia exatamente):
 
-- **`IN`** — empurrado como pré-filtro superconjunto, mantido residual.
-- **`LIKE`** prefixo / sufixo / contém — empurrado como superconjunto,
+- **`IN`** — pushdown como pré-filtro superconjunto, mantido residual.
+- **`LIKE`** prefixo / sufixo / contém — pushdown como superconjunto,
   mantido residual.
-- **`OR`** — empurrado apenas quando todos os filhos são, eles mesmos,
-  seguros de empurrar; empurrado como superconjunto, mantido residual.
+- **`OR`** — pushdown apenas quando todos os filhos são, eles mesmos,
+  seguros; enviado como superconjunto, mantido residual.
 
-Mantido totalmente residual (não empurrado):
+Mantido totalmente residual (sem pushdown):
 
 - Chamadas de função em predicados.
 - `NOT`.
@@ -364,8 +364,8 @@ Mantido totalmente residual (não empurrado):
 
 Agregações:
 
-- `COUNT(*)` é empurrado como um `COUNT()` de SOQL.
-- Agregações diferentes de `COUNT(*)` **não** são empurradas.
+- `COUNT(*)` recebe pushdown como um `COUNT()` de SOQL (COUNT pushdown).
+- Agregações diferentes de `COUNT(*)` **não** recebem pushdown.
 
 Use `salesforce_query_cost()` (colunas `pushed_filters`, `residual_filters`,
 `where_pushed`, `count_pushdown`) para ver exatamente o que chegou ao
