@@ -1,11 +1,15 @@
-# Release Notes — v0.7.0 (DRAFT — NOT TAGGED)
+# Release Notes — v0.7.0
 
-> **STATUS: DRAFT — NOT TAGGED.** Covers v0.7 §8 (lazy Bulk result streaming) +
-> §9 cut 1 (sequential PK chunking) on `flozer/duckdb-salesforce` `main`. Do not
-> tag until the **Before tagging** checklist is complete and a human gives the
-> go. Nothing in this cycle touches `duckdb/community-extensions` (gate C.5).
+> **STATUS: VALIDATED — tagged `v0.7.0`.** Validated by maintainer-provided
+> manual live smoke evidence against an authorized org, plus a green offline
+> suite. The DEV did **not** independently rerun the live smoke (no `SF_LIVE_*`
+> credentials were present); the live validation is attributed to the
+> maintainer's reviewed evidence. Covers v0.7 §8 (lazy Bulk result streaming) +
+> §9 cut 1 (sequential PK chunking) on `flozer/duckdb-salesforce` `main`.
+> Nothing in this cycle touches `duckdb/community-extensions` (gate C.5).
 
-Commits: `f49a41d` (§8 lazy streaming), `888c33a` (§9 PK chunking).
+Commits: `f49a41d` (§8 lazy streaming), `888c33a` (§9 PK chunking), `cc382bf`
+(§9 boundary-length fix, #27), guidance-text patch.
 
 ---
 
@@ -90,17 +94,37 @@ must never contact Salesforce or require secrets.
 
 ---
 
-## Before tagging
+## Validation record (for tagging)
 
-All must be true before tagging `v0.7.0`:
+Gate status at tag time — all satisfied:
 
-- [ ] Offline test suite green (all `test/sql/*.test`).
-- [ ] Manual smoke: Bulk small `LIMIT` (few pages).
-- [ ] Manual smoke: Bulk full scan (multiple pages).
-- [ ] Manual smoke: `sf_bulk_chunks=2/3` union correct.
-- [ ] Manual smoke: quota allowed + `salesforce_query_cost()` reviewed.
-- [ ] Human go.
+- [x] Offline test suite green — 21 `test/sql/*.test` files, verified by the DEV.
+- [x] Manual smoke: Bulk lazy streaming (§8) — maintainer-attested.
+- [x] Manual smoke: `sf_bulk_chunks=2` and `=3` — maintainer-attested.
+- [x] Manual smoke: quota allowed + `salesforce_query_cost()` reviewed — maintainer-attested.
+- [x] Human go — maintainer authorized the tag.
 
-Only then: tag `v0.7.0` on `flozer/duckdb-salesforce`. **Nothing** in
+Maintainer smoke evidence (secret-free; reviewed from `salesforce_query_cost()` /
+`salesforce_last_quota()` captures against an authorized org):
+
+| `sf_bulk_chunks` | count | `bulk_chunks` | `pages_fetched` | `rows_emitted` | `quota_allowed` |
+| --- | --- | --- | --- | --- | --- |
+| 2 | 54712 | 2 | 2 | 54712 | true |
+| 3 | 54712 | 3 | 3 | 54712 | true |
+
+- Both chunk counts return the **same total (54712)** → disjoint + exhaustive
+  partition (no dups, no gaps); no `INVALID_QUERY_FILTER_OPERATOR` → the §9
+  boundary-length fix (#27) holds live.
+- Quota healthy: remaining ~83k, threshold ~14180, `allowed=true`.
+
+Attribution / honesty notes:
+
+- The live smoke was **not** independently rerun by the DEV — no `SF_LIVE_*`
+  credentials were present. The live validation is the **maintainer's** reviewed
+  evidence.
+- No secrets, tokens, org identifiers, or response bodies are recorded here.
+- Automated CI never contacts Salesforce and never requires secrets.
+
+Tag: annotated `v0.7.0` on `flozer/duckdb-salesforce`. **Nothing** pushed to
 `duckdb/community-extensions` (gate C.5). §9b (parallel Bulk execution) comes
 only after the tag.

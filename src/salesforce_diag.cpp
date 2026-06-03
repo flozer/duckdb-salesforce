@@ -51,7 +51,8 @@ string BuildGuidance(const ScanCost &c) {
         hints.push_back("all fields projected — SELECT fewer columns to cut egress");
     }
     if (c.bulk) {
-        hints.push_back("Bulk downloads the whole result eagerly (LIMIT is not server-side)");
+        hints.push_back("Bulk job completes server-side first; result pages stream lazily; "
+                        "LIMIT is not server-side");
     }
     if (c.count_pushdown) {
         hints.push_back(StringUtil::Format(
