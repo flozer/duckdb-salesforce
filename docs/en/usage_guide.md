@@ -96,7 +96,7 @@ ATTACH 'salesforce://<org>' AS sf (
 Use `login_url 'https://test.salesforce.com'` for a sandbox. To obtain the
 `client_id`, `client_secret`, and `refresh_token`, set up a Connected App
 in your org and complete the OAuth flow as described in
-[docs/connected_app.md](../connected_app.md).
+[docs/CONNECTED_APP.md](../CONNECTED_APP.md).
 
 ## 4. First queries
 

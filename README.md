@@ -11,7 +11,8 @@ catalog/storage + table-function scanner + pushdown design, different backend.
 > (lazy-streamed, optional PK chunking), or `auto`, with SOQL projection +
 > predicate pushdown, COUNT pushdown, a per-job quota governor, parent
 > relationship (STRUCT) columns, and Tooling-API fast schema. CI builds + runs
-> the offline (mock) suite on **Windows + Linux** across DuckDB v1.5.2/v1.5.3.
+> the offline (mock) suite on **Windows + Linux + macOS (arm64)** across DuckDB
+> v1.5.2/v1.5.3.
 > **Live validation is manual-only**, run only against an org the maintainer is
 > authorized to use; **automated CI never contacts Salesforce or requires
 > secrets**. See [docs/INSTALL.md](docs/INSTALL.md) and the limitations below.

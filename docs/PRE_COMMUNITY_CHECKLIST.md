@@ -91,17 +91,23 @@ Done as a local audit. **No PR/push/branch on `duckdb/community-extensions`.**
 3. ✅ **Stale-string sweep** — README + SECURITY refreshed to v0.8; `vcpkg.json`
    0.8.0; `docs/ARCHITECTURE.md` Appendix C marked HISTORICAL + `repo.ref`
    example updated. (Appendix C kept verbatim for provenance.)
-4. 🟦 **Platform coverage — conscious decision (deferred).** Validated platforms
-   today: **`linux_amd64` + `windows_amd64`** only (CI). macOS/arm/wasm are
-   **out of scope for now** and stay in `excluded_platforms`. **Known gap before
-   a broad community PR**: a wide submission would want macOS at least. Revisit
-   before submission.
-5. ℹ️ **Signing** — community extensions are signed by DuckDB's pipeline; local
+4. ✅ **Platform coverage** — CI-validated: **`linux_amd64` + `windows_amd64` +
+   `osx_arm64`** (build + offline mock suite, all green on DuckDB v1.5.2/v1.5.3).
+   `osx_amd64` (cross-compile), arm-linux, musl, wasm, mingw remain excluded —
+   a documented, conscious scope choice. **CI proves the macOS build + offline
+   tests, NOT live Salesforce TLS on macOS** (see #5).
+5. ⚠️ **Live-TLS on macOS — known gap.** OpenSSL-via-vcpkg on macOS does not read
+   the macOS **Keychain**, so a *live* TLS connect may fail certificate
+   verification at runtime. CI never does live TLS, so this is not exercised by
+   the green osx_arm64 job. Future fix: load the macOS system trust store (as the
+   Windows `wincrypt` path does). Documented; not a blocker for build/test parity.
+6. ℹ️ **Signing** — community extensions are signed by DuckDB's pipeline; local
    builds stay unsigned (documented in INSTALL.md). No action until submission.
-6. ℹ️ **Submission mechanics** — a PR to `duckdb/community-extensions` adds
+7. ℹ️ **Submission mechanics** — a PR to `duckdb/community-extensions` adds
    `extensions/salesforce/description.yml` pointing at a tagged ref. Human-gated
    (C.5); not prepared as a branch/PR anywhere.
 
-**Net:** mechanical gaps closed. Package is **submission-ready** except the
-deliberate platform-scope choice (#4) and the **explicit human GO** (C.5) — both
-remain open by design. No submission performed.
+**Net:** mechanical + platform gaps closed (CI green on Linux/Windows/macOS).
+Package is **submission-ready** except the documented live-macOS-TLS gap (#5,
+not a parity blocker) and the **explicit human GO** (C.5) — which remains open
+by design. No submission performed.

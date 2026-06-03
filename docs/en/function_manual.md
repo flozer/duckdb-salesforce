@@ -7,15 +7,34 @@ files aligned when public behavior changes.
 
 ## How to read this manual
 
+This manual is written for a beginner. For each important function and
+setting it follows the same four-part shape:
+
+- **What it does** — a one-line plain-English explanation.
+- **How it works** — the mechanics, plus the output columns or the
+  type/default/allowed values.
+- **Why use it** — when and why you reach for it.
+- **Daily use** — a small, runnable SQL example.
+
+Every example assumes you have already attached an org as `sf` (see the
+ATTACH section) and uses the familiar `sf.Account` / `sf.Contact` tables.
+
 Use this document as a behavior reference, not as a product roadmap. Future
 functions mentioned in the roadmap are not available until they are
 implemented, tested, and documented here.
 
-This manual covers every user-facing SQL surface the extension exposes:
-the `salesforce` ATTACH storage type, session settings, diagnostic table
-functions, and standalone utility functions. A clearly separated final
-section documents debug/test-only entry points that are **not a stable
-API**.
+A clearly separated final section documents debug/test-only entry points
+that are **not a stable API**.
+
+### Table of contents
+
+- [Runtime requirement](#runtime-requirement)
+- [Level 1 - Attached org](#level-1---attached-org-storage-type-salesforce)
+- [Level 2 - Session settings](#level-2---session-settings-set-)
+- [Level 3 - Diagnostics and observability](#level-3---diagnostics-and-observability)
+- [Level 4 - Utility / standalone functions](#level-4---utility--standalone-functions)
+- [Pushdown reference](#pushdown-reference)
+- [Debug / test-only functions](#debug--test-only-functions)
 
 ## Runtime requirement
 
@@ -32,27 +51,25 @@ and reads results; it never writes back to Salesforce.
 
 ### `ATTACH 'salesforce://<org>' AS sf (TYPE salesforce, ...)`
 
-Attaches a Salesforce org as a read-only DuckDB catalog. sObjects are
-exposed as tables and resolved lazily — an sObject is described only when
-it is first referenced, not at attach time.
+#### What it does
 
-```sql
-ATTACH 'salesforce://production' AS sf (
-  TYPE salesforce,
-  client_id     'YOUR_CONSUMER_KEY',
-  client_secret 'YOUR_CONSUMER_SECRET',
-  refresh_token 'YOUR_REFRESH_TOKEN'
-);
+Connects a Salesforce org to your DuckDB session as a read-only catalog
+named `sf`. After this runs, each Salesforce sObject looks like a normal
+table you can query — for example `sf.Account` or `sf.Contact`.
 
-SELECT Id, Name, AnnualRevenue
-FROM sf.Account
-WHERE BillingCountry = 'Brazil';
-```
+#### How it works
+
+sObjects are resolved lazily: an sObject's schema is fetched only when you
+first reference it, not at attach time, so attaching even a huge org is
+cheap. Authentication uses the OAuth refresh-token flow — the extension
+exchanges your refresh token for a short-lived access token and the
+instance URL, and refreshes as needed. The catalog is **read-only**: no
+INSERT/UPDATE/DELETE/DDL is allowed against attached sObjects.
 
 The `salesforce://<org>` string is a logical label for the attached org;
 `<org>` is an arbitrary identifier you choose (for example `production` or
-`sandbox`). It does not encode the instance host — the actual instance URL
-is discovered from the OAuth token exchange.
+`sandbox`). It does **not** encode the instance host — the actual instance
+URL is discovered from the OAuth token exchange.
 
 Parameters:
 
@@ -65,29 +82,51 @@ Parameters:
 | `login_url` | no | `https://login.salesforce.com` | OAuth host; use the My Domain / sandbox host where applicable |
 | `api_version` | no | extension default | Salesforce API version, e.g. `60.0` |
 
-Behavior notes:
+Use `login_url` to point at a sandbox (`https://test.salesforce.com`) or a
+My Domain login host.
 
-- **Read-only catalog.** No INSERT/UPDATE/DELETE/DDL against attached
-  sObjects.
-- **OAuth refresh-token flow.** The extension exchanges the refresh token
-  for a short-lived access token and the instance URL; it refreshes as
-  needed.
-- **Lazy sObject resolution.** Schema for an sObject is fetched on first
-  use, so attaching a large org is cheap.
-- Use `login_url` to point at a sandbox (`https://test.salesforce.com`) or
-  a My Domain login host.
+#### Why use it
 
-### `information_schema` via `ATTACH`
+It is the entry point for everything else. Without an attached org you have
+no `sf.Account` / `sf.Contact` tables to query, and none of the session
+settings or diagnostics have anything to act on.
 
-After attaching, use the standard DuckDB catalog views to inspect exposed
-sObjects and their columns:
+#### Daily use
 
 ```sql
 ATTACH 'salesforce://production' AS sf (
   TYPE salesforce,
-  client_id 'KEY', client_secret 'SECRET', refresh_token 'TOKEN'
+  client_id     'YOUR_CONSUMER_KEY',
+  client_secret 'YOUR_CONSUMER_SECRET',
+  refresh_token 'YOUR_REFRESH_TOKEN'
 );
 
+SELECT Id, Name, AnnualRevenue
+FROM sf.Account
+WHERE Industry = 'Technology';
+```
+
+### Inspecting the catalog via `information_schema`
+
+#### What it does
+
+Lists the sObjects and columns the attached org exposes, using the standard
+DuckDB catalog views — no special Salesforce function needed.
+
+#### How it works
+
+Once attached, the org's sObjects appear in the normal DuckDB catalog.
+Filter `information_schema.tables` (and `.columns`) by the catalog name you
+used in `ATTACH` (here, `sf`).
+
+#### Why use it
+
+To discover which tables and columns are available before you write a
+query, or to confirm an sObject was resolved.
+
+#### Daily use
+
+```sql
 SELECT table_name
 FROM information_schema.tables
 WHERE table_catalog = 'sf';
@@ -96,86 +135,367 @@ WHERE table_catalog = 'sf';
 ## Level 2 - Session settings (`SET ...`)
 
 These settings tune scan transport selection, the API-quota governor,
-schema discovery, relationship expansion, and Bulk chunking. Each applies
-to the current DuckDB session.
+schema discovery, relationship expansion, and Bulk chunking. Each `SET`
+applies to the current DuckDB session.
 
-### Transport selection
+### `sf_force_transport`
 
-| Setting | Type | Default | Meaning |
-|---|---|---|---|
-| `sf_force_transport` | VARCHAR | `'rest'` | Scan transport: `'rest'`, `'bulk'`, or `'auto'` |
-| `sf_auto_bulk_threshold` | BIGINT | `50000` | In `'auto'`: row count above which Bulk is chosen |
-| `sf_auto_probe` | BOOLEAN | `true` | In `'auto'`: run the `COUNT()` probe to estimate rows; `false` => default to REST |
+#### What it does
+
+Chooses how a scan fetches rows from Salesforce: the REST API, the Bulk
+API, or an automatic per-scan decision.
+
+#### How it works
+
+- Type: `VARCHAR`
+- Default: `'rest'`
+- Allowed values: `'rest'`, `'bulk'`, `'auto'`
+
+With `'rest'` every scan uses the REST API. With `'bulk'` every scan uses
+the Bulk API. With `'auto'` the extension decides per scan (see
+`sf_auto_probe` and `sf_auto_bulk_threshold`).
+
+#### Why use it
+
+REST is best for small/medium result sets and low latency; Bulk is best for
+very large extracts. Set this when you know the workload, or use `'auto'`
+to let the planner pick.
+
+#### Daily use
+
+```sql
+SET sf_force_transport = 'bulk';
+
+SELECT Id, Name FROM sf.Account;
+```
+
+### `sf_auto_bulk_threshold`
+
+#### What it does
+
+In `'auto'` mode, sets the estimated row count above which Bulk is chosen
+instead of REST.
+
+#### How it works
+
+- Type: `BIGINT`
+- Default: `50000`
+
+Only consulted when `sf_force_transport = 'auto'`. If the estimated row
+count for a scan exceeds this value, the planner chooses Bulk; otherwise it
+chooses REST.
+
+#### Why use it
+
+To tune where the REST/Bulk boundary sits for your org and network — raise
+it to keep more scans on REST, lower it to push more scans to Bulk.
+
+#### Daily use
 
 ```sql
 SET sf_force_transport = 'auto';
 SET sf_auto_bulk_threshold = 100000;
+
+SELECT Id, Name FROM sf.Account;
 ```
 
-When `sf_force_transport` is `'auto'`, the extension decides per scan: with
-`sf_auto_probe = true` it runs a `COUNT()` probe and chooses Bulk when the
-estimate exceeds `sf_auto_bulk_threshold`; with `sf_auto_probe = false` it
-skips the probe and defaults to REST.
+### `sf_auto_probe`
+
+#### What it does
+
+In `'auto'` mode, decides whether to run a `COUNT()` probe to estimate the
+row count before choosing a transport.
+
+#### How it works
+
+- Type: `BOOLEAN`
+- Default: `true`
+
+When `true` and `sf_force_transport = 'auto'`, the extension runs a
+`COUNT()` probe and compares the estimate against `sf_auto_bulk_threshold`.
+When `false`, it skips the probe and simply defaults to REST.
+
+#### Why use it
+
+The probe costs one extra API call but gives an accurate transport
+decision. Disable it (`false`) to save that call when you would rather
+default to REST anyway.
+
+#### Daily use
+
+```sql
+SET sf_force_transport = 'auto';
+SET sf_auto_probe = false;   -- skip the COUNT() probe; default to REST
+
+SELECT Id, Name FROM sf.Account;
+```
 
 ### API-quota governor
 
 The governor consults the Salesforce `/limits` resource and the
 `DailyApiRequests` limit before a scan, to avoid exhausting the org's daily
-API allowance.
-
-| Setting | Type | Default | Meaning |
-|---|---|---|---|
-| `sf_quota_enabled` | BOOLEAN | `true` | Governor on; `false` skips the `/limits` consultation entirely |
-| `sf_quota_enforce` | BOOLEAN | `true` | `false` = warn-only (consult `/limits` but never block) |
-| `sf_quota_fail_open` | BOOLEAN | `true` | If `/limits` is unavailable, allow the scan; `false` = block |
-| `sf_quota_reserve_pct` | BIGINT | `10` | Reserve this percent of `DailyApiRequests.Max` |
-| `sf_quota_min_remaining` | BIGINT | `1000` | Absolute floor of remaining requests below which scans are blocked |
-| `sf_quota_cache_seconds` | BIGINT | `60` | In-memory `/limits` TTL per `instance_url` (`0` = no cache) |
-
-```sql
-SET sf_quota_reserve_pct = 20;
-SET sf_quota_min_remaining = 5000;
-```
+API allowance. The settings below control it.
 
 The governor blocks a scan when the projected remaining requests would fall
 below either the reserve (`sf_quota_reserve_pct` of `DailyApiRequests.Max`)
-or the absolute floor (`sf_quota_min_remaining`). With
-`sf_quota_enforce = false` it still consults `/limits` and records the
-decision but never blocks. With `sf_quota_fail_open = true` an unavailable
-`/limits` endpoint allows the scan; set it to `false` to block when the
-limit cannot be read.
+or the absolute floor (`sf_quota_min_remaining`).
 
-### Schema discovery and relationships
+### `sf_quota_enabled`
 
-| Setting | Type | Default | Meaning |
-|---|---|---|---|
-| `sf_schema_source` | VARCHAR | `'describe'` | Schema discovery source: `'describe'` or `'tooling'` |
-| `sf_relationships` | VARCHAR | `'off'` | `'off'`, or `'parent'` to expose parent relationships as STRUCT columns |
+#### What it does
+
+Turns the API-quota governor on or off.
+
+#### How it works
+
+- Type: `BOOLEAN`
+- Default: `true`
+
+When `true`, the governor consults `/limits` before scans. When `false`,
+the `/limits` consultation is skipped entirely and no quota check happens.
+
+#### Why use it
+
+Leave it on to protect the org's daily API budget. Turn it off only when
+you are certain quota is not a concern and want to avoid the `/limits`
+call.
+
+#### Daily use
+
+```sql
+SET sf_quota_enabled = false;   -- no quota consultation at all
+
+SELECT Id, Name FROM sf.Account;
+```
+
+### `sf_quota_enforce`
+
+#### What it does
+
+Chooses whether the governor actually blocks scans, or only warns.
+
+#### How it works
+
+- Type: `BOOLEAN`
+- Default: `true`
+
+When `true`, the governor can block a scan that would breach the limits.
+When `false`, it still consults `/limits` and records the decision but
+never blocks (warn-only).
+
+#### Why use it
+
+Use warn-only mode (`false`) to observe what the governor would do without
+risking a blocked query while you tune the thresholds.
+
+#### Daily use
+
+```sql
+SET sf_quota_enforce = false;   -- consult limits but never block
+
+SELECT Id, Name FROM sf.Account;
+SELECT * FROM salesforce_last_quota();
+```
+
+### `sf_quota_fail_open`
+
+#### What it does
+
+Decides what happens when the `/limits` endpoint cannot be read.
+
+#### How it works
+
+- Type: `BOOLEAN`
+- Default: `true`
+
+When `true`, an unavailable `/limits` endpoint allows the scan to proceed
+(fail open). When `false`, an unavailable `/limits` endpoint blocks the
+scan (fail closed).
+
+#### Why use it
+
+Keep it `true` so a transient `/limits` outage does not break your queries;
+set it `false` when you would rather refuse to run than risk overshooting
+quota.
+
+#### Daily use
+
+```sql
+SET sf_quota_fail_open = false;   -- block if /limits cannot be read
+
+SELECT Id, Name FROM sf.Account;
+```
+
+### `sf_quota_reserve_pct`
+
+#### What it does
+
+Reserves a percentage of the daily API maximum as an untouchable buffer.
+
+#### How it works
+
+- Type: `BIGINT`
+- Default: `10`
+
+The governor blocks a scan whose projected remaining requests would drop
+below this percent of `DailyApiRequests.Max`.
+
+#### Why use it
+
+To keep a safety margin of daily API calls for other systems and ad-hoc
+work. Raise it to be more conservative.
+
+#### Daily use
+
+```sql
+SET sf_quota_reserve_pct = 20;   -- keep 20% of the daily max in reserve
+
+SELECT Id, Name FROM sf.Account;
+```
+
+### `sf_quota_min_remaining`
+
+#### What it does
+
+Sets an absolute floor of remaining API requests below which scans are
+blocked.
+
+#### How it works
+
+- Type: `BIGINT`
+- Default: `1000`
+
+Independent of the percentage reserve: if projected remaining requests
+would fall below this absolute number, the scan is blocked.
+
+#### Why use it
+
+For a hard, count-based guardrail that does not scale with the org's
+maximum — useful when you want a fixed cushion.
+
+#### Daily use
+
+```sql
+SET sf_quota_min_remaining = 5000;   -- never let remaining drop below 5000
+
+SELECT Id, Name FROM sf.Account;
+```
+
+### `sf_quota_cache_seconds`
+
+#### What it does
+
+Caches the `/limits` response for a number of seconds to avoid re-fetching
+it on every scan.
+
+#### How it works
+
+- Type: `BIGINT`
+- Default: `60`
+
+The `/limits` result is cached in memory per `instance_url` for this many
+seconds. A value of `0` disables the cache (every scan re-reads `/limits`).
+
+#### Why use it
+
+A short cache cuts repeated `/limits` calls during a burst of queries.
+Lower it (or set `0`) when you need the freshest possible remaining-quota
+reading.
+
+#### Daily use
+
+```sql
+SET sf_quota_cache_seconds = 0;   -- always read fresh /limits
+
+SELECT Id, Name FROM sf.Account;
+```
+
+### `sf_schema_source`
+
+#### What it does
+
+Chooses which Salesforce API supplies field metadata when an sObject's
+schema is resolved.
+
+#### How it works
+
+- Type: `VARCHAR`
+- Default: `'describe'`
+- Allowed values: `'describe'`, `'tooling'`
+
+With `'describe'` the standard Describe API supplies field metadata; with
+`'tooling'` the Tooling API does.
+
+#### Why use it
+
+Switch to `'tooling'` when you need metadata the standard Describe API does
+not surface; otherwise leave it on `'describe'`.
+
+#### Daily use
 
 ```sql
 SET sf_schema_source = 'tooling';
-SET sf_relationships = 'parent';
+
+SELECT Id, Name FROM sf.Account;
 ```
 
-`sf_schema_source` selects which API supplies field metadata: the standard
-Describe API (`'describe'`) or the Tooling API (`'tooling'`). With
-`sf_relationships = 'parent'`, parent relationships are surfaced as nested
-STRUCT columns alongside the flat fields.
+### `sf_relationships`
 
-### Bulk chunking
+#### What it does
 
-| Setting | Type | Default | Meaning |
-|---|---|---|---|
-| `sf_bulk_chunks` | BIGINT | `1` | PK chunk count for Bulk scans (cap `8`, Bulk-only) |
+Controls whether parent relationships are exposed as nested STRUCT columns.
+
+#### How it works
+
+- Type: `VARCHAR`
+- Default: `'off'`
+- Allowed values: `'off'`, `'parent'`
+
+With `'off'` only flat fields are exposed. With `'parent'`, parent
+relationships are surfaced as nested STRUCT columns alongside the flat
+fields.
+
+#### Why use it
+
+Enable `'parent'` when you want to read fields from a parent record (for
+example a Contact's parent Account) without writing your own join.
+
+#### Daily use
+
+```sql
+SET sf_relationships = 'parent';
+
+SELECT Id, Name FROM sf.Contact;
+```
+
+### `sf_bulk_chunks`
+
+#### What it does
+
+Splits a Bulk scan into several primary-key ranges fetched in parallel.
+
+#### How it works
+
+- Type: `BIGINT`
+- Default: `1`
+- Cap: `8` (Bulk-only)
+
+`sf_bulk_chunks` splits a Bulk scan into N primary-key ranges that are
+fetched in parallel (one thread per chunk). It is capped at `8` and applies
+only when the Bulk transport is used; it has **no effect** on REST scans.
+
+#### Why use it
+
+To speed up a large Bulk extract by parallelizing it across PK ranges.
+
+#### Daily use
 
 ```sql
 SET sf_force_transport = 'bulk';
 SET sf_bulk_chunks = 4;
-```
 
-`sf_bulk_chunks` splits a Bulk scan into N primary-key ranges that are
-fetched in parallel (one thread per chunk). It is capped at `8` and applies
-only when the Bulk transport is used; it has no effect on REST scans.
+SELECT Id, Name FROM sf.Account;
+```
 
 ## Level 3 - Diagnostics and observability
 
@@ -184,18 +504,20 @@ the current session. They are best-effort and reflect a single-thread
 snapshot; under parallel Bulk execution they describe the coordinating
 thread's view.
 
+The pattern is always the same: run a query, then call the diagnostic
+function to see what happened.
+
 ### `salesforce_query_cost()`
 
-Returns one row describing the planning and execution of the most recent
-scan: chosen transport and why, projection/filter pushdown counts, paging,
-quota decision, and a human-readable guidance string.
+#### What it does
 
-```sql
-SELECT * FROM sf.Account WHERE BillingCountry = 'Brazil';
-SELECT * FROM salesforce_query_cost();
-```
+Gives a single, complete summary of how the most recent scan was planned
+and executed — transport choice and reason, pushdown counts, paging, the
+quota decision, and a human-readable tuning hint.
 
-Output columns:
+#### How it works
+
+Returns one row describing the last scan. Output columns:
 
 | Column | Type | Notes |
 |---|---|---|
@@ -220,9 +542,55 @@ Output columns:
 
 Last-scan, best-effort, single-thread snapshot.
 
+#### Why use it
+
+It is the one-stop diagnostic. When you want to understand or tune a scan,
+this row tells you almost everything — which transport ran, how much was
+pushed down, how many pages were fetched, and what to try next.
+
+#### Daily use
+
+```sql
+SELECT * FROM sf.Account WHERE Industry = 'Technology';
+SELECT * FROM salesforce_query_cost();
+```
+
+### `salesforce_last_soql()`
+
+#### What it does
+
+Shows the exact SOQL string the extension sent to Salesforce for the last
+scan.
+
+#### How it works
+
+Returns one row. Output column:
+
+| Column | Type | Notes |
+|---|---|---|
+| `soql` | VARCHAR | The SOQL query string |
+
+#### Why use it
+
+To see precisely how your DuckDB query was translated into SOQL, including
+the projected fields and the pushed WHERE clause.
+
+#### Daily use
+
+```sql
+SELECT Id, Name FROM sf.Account WHERE Industry = 'Technology';
+SELECT * FROM salesforce_last_soql();
+```
+
 ### `salesforce_last_transport()`
 
-Returns the transport decision for the last scan.
+#### What it does
+
+Reports which transport (REST or Bulk) the last scan used and why.
+
+#### How it works
+
+Returns one row. Output columns:
 
 | Column | Type | Notes |
 |---|---|---|
@@ -230,9 +598,28 @@ Returns the transport decision for the last scan.
 | `est_rows` | BIGINT | Estimated rows used in the decision |
 | `reason` | VARCHAR | Why this transport was chosen |
 
+#### Why use it
+
+To confirm whether `'auto'` mode (or your explicit setting) picked the
+transport you expected, and to read the row estimate behind that choice.
+
+#### Daily use
+
+```sql
+SET sf_force_transport = 'auto';
+SELECT Id, Name FROM sf.Account;
+SELECT * FROM salesforce_last_transport();
+```
+
 ### `salesforce_last_quota()`
 
-Returns the quota-governor decision for the last scan.
+#### What it does
+
+Reports the quota-governor's decision for the last scan.
+
+#### How it works
+
+Returns one row. Output columns:
 
 | Column | Type | Notes |
 |---|---|---|
@@ -243,21 +630,44 @@ Returns the quota-governor decision for the last scan.
 | `allowed` | BOOLEAN | Whether the scan was allowed |
 | `reason` | VARCHAR | Explanation of the decision |
 
-### `salesforce_last_soql()`
+#### Why use it
 
-Returns the SOQL string sent for the last scan.
+To see how close you are to the daily API limit and why the governor did or
+did not allow a scan — invaluable when tuning the `sf_quota_*` settings.
 
-| Column | Type | Notes |
-|---|---|---|
-| `soql` | VARCHAR | The SOQL query string |
+#### Daily use
+
+```sql
+SELECT Id, Name FROM sf.Account;
+SELECT * FROM salesforce_last_quota();
+```
 
 ### `salesforce_last_scan_pages()`
 
-Returns the number of API result pages fetched during the last scan.
+#### What it does
+
+Reports how many API result pages were fetched during the last scan.
+
+#### How it works
+
+Returns one row. Output column:
 
 | Column | Type | Notes |
 |---|---|---|
 | `pages` | BIGINT | API result pages fetched |
+
+#### Why use it
+
+A high page count means many round trips. Use it to gauge whether tighter
+filters, a smaller projection, or a different transport would reduce the
+work.
+
+#### Daily use
+
+```sql
+SELECT Id, Name FROM sf.Account;
+SELECT * FROM salesforce_last_scan_pages();
+```
 
 ## Level 4 - Utility / standalone functions
 
@@ -266,18 +676,14 @@ an `ATTACH`. They are useful for one-off schema inspection or raw queries.
 
 ### `salesforce_describe(object, client_id := ..., ...)`
 
-Describes the schema of a single sObject without attaching the org. Returns
-one row per field.
+#### What it does
 
-```sql
-SELECT *
-FROM salesforce_describe(
-  'Account',
-  client_id     := 'KEY',
-  client_secret := 'SECRET',
-  refresh_token := 'TOKEN'
-);
-```
+Describes the schema of a single sObject without attaching the whole org —
+returns one row per field.
+
+#### How it works
+
+Pass the sObject name positionally and the credentials as named arguments.
 
 Arguments:
 
@@ -304,14 +710,43 @@ Output columns (names approximate):
 | `filterable` | BOOLEAN | Whether the field can appear in a SOQL WHERE |
 | `sortable` | BOOLEAN | Whether the field can appear in ORDER BY |
 
-Use this to inspect an sObject's schema without attaching the whole org
-catalog.
+#### Why use it
+
+To inspect an sObject's fields and types without attaching the entire org
+catalog — handy for quick metadata checks or scripts.
+
+#### Daily use
+
+```sql
+SELECT *
+FROM salesforce_describe(
+  'Account',
+  client_id     := 'KEY',
+  client_secret := 'SECRET',
+  refresh_token := 'TOKEN'
+);
+```
 
 ### `salesforce_query(soql, client_id := ..., ...)`
 
-Runs a raw SOQL query and returns the result records as raw JSON record
-strings, one per row. This is a low-level utility; no schema mapping or
-pushdown planning is applied.
+#### What it does
+
+Runs a raw SOQL query and returns each result record as a raw JSON string,
+one per row, without attaching the org.
+
+#### How it works
+
+This is a low-level utility: no schema mapping or pushdown planning is
+applied. Arguments mirror `salesforce_describe`, except the first
+positional argument is the SOQL string instead of an object name; the same
+credential named arguments apply.
+
+#### Why use it
+
+For one-off raw SOQL — for example a quick lookup or a query that uses SOQL
+features outside the normal table scan path.
+
+#### Daily use
 
 ```sql
 SELECT *
@@ -322,10 +757,6 @@ FROM salesforce_query(
   refresh_token := 'TOKEN'
 );
 ```
-
-Arguments mirror `salesforce_describe` (the first positional argument is the
-SOQL string instead of an object name; the same credential named arguments
-apply).
 
 ## Pushdown reference
 
@@ -368,19 +799,117 @@ a given scan.
 
 ## Debug / test-only functions
 
-> **Not a stable API.** Everything in this section exists for the
-> extension's own test suite and for low-level debugging. Names, arguments,
-> output shapes, and existence may change without notice. Do not build
-> production workflows on these.
+> **DEBUG / TEST-ONLY — not a stable API.** Everything in this section
+> exists for the extension's own test suite and for low-level debugging.
+> Names, arguments, output shapes, and existence may change without notice.
+> Do not build production workflows on these.
 
-- `salesforce_describe_calls()` — call-count instrumentation for Describe
-  API requests.
-- `salesforce_global_describe_calls()` — call-count instrumentation for
-  Global Describe API requests.
-- `salesforce_tooling_calls()` — call-count instrumentation for Tooling API
-  requests.
-- `salesforce_last_bulk_create_body()` — the request body of the most
-  recent Bulk job create call.
+### `salesforce_describe_calls()`
+
+> **DEBUG / TEST-ONLY — not a stable API.**
+
+#### What it does
+
+Reports a call count for Describe API requests — instrumentation used to
+verify how often the extension hits the Describe API.
+
+#### How it works
+
+A no-argument table function returning the Describe call-count
+instrumentation. Shape is internal and may change.
+
+#### Why use it
+
+Only when debugging or testing schema-resolution behavior; it lets a test
+assert that describe calls were (or were not) made.
+
+#### Daily use
+
+```sql
+SELECT Id, Name FROM sf.Account;
+SELECT * FROM salesforce_describe_calls();
+```
+
+### `salesforce_global_describe_calls()`
+
+> **DEBUG / TEST-ONLY — not a stable API.**
+
+#### What it does
+
+Reports a call count for Global Describe API requests.
+
+#### How it works
+
+A no-argument table function returning the Global Describe call-count
+instrumentation. Shape is internal and may change.
+
+#### Why use it
+
+Only when debugging or testing how often the extension performs a global
+describe.
+
+#### Daily use
+
+```sql
+SELECT * FROM salesforce_global_describe_calls();
+```
+
+### `salesforce_tooling_calls()`
+
+> **DEBUG / TEST-ONLY — not a stable API.**
+
+#### What it does
+
+Reports a call count for Tooling API requests.
+
+#### How it works
+
+A no-argument table function returning the Tooling call-count
+instrumentation. Shape is internal and may change. Relevant when
+`sf_schema_source = 'tooling'`.
+
+#### Why use it
+
+Only when debugging or testing Tooling-API-based schema discovery.
+
+#### Daily use
+
+```sql
+SET sf_schema_source = 'tooling';
+SELECT Id, Name FROM sf.Account;
+SELECT * FROM salesforce_tooling_calls();
+```
+
+### `salesforce_last_bulk_create_body()`
+
+> **DEBUG / TEST-ONLY — not a stable API.**
+
+#### What it does
+
+Returns the request body of the most recent Bulk job create call.
+
+#### How it works
+
+A no-argument table function exposing the raw body the extension last sent
+to create a Bulk job. Shape is internal and may change.
+
+#### Why use it
+
+Only when debugging or testing Bulk job creation — for example to confirm
+the SOQL or chunking embedded in the job request.
+
+#### Daily use
+
+```sql
+SET sf_force_transport = 'bulk';
+SELECT Id, Name FROM sf.Account;
+SELECT * FROM salesforce_last_bulk_create_body();
+```
+
+### Other debug helpers
+
+> **DEBUG / TEST-ONLY — not a stable API.**
+
 - `salesforce_decode(fields_json, records_json)` — decodes raw Salesforce
   field/record JSON into typed rows; used to test the decode path in
   isolation.

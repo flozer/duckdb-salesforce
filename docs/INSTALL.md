@@ -22,6 +22,16 @@ Common: `git`, CMake ≥ 3.5, a C++17 compiler, OpenSSL.
 - **Windows**: Visual Studio Build Tools (MSVC + CMake + Ninja) and vcpkg.
   OpenSSL is resolved via the vcpkg manifest (`vcpkg.json`), triplet
   `x64-windows-static` (must match DuckDB's `/MT` runtime).
+- **macOS (Apple Silicon / `osx_arm64`)**: Xcode command-line tools + CMake;
+  OpenSSL via vcpkg. The `osx_arm64` build + offline tests are validated by CI.
+  ⚠️ **Live-TLS caveat**: OpenSSL-via-vcpkg does not read the macOS **Keychain**,
+  so a *live* `ATTACH` may fail certificate verification. CI only runs the
+  offline mock suite, so this is not exercised there. Until the macOS trust
+  store is wired up, point OpenSSL at a CA bundle (e.g. `SSL_CERT_FILE=…`) for
+  live use.
+
+CI validates build + the offline (mock) test suite on **linux_amd64,
+windows_amd64, and osx_arm64** across DuckDB v1.5.2 and v1.5.3.
 
 ## Build
 
@@ -66,7 +76,7 @@ LOAD '/path/to/salesforce.duckdb_extension';
 ## Quickstart (read-only)
 
 ```sql
--- Use a refresh-token OAuth Connected App (see docs/connected_app.md).
+-- Use a refresh-token OAuth Connected App (see docs/CONNECTED_APP.md).
 ATTACH 'salesforce://myorg' AS sf (TYPE salesforce,
     client_id 'xxx', client_secret 'xxx', refresh_token 'xxx');
 

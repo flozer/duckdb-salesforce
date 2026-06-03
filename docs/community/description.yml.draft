@@ -15,9 +15,9 @@ extension:
   build: cmake
   license: MIT             # LICENSE file present at repo root
   requires_toolchains: "vcpkg"
-  # We have only built/tested linux_amd64 + windows_amd64 (CI). Community CI
-  # builds the full set; either add support or exclude the untested platforms.
-  excluded_platforms: "osx_amd64;osx_arm64;wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw;linux_amd64_musl;linux_arm64;linux_arm64_musl;windows_arm64"
+  # CI-validated: linux_amd64 + windows_amd64 + osx_arm64. The rest stay
+  # excluded until built/tested (osx_amd64 = cross-compile, deferred).
+  excluded_platforms: "osx_amd64;wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw;linux_amd64_musl;linux_arm64;linux_arm64_musl;windows_arm64"
   maintainers:
     - flozer
 
