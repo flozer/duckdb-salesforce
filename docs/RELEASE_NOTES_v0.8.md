@@ -1,9 +1,10 @@
-# Release Notes — v0.8.0 (DRAFT — NOT TAGGED)
+# Release Notes — v0.8.0
 
-> **STATUS: DRAFT — NOT TAGGED.** v0.8 is distribution hardening (no new
-> features). Acceptance = **CI matrix green**, which is now met (evidence
-> below). Do not tag without explicit maintainer go. Local / `flozer`-only;
-> nothing in this cycle touches `duckdb/community-extensions` (gate C.5).
+> **STATUS: VALIDATED — tagged `v0.8.0`.** v0.8 is distribution hardening (no new
+> features). Acceptance = **CI matrix green**, met (evidence below) and
+> authorized by the maintainer. v0.8.0 is local/distribution hardening — it does
+> **not** authorize a `duckdb/community-extensions` publication (gate C.5 stays
+> active). Local / `flozer`-only.
 
 Commit: `41f9213` (CI + install/pre-community docs).
 
@@ -31,7 +32,7 @@ No source / behaviour change. Offline suite: 21 `test/sql/*.test` green.
 ## Acceptance evidence — CI matrix GREEN
 
 Run: **Main Distribution Pipeline** @ `41f9213` —
-https://github.com/flozer/duckdb-salesforce/actions/runs/26888031691
+<https://github.com/flozer/duckdb-salesforce/actions/runs/26888031691>
 
 | DuckDB | linux_amd64 | windows_amd64 |
 | --- | --- | --- |
@@ -44,14 +45,14 @@ suite. No Salesforce contact, no secrets.
 
 ---
 
-## Before tagging `v0.8.0`
+## Tag gate — all satisfied
 
 - [x] CI matrix green — Windows + Linux × DuckDB v1.5.2, v1.5.3.
 - [x] First Linux build proven (Ubuntu CI).
 - [x] Offline suite green (21 files).
 - [x] Install + pre-community docs landed.
-- [ ] Maintainer review of this note.
-- [ ] **Explicit human GO** to tag `v0.8.0`.
+- [x] Maintainer review of this note.
+- [x] **Explicit human GO** to tag `v0.8.0`.
 
-Tagging and any future `duckdb/community-extensions` submission remain
-human-gated (C.5).
+Tag: annotated `v0.8.0` on `flozer/duckdb-salesforce`. A `duckdb/community-extensions`
+submission remains human-gated (C.5) — v0.8.0 does not authorize it.
