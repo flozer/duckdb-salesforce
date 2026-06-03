@@ -62,12 +62,14 @@ Notes / limitations of the `bulk` path:
 - A `Failed`/`Aborted` job, a results HTTP error, or a repeated locator each
   raise a clean, secret-free error.
 
-### PK chunking (`sf_bulk_chunks`, v0.7 §9 — sequential)
+### PK chunking (`sf_bulk_chunks`, v0.7 §9)
 
 For a large Bulk extraction, `sf_bulk_chunks = N` (default `1` = off, capped at
 8) splits the scan into **N disjoint `Id` ranges**, each run as its own Bulk job
-and streamed (§8). Cut 1 runs the chunks **sequentially** (real parallelism is a
-follow-up).
+and streamed (§8). Since §9b the chunks run **in parallel** — up to one DuckDB
+scan thread per chunk, each with its own client/session/job (DuckDB may clamp
+the thread count to the hardware/`threads` setting; the contract is "up to N
+chunks concurrently", not exactly N threads).
 
 ```sql
 SET sf_force_transport = 'bulk';

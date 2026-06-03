@@ -16,6 +16,7 @@
 #include "salesforce_soql.hpp"
 #include "salesforce_value.hpp"
 
+#include <atomic>
 #include <unordered_set>
 
 #include "duckdb/common/exception.hpp"
@@ -62,24 +63,14 @@ struct ScanGlobalState : public GlobalTableFunctionState {
     idx_t pages_fetched = 0;
     std::unordered_set<string> seen; // queryMore cursors seen (loop guard)
 
-    // Bulk path (sf_force_transport='bulk'). Lazy result streaming (#v0.7 §8):
-    // job created + polled in InitGlobal; result CSV pages fetched ON DEMAND.
+    // Bulk path (sf_force_transport='bulk'). Lazy result streaming (#v0.7 §8) +
+    // PK chunking (#v0.7 §9). The per-chunk job + result streaming live in the
+    // PER-THREAD local state (#v0.7 §9b parallel); the global state only holds
+    // the chunk work-list, hands out chunk indices, and aggregates diagnostics.
     bool bulk = false;
-    // PK chunking (#v0.7 §9, sequential): one Bulk job per Id-range chunk, run in
-    // order. >1 entry only when sf_bulk_chunks>1 and the MIN/MAX probe succeeded.
-    vector<string> bulk_chunk_soqls;  // full SOQL per chunk
-    idx_t bulk_chunk_idx = 0;         // current chunk
-    bool bulk_chunk_active = false;   // a job is started + streaming for this chunk
-    string bulk_results_base;        // <job>/results (set after the job completes)
-    bool bulk_started = false;       // first page fetched yet (current chunk)?
-    bool bulk_done = false;          // current chunk drained
-    string bulk_next_locator;        // Sforce-Locator for the next page
-    vector<string> bulk_columns;     // CSV header (from the first page)
-    vector<vector<string>> bulk_page; // current page's data rows
-    idx_t bulk_cursor = 0;            // index into bulk_page
-    idx_t bulk_pages = 0;             // result pages fetched (across all chunks)
-    std::unordered_set<string> bulk_seen; // locator loop guard (current chunk)
-    vector<int64_t> field_to_csv;    // field index -> CSV column index (-1 if absent)
+    vector<string> bulk_chunk_soqls;          // full SOQL per chunk (built in InitGlobal)
+    std::atomic<idx_t> next_chunk{0};         // dispenser: next chunk index to claim
+    std::atomic<idx_t> total_bulk_pages{0};   // aggregate result pages (all threads)
 
     // COUNT pushdown (#v0.5 §5): an aggregate-only scan (zero real columns, no
     // residual filter) emits `count_total` empty rows from a single SELECT
@@ -90,9 +81,30 @@ struct ScanGlobalState : public GlobalTableFunctionState {
 
     // DuckDB-level projection: which source field each output column maps to.
     vector<column_t> column_ids;
+    idx_t max_threads = 1;
     idx_t MaxThreads() const override {
-        return 1;
+        return max_threads;
     }
+};
+
+// Per-thread state (#v0.7 §9b). Each thread claims chunk indices from the
+// global dispenser and owns its OWN client/session/job + lazy page streaming,
+// so chunks run in parallel with isolated HTTP lifecycle. Used only on the Bulk
+// path; REST/COUNT run on the global state (MaxThreads=1).
+struct ScanLocalState : public LocalTableFunctionState {
+    // client declared before session (reverse-order destruction).
+    unique_ptr<SalesforceHttpClient> client;
+    unique_ptr<SalesforceSession> session;
+    bool has_chunk = false;          // a job is started + streaming for this chunk
+    string results_base;             // <job>/results
+    bool started = false;            // first page fetched yet (current chunk)?
+    bool chunk_done = false;         // current chunk drained
+    string next_locator;             // Sforce-Locator for the next page
+    vector<string> columns;          // CSV header (from the first page)
+    vector<vector<string>> page;     // current page's data rows
+    idx_t cursor = 0;                // index into page
+    std::unordered_set<string> seen; // locator loop guard (current chunk)
+    vector<int64_t> field_to_csv;    // field index -> CSV column index (-1 if absent)
 };
 
 // --- PK chunking helpers (#v0.7 §9) -----------------------------------------
@@ -367,6 +379,8 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
                 BuildSelectSoql(bind.object, select_fields, w, optional_idx()));
         }
         DiagSetBulkChunks(static_cast<int64_t>(gstate->bulk_chunk_soqls.size()));
+        // Parallelise across chunks (#v0.7 §9b): up to one thread per chunk.
+        gstate->max_threads = gstate->bulk_chunk_soqls.size();
     } else {
         // REST: build the initial page path, but fetch NOTHING yet (lazy, #11).
         gstate->next_path = gstate->session->QueryPath(soql);
@@ -414,45 +428,45 @@ static bool ScanAdvancePage(ScanGlobalState &g) {
     }
 }
 
-// Fetch the next Bulk result page lazily (#v0.7 §8). Mirrors ScanAdvancePage:
-// fetches one /results page on demand, following the Sforce-Locator, with the
-// same loop + max-page guards. Returns false when there are no more rows.
 static constexpr idx_t kBulkMaxPages = 1000000;
-static bool BulkAdvancePage(ScanGlobalState &g) {
+// Fetch the next page of the LOCAL state's current chunk; aggregate the page
+// count into the GLOBAL atomic (#v0.7 §9b). Returns false when the current chunk
+// has no more rows (caller then claims the next chunk).
+static bool BulkAdvancePage(ScanGlobalState &g, ScanLocalState &l) {
     while (true) {
-        if (g.bulk_done) {
+        if (l.chunk_done) {
             return false;
         }
-        string path = g.bulk_started ? (g.bulk_results_base + "?locator=" + g.bulk_next_locator)
-                                      : g.bulk_results_base;
-        SalesforceBulkPage pg = g.session->BulkFetchResultPage(path);
-        g.bulk_started = true;
-        g.bulk_pages++;
-        SetLastScanPages(g.bulk_pages);
-        DiagSetPages(static_cast<int64_t>(g.bulk_pages));
-        if (g.bulk_columns.empty() && !pg.columns.empty()) {
-            g.bulk_columns = std::move(pg.columns); // header from the first page
+        string path =
+            l.started ? (l.results_base + "?locator=" + l.next_locator) : l.results_base;
+        SalesforceBulkPage pg = l.session->BulkFetchResultPage(path);
+        l.started = true;
+        idx_t total = g.total_bulk_pages.fetch_add(1) + 1;
+        SetLastScanPages(static_cast<int64_t>(total));
+        DiagSetPages(static_cast<int64_t>(total));
+        if (l.columns.empty() && !pg.columns.empty()) {
+            l.columns = std::move(pg.columns); // header from the first page
         }
-        g.bulk_page = std::move(pg.rows);
-        g.bulk_cursor = 0;
+        l.page = std::move(pg.rows);
+        l.cursor = 0;
 
         if (pg.next_locator.empty()) {
-            g.bulk_done = true;
+            l.chunk_done = true;
         } else {
-            if (g.bulk_pages >= kBulkMaxPages) {
+            if (total >= kBulkMaxPages) {
                 throw IOException("salesforce bulk: exceeded the maximum result page count.");
             }
-            if (!g.bulk_seen.insert(pg.next_locator).second) {
+            if (!l.seen.insert(pg.next_locator).second) {
                 throw IOException("salesforce bulk: result pagination loop (locator repeated).");
             }
-            g.bulk_next_locator = pg.next_locator;
+            l.next_locator = pg.next_locator;
         }
 
-        if (!g.bulk_page.empty()) {
+        if (!l.page.empty()) {
             return true;
         }
-        if (g.bulk_done) {
-            return false; // empty final page
+        if (l.chunk_done) {
+            return false; // empty final page of this chunk
         }
         // empty non-final page -> loop to fetch the next one
     }
@@ -506,44 +520,50 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
         return;
     }
 
-    // Bulk path: stream decoded CSV rows, fetching the next /results page only
-    // when the current one is drained (#v0.7 §8 — lazy, page granularity so a
-    // small LIMIT stops pulling before later pages are downloaded).
+    // Bulk path (#v0.7 §9b parallel): this thread's LOCAL state claims chunk
+    // indices from the global dispenser and streams each chunk's pages lazily
+    // (§8) over its OWN client/session/job. Chunks run in parallel.
     if (gstate.bulk) {
-        if (gstate.bulk_cursor >= gstate.bulk_page.size()) {
-            // Need a fresh page: advance the current chunk, or start the next one.
+        auto &lstate = data.local_state->Cast<ScanLocalState>();
+        // Lazily build this thread's client + session (Bulk-only, per thread).
+        if (!lstate.session) {
+            lstate.client = BuildHttpClientForContext(context);
+            lstate.session = make_uniq<SalesforceSession>(bind.config, *lstate.client);
+            lstate.session->SetToken(bind.token);
+        }
+        if (lstate.cursor >= lstate.page.size()) {
+            // Need a fresh page: advance the current chunk, or claim the next.
             bool got = false;
             while (!got) {
-                if (!gstate.bulk_chunk_active) {
-                    if (gstate.bulk_chunk_idx >= gstate.bulk_chunk_soqls.size()) {
+                if (!lstate.has_chunk) {
+                    idx_t idx = gstate.next_chunk.fetch_add(1);
+                    if (idx >= gstate.bulk_chunk_soqls.size()) {
                         output.SetCardinality(0);
-                        return; // all chunks drained
+                        return; // no more chunks for this thread
                     }
                     // Start this chunk's Bulk job — quota-gated PER job (#9).
-                    QuotaGuardBulkStart(context, *gstate.session,
-                                        gstate.session->Token().instance_url);
-                    gstate.bulk_results_base =
-                        gstate.session->BulkStartJob(gstate.bulk_chunk_soqls[gstate.bulk_chunk_idx]);
-                    gstate.bulk_started = false;
-                    gstate.bulk_done = false;
-                    gstate.bulk_next_locator.clear();
-                    gstate.bulk_seen.clear();
-                    gstate.bulk_chunk_active = true;
+                    QuotaGuardBulkStart(context, *lstate.session,
+                                        lstate.session->Token().instance_url);
+                    lstate.results_base = lstate.session->BulkStartJob(gstate.bulk_chunk_soqls[idx]);
+                    lstate.started = false;
+                    lstate.chunk_done = false;
+                    lstate.next_locator.clear();
+                    lstate.seen.clear();
+                    lstate.has_chunk = true;
                 }
-                if (BulkAdvancePage(gstate)) {
+                if (BulkAdvancePage(gstate, lstate)) {
                     got = true;
                 } else {
-                    gstate.bulk_chunk_active = false; // chunk exhausted -> next
-                    gstate.bulk_chunk_idx++;
+                    lstate.has_chunk = false; // chunk exhausted -> claim the next
                 }
             }
             // Build the field -> CSV column map once the first header is known.
-            if (gstate.field_to_csv.empty() && !gstate.bulk_columns.empty()) {
-                gstate.field_to_csv.assign(bind.fields.size(), -1);
+            if (lstate.field_to_csv.empty() && !lstate.columns.empty()) {
+                lstate.field_to_csv.assign(bind.fields.size(), -1);
                 for (idx_t f = 0; f < bind.fields.size(); f++) {
-                    for (idx_t c = 0; c < gstate.bulk_columns.size(); c++) {
-                        if (StringUtil::CIEquals(bind.fields[f].name, gstate.bulk_columns[c])) {
-                            gstate.field_to_csv[f] = static_cast<int64_t>(c);
+                    for (idx_t c = 0; c < lstate.columns.size(); c++) {
+                        if (StringUtil::CIEquals(bind.fields[f].name, lstate.columns[c])) {
+                            lstate.field_to_csv[f] = static_cast<int64_t>(c);
                             break;
                         }
                     }
@@ -551,24 +571,23 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
             }
         }
         idx_t row = 0;
-        while (row < STANDARD_VECTOR_SIZE && gstate.bulk_cursor < gstate.bulk_page.size()) {
-            const auto &cells = gstate.bulk_page[gstate.bulk_cursor];
+        while (row < STANDARD_VECTOR_SIZE && lstate.cursor < lstate.page.size()) {
+            const auto &cells = lstate.page[lstate.cursor];
             for (idx_t j = 0; j < gstate.column_ids.size(); j++) {
                 column_t col = gstate.column_ids[j];
                 if (col < bind.fields.size() && bind.fields[col].is_relationship) {
                     // Parent STRUCT from CSV columns "rel.child" (#v0.6 §7).
-                    AppendBulkStruct(output.data[j], row, bind.fields[col], cells,
-                                     gstate.bulk_columns);
+                    AppendBulkStruct(output.data[j], row, bind.fields[col], cells, lstate.columns);
                     continue;
                 }
-                int64_t ci = (col < bind.fields.size()) ? gstate.field_to_csv[col] : -1;
+                int64_t ci = (col < bind.fields.size()) ? lstate.field_to_csv[col] : -1;
                 if (ci < 0 || static_cast<idx_t>(ci) >= cells.size() || cells[ci].empty()) {
                     FlatVector::SetNull(output.data[j], row, true); // missing/virtual/empty -> NULL
                 } else {
                     AppendTypedCell(output.data[j], row, bind.fields[col], cells[ci]);
                 }
             }
-            gstate.bulk_cursor++;
+            lstate.cursor++;
             row++;
         }
         output.SetCardinality(row);
@@ -642,10 +661,17 @@ static void ScanPushdownComplexFilter(ClientContext &, LogicalGet &get, Function
     bind.residual_filter_count = static_cast<int64_t>(filters.size());
 }
 
+// Per-thread local state (#v0.7 §9b). Empty until first use; the Bulk path
+// lazily builds its client/session. REST/COUNT ignore it (run on the global).
+static unique_ptr<LocalTableFunctionState>
+ScanInitLocal(ExecutionContext &, TableFunctionInitInput &, GlobalTableFunctionState *) {
+    return make_uniq<ScanLocalState>();
+}
+
 } // namespace
 
 TableFunction GetSalesforceScanFunction() {
-    TableFunction fn("salesforce_scan", {}, ScanFunction, ScanBind, ScanInitGlobal);
+    TableFunction fn("salesforce_scan", {}, ScanFunction, ScanBind, ScanInitGlobal, ScanInitLocal);
     fn.projection_pushdown = true; // DuckDB-level column projection
     fn.pushdown_complex_filter = ScanPushdownComplexFilter; // SOQL WHERE, residual-safe
     return fn;

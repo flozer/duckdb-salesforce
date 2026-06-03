@@ -4,6 +4,13 @@
 
 require salesforce
 
+# Determinism: the scripted mock advances per CLIENT instance, and §9b gives each
+# parallel thread its own client (which would reset the sequence). Pin one thread
+# so the chunk sequence is deterministic here; real parallel execution is
+# validated by the live smoke, not the mock.
+statement ok
+SET threads = 1;
+
 statement ok
 SET sf_mock_token_status = 200;
 
