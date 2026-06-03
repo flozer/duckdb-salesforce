@@ -1,25 +1,39 @@
-# Third-Party Notices
+# Third-party notices
 
-This project bundles or links the following third-party components.
+`duckdb-salesforce` itself is licensed under the **MIT License** (`LICENSE`).
+The source tree additionally uses the third-party material listed below. Their
+original copyright headers and license terms are preserved inside the
+corresponding files.
 
-## cpp-httplib (vendored)
+The HTTPS transport is built from vendored, header-only `httplib` plus
+**OpenSSL** (linked, resolved via the `vcpkg.json` manifest). No Salesforce
+client library exists or is bundled — the connector speaks the REST and Bulk
+APIs directly over HTTPS.
 
-- Path: `third_party/httplib/httplib.h`
-- Version: 0.18.3
-- Upstream: https://github.com/yhirose/cpp-httplib
-- License: MIT
+## cpp-httplib — MIT
 
-Used for the live HTTPS transport. Header-only; vendored verbatim.
+| Source | Version | License | Where in this repo |
+|---|---|---|---|
+| `cpp-httplib` (header-only HTTP/HTTPS client) | 0.18.3 | MIT | `third_party/httplib/httplib.h` |
 
-## OpenSSL (linked via vcpkg)
+Copyright (c) 2024 Yuji Hirose. Upstream:
+<https://github.com/yhirose/cpp-httplib>. Used at compile time for the
+Salesforce HTTPS transport; OpenSSL is enabled via `CPPHTTPLIB_OPENSSL_SUPPORT`.
 
-- Upstream: https://www.openssl.org/
-- License: Apache License 2.0
-- Pulled at build time via vcpkg (`vcpkg.json`), triplet `x64-windows-static`
-  on Windows. Provides TLS for the HTTPS transport (cpp-httplib uses OpenSSL
-  when `CPPHTTPLIB_OPENSSL_SUPPORT` is defined).
+## OpenSSL — Apache License 2.0
 
-## DuckDB / extension-ci-tools (submodules)
+| Source | License | How |
+|---|---|---|
+| OpenSSL (TLS) | Apache-2.0 | linked, via the `vcpkg.json` manifest (triplet `x64-windows-static` on Windows) |
 
-- `duckdb` and `extension-ci-tools` are git submodules, used as the extension
-  build host. See their respective repositories for license terms.
+Provides TLS for the HTTPS transport; server-certificate verification is always
+on. Upstream: <https://www.openssl.org/>.
+
+## DuckDB and build tooling — MIT
+
+The build pulls DuckDB's headers and the extension build harness via the
+`duckdb` and `extension-ci-tools` submodules, with `vcpkg` (Microsoft) for
+dependencies. DuckDB (`duckdb/duckdb`), `extension-ci-tools`
+(`duckdb/extension-ci-tools`), and `vcpkg` are each distributed under the MIT
+License; refer to their repositories for the authoritative `LICENSE` files.
+This notice does not modify them.

@@ -388,12 +388,45 @@ Known and intentional for this cut (see `docs/ARCHITECTURE.md` Appendix C):
   to disk, and record/data are never cached. The cache is dropped on DETACH.
 - **Read-only.** All catalog mutations (CREATE/INSERT/UPDATE/DELETE/...) throw.
 
-## Community publication
+## Documentation
 
-Per `docs/ARCHITECTURE.md` Appendix C.5, there is **no** push, PR, tag, or
-release to `duckdb/community-extensions` without explicit human go/no-go after
-multi-test evidence. Development stays in this repository.
+Docs are split by language under `docs/en/` (English, primary) and `docs/pt/`
+(Brazilian Portuguese).
+
+- [docs/DOCS_PARITY.md](docs/DOCS_PARITY.md) — PT/EN documentation parity map.
+- [docs/en/usage_guide.md](docs/en/usage_guide.md) — analyst guide: `ATTACH`,
+  querying, transports, large extractions, quota, relationships, diagnostics.
+  (PT: [docs/pt/usage_guide.md](docs/pt/usage_guide.md))
+- [docs/en/function_manual.md](docs/en/function_manual.md) — public function +
+  setting reference. (PT: [docs/pt/function_manual.md](docs/pt/function_manual.md))
+- [docs/en/guide_windows.md](docs/en/guide_windows.md) — Windows build + load.
+- [docs/en/guide_linux.md](docs/en/guide_linux.md) — Linux build + load.
+- [docs/INSTALL.md](docs/INSTALL.md) — quick local install (unsigned `LOAD`).
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — implementation architecture.
+
+## Governance
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [SECURITY.md](SECURITY.md)
+- [LICENSE](LICENSE)
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+
+## Community catalog
+
+**Not yet submitted.** Per `docs/ARCHITECTURE.md` Appendix C.5, there is **no**
+push, PR, tag, or release to `duckdb/community-extensions` without an explicit
+human go/no-go. A staged descriptor lives at
+[docs/community/description.yml.draft](docs/community/description.yml.draft);
+readiness is tracked in
+[docs/PRE_COMMUNITY_CHECKLIST.md](docs/PRE_COMMUNITY_CHECKLIST.md). Until then,
+build + load locally (see [docs/INSTALL.md](docs/INSTALL.md)).
+
+## Author
+
+**Fernando Lozer** — GitHub [@flozer](https://github.com/flozer).
 
 ## License
 
-See [LICENSE](LICENSE) (to be added).
+MIT — see [LICENSE](LICENSE). Third-party components:
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

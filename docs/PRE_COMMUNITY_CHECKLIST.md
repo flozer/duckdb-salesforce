@@ -36,19 +36,22 @@ auditable, and distributable**. Tick every box first.
 
 ## Metadata & legal (required by community-extensions)
 
-- [ ] `description.yml` (or equivalent) — name, description, version, maintainers,
-      repo, license, language.
-- [ ] LICENSE present and compatible.
-- [ ] `SECURITY.md` present (vuln reporting, TLS-on, no-secret-logging).
-- [ ] No secrets, tokens, org identifiers, or customer data anywhere in the repo
-      or CI logs.
-- [ ] README documents auth (refresh-token OAuth), read-only scope, limitations.
+- [x] `description.yml` drafted (`docs/community/description.yml.draft`) — name,
+      description, version, maintainers, repo, license, language. (Staged, not
+      submitted.)
+- [x] LICENSE present and compatible (MIT).
+- [x] `SECURITY.md` present (vuln reporting, TLS-on, no-secret-logging).
+- [x] No secrets, tokens, org identifiers, or customer data in the repo/CI.
+- [x] README documents auth (refresh-token OAuth), read-only scope, limitations.
+- [x] CONTRIBUTING.md + CODE_OF_CONDUCT.md + THIRD_PARTY_NOTICES.md present.
+- [x] Public docs (EN primary, PT) — usage guide + function manual paired;
+      Windows/Linux build guides; parity tracked in `docs/DOCS_PARITY.md`.
 
 ## Behaviour / safety
 
-- [ ] Read-only: all mutating catalog ops throw.
-- [ ] Errors are secret-free (no bearer/body/secret in messages).
-- [ ] Quota governor + REQUEST_LIMIT_EXCEEDED handling documented.
+- [x] Read-only: all mutating catalog ops throw.
+- [x] Errors are secret-free (no bearer/body/secret in messages).
+- [x] Quota governor + REQUEST_LIMIT_EXCEEDED handling documented.
 
 ## Sign-off
 
@@ -83,7 +86,7 @@ Done as a local audit. **No PR/push/branch on `duckdb/community-extensions`.**
 
 1. ✅ **`LICENSE`** — **MIT** added at repo root (© 2026 Fernando Lozer);
    `description.yml` draft set to `license: MIT`. (Was the hard blocker.)
-2. ✅ **THIRD-PARTY NOTICES** — [`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md):
+2. ✅ **THIRD-PARTY NOTICES** — [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md):
    httplib (MIT), OpenSSL (Apache-2.0), DuckDB/extension-ci-tools/vcpkg (MIT).
 3. ✅ **Stale-string sweep** — README + SECURITY refreshed to v0.8; `vcpkg.json`
    0.8.0; `docs/ARCHITECTURE.md` Appendix C marked HISTORICAL + `repo.ref`
