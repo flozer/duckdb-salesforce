@@ -41,6 +41,11 @@ maintainer's explicit GO (C.5).**
       OpenSSL-via-vcpkg); `SSL_CERT_FILE` workaround documented. CI proves
       macOS build + offline tests only.
 - [x] `osx_amd64`, arm-linux, musl, wasm, mingw out of scope (excluded).
+- [x] **Cosmetic, deferred to next tag**: `vcpkg.json` `version-string` is still
+      `0.8.0` (tag is `v0.8.1`). Non-blocking — the community CI takes the
+      extension version from the tag / descriptor (`version: 0.8.1`), not from
+      `vcpkg.json`. Recutting `v0.8.1` to fix this is not worth the risk; bump it
+      whenever the next tag (`v0.8.2`/`v0.9.0`) is cut.
 
 ## Final gate
 
