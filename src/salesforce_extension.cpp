@@ -221,6 +221,16 @@ static void LoadInternal(ExtensionLoader &loader) {
                               "TEST ONLY. Body/pages for the mocked GET /tooling/query ('|~|').",
                               LogicalType::VARCHAR, Value(""));
 
+    // PK chunking for Bulk extraction (#v0.7 §9, cut 1 = sequential). 1 (default)
+    // = no chunking. >1 splits the scan into N disjoint Id ranges (MIN/MAX(Id)
+    // probe + uniform lexical split), each run as its own Bulk job, streamed
+    // sequentially. Bulk-only (REST ignores it); capped at 8.
+    config.AddExtensionOption(
+        "sf_bulk_chunks",
+        "Bulk PK chunking: split a Bulk scan into N disjoint Id ranges (1 = off, "
+        "default; capped at 8). Sequential in this cut. Bulk transport only.",
+        LogicalType::BIGINT, Value::BIGINT(1));
+
     // Test-only Bulk mock hooks (active when sf_mock_token_status != 0).
     config.AddExtensionOption("sf_mock_bulk_create_status", "TEST ONLY. Bulk job-create HTTP status.",
                               LogicalType::BIGINT, Value::BIGINT(200));

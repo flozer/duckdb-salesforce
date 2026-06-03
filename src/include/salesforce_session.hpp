@@ -104,6 +104,12 @@ public:
     string BulkStartJob(const string &soql);
     SalesforceBulkPage BulkFetchResultPage(const string &path);
 
+    // PK chunking probe (#v0.7 §9): one REST aggregate `SELECT MIN(Id), MAX(Id)`
+    // (optionally with the pushed WHERE) to bound the Id range for splitting.
+    // Returns false on any failure or when the object is empty (null min/max),
+    // so the caller falls back to a single chunk. Never throws.
+    bool TryMinMaxId(const string &object, const string &where, string &min_id, string &max_id);
+
     // Auto-transport probe (#v0.3 §2): estimate the row count for a COUNT() SOQL
     // via one REST /query call (reads `totalSize`; zero row egress). Returns
     // false on ANY failure (HTTP error, missing totalSize) so the caller falls

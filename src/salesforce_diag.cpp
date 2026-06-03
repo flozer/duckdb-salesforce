@@ -27,6 +27,7 @@ struct ScanCost {
     int64_t rows_emitted = 0;
     bool bulk = false;
     bool count_pushdown = false;
+    int64_t bulk_chunks = 1; // PK-chunk count (#v0.7 §9); 1 = no chunking
     bool quota_consulted = false; // false -> quota_* NULL
     int64_t quota_remaining = -1;
     bool quota_allowed = false;
@@ -79,14 +80,14 @@ unique_ptr<FunctionData> QueryCostBind(ClientContext &, TableFunctionBindInput &
              "residual_filters", "where_pushed",
              "pages_fetched",   "rows_emitted",
              "bulk",            "count_pushdown",
-             "quota_remaining", "quota_allowed",
-             "guidance"};
+             "bulk_chunks",     "quota_remaining",
+             "quota_allowed",   "guidance"};
     return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
                     LogicalType::BIGINT,  LogicalType::VARCHAR, LogicalType::BIGINT,
                     LogicalType::BIGINT,  LogicalType::BIGINT,  LogicalType::BIGINT,
                     LogicalType::VARCHAR, LogicalType::BIGINT,  LogicalType::BIGINT,
                     LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::BIGINT,
-                    LogicalType::BOOLEAN, LogicalType::VARCHAR};
+                    LogicalType::BIGINT,  LogicalType::BOOLEAN, LogicalType::VARCHAR};
     return nullptr;
 }
 
@@ -130,14 +131,15 @@ void QueryCostFunction(ClientContext &, TableFunctionInput &data, DataChunk &out
     FlatVector::GetData<int64_t>(output.data[11])[0] = c.rows_emitted;
     FlatVector::GetData<bool>(output.data[12])[0] = c.bulk;
     FlatVector::GetData<bool>(output.data[13])[0] = c.count_pushdown;
+    FlatVector::GetData<int64_t>(output.data[14])[0] = c.bulk_chunks;
     if (c.quota_consulted) {
-        IntOrNull(output, 14, c.quota_remaining);
-        FlatVector::GetData<bool>(output.data[15])[0] = c.quota_allowed;
+        IntOrNull(output, 15, c.quota_remaining);
+        FlatVector::GetData<bool>(output.data[16])[0] = c.quota_allowed;
     } else {
-        FlatVector::SetNull(output.data[14], 0, true);
         FlatVector::SetNull(output.data[15], 0, true);
+        FlatVector::SetNull(output.data[16], 0, true);
     }
-    Str(output, 16, BuildGuidance(c));
+    Str(output, 17, BuildGuidance(c));
     gstate.emitted = true;
     output.SetCardinality(1);
 }
@@ -169,6 +171,11 @@ void DiagRecordScan(const string &object, const string &soql, const string &tran
 void DiagSetPages(int64_t pages) {
     std::lock_guard<std::mutex> g(g_lock);
     g_cost.pages_fetched = pages;
+}
+
+void DiagSetBulkChunks(int64_t chunks) {
+    std::lock_guard<std::mutex> g(g_lock);
+    g_cost.bulk_chunks = chunks;
 }
 
 void DiagAddRowsEmitted(int64_t rows) {

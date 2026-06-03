@@ -371,6 +371,36 @@ string SalesforceSession::BulkStartJob(const string &soql) {
     return job_path + "/results";
 }
 
+bool SalesforceSession::TryMinMaxId(const string &object, const string &where, string &min_id,
+                                    string &max_id) {
+    try {
+        string soql = "SELECT MIN(Id) mn, MAX(Id) mx FROM " + object;
+        if (!where.empty()) {
+            soql += " WHERE " + where;
+        }
+        HttpResponse resp = AuthorizedSend(false, QueryPath(soql), "");
+        if (resp.status != 200) {
+            return false;
+        }
+        auto records = sfjson::GetObjectArray(resp.body, "records");
+        if (records.empty()) {
+            return false;
+        }
+        bool fm = false, nm = false, fx = false, nx = false;
+        string mn, mx;
+        sfjson::GetValue(records[0], "mn", mn, fm, nm);
+        sfjson::GetValue(records[0], "mx", mx, fx, nx);
+        if (!fm || nm || !fx || nx || mn.empty() || mx.empty()) {
+            return false; // empty object / null aggregate -> single chunk
+        }
+        min_id = mn;
+        max_id = mx;
+        return min_id < max_id;
+    } catch (...) {
+        return false;
+    }
+}
+
 SalesforceBulkPage SalesforceSession::BulkFetchResultPage(const string &path) {
     HttpResponse rs = AuthorizedSend(false, path, "");
     if (rs.status < 200 || rs.status >= 300) {

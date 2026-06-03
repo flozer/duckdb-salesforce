@@ -1,0 +1,116 @@
+# name: test/sql/salesforce_bulk_chunks.test
+# description: v0.7 §9 (cut 1) — sequential PK chunking for Bulk extraction
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true}]}';
+
+# MIN/MAX(Id) probe response (REST aggregate, alias mn/mx).
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"mn":"001000000000000","mx":"005000000000000"}]}';
+
+statement ok
+SET sf_force_transport = 'bulk';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === 2 chunks: two jobs over disjoint Id ranges, union of rows ==============
+statement ok
+SET sf_bulk_chunks = 2;
+
+# Chunk 0 results then chunk 1 results (one /results page each).
+statement ok
+SET sf_mock_bulk_results_body = 'Id
+001
+002|~|Id
+007
+008';
+
+query I
+SELECT Id FROM sf.Account ORDER BY Id;
+----
+001
+002
+007
+008
+
+# Diagnostics: 2 chunks, 2 result pages streamed.
+query I
+SELECT bulk_chunks = 2 AND pages_fetched = 2 AND bulk = true FROM salesforce_query_cost();
+----
+true
+
+# Two create-bodies, disjoint ranges: an interior "Id < 'x'" and the final
+# inclusive "Id <= 'max'".
+query I
+SELECT contains(body, 'Id >= ''') AND contains(body, 'Id < ''') AND contains(body, 'Id <= ''')
+FROM salesforce_last_bulk_create_body();
+----
+true
+
+# === empty chunk: a range with no rows is fine (no error) ===================
+statement ok
+SET sf_mock_bulk_results_body = 'Id|~|Id
+009';
+
+query I
+SELECT Id FROM sf.Account ORDER BY Id;
+----
+009
+
+# === one chunk's job fails -> whole scan aborts cleanly =====================
+statement ok
+SET sf_mock_bulk_results_body = 'Id
+001|~|Id
+002';
+
+statement ok
+SET sf_mock_bulk_status_body = '{"state":"JobComplete"}|~|{"state":"Failed","errorMessage":"boom"}';
+
+statement error
+SELECT Id FROM sf.Account;
+----
+bulk: job Failed - boom
+
+statement ok
+SET sf_mock_bulk_status_body = '{"state":"JobComplete"}';
+
+# === chunks = 1 (default off): single job, no Id range ======================
+statement ok
+SET sf_bulk_chunks = 1;
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id
+001
+002';
+
+query I
+SELECT Id FROM sf.Account ORDER BY Id;
+----
+001
+002
+
+query I
+SELECT bulk_chunks = 1 FROM salesforce_query_cost();
+----
+true
+
+query I
+SELECT NOT contains(body, 'Id >=') FROM salesforce_last_bulk_create_body();
+----
+true
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_bulk_chunks = 1;

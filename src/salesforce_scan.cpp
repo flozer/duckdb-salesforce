@@ -65,15 +65,20 @@ struct ScanGlobalState : public GlobalTableFunctionState {
     // Bulk path (sf_force_transport='bulk'). Lazy result streaming (#v0.7 §8):
     // job created + polled in InitGlobal; result CSV pages fetched ON DEMAND.
     bool bulk = false;
+    // PK chunking (#v0.7 §9, sequential): one Bulk job per Id-range chunk, run in
+    // order. >1 entry only when sf_bulk_chunks>1 and the MIN/MAX probe succeeded.
+    vector<string> bulk_chunk_soqls;  // full SOQL per chunk
+    idx_t bulk_chunk_idx = 0;         // current chunk
+    bool bulk_chunk_active = false;   // a job is started + streaming for this chunk
     string bulk_results_base;        // <job>/results (set after the job completes)
-    bool bulk_started = false;       // first page fetched yet?
-    bool bulk_done = false;          // no more pages after the current is drained
+    bool bulk_started = false;       // first page fetched yet (current chunk)?
+    bool bulk_done = false;          // current chunk drained
     string bulk_next_locator;        // Sforce-Locator for the next page
     vector<string> bulk_columns;     // CSV header (from the first page)
     vector<vector<string>> bulk_page; // current page's data rows
     idx_t bulk_cursor = 0;            // index into bulk_page
-    idx_t bulk_pages = 0;             // result pages fetched
-    std::unordered_set<string> bulk_seen; // locator loop guard
+    idx_t bulk_pages = 0;             // result pages fetched (across all chunks)
+    std::unordered_set<string> bulk_seen; // locator loop guard (current chunk)
     vector<int64_t> field_to_csv;    // field index -> CSV column index (-1 if absent)
 
     // COUNT pushdown (#v0.5 §5): an aggregate-only scan (zero real columns, no
@@ -89,6 +94,75 @@ struct ScanGlobalState : public GlobalTableFunctionState {
         return 1;
     }
 };
+
+// --- PK chunking helpers (#v0.7 §9) -----------------------------------------
+// Salesforce Id alphabet in ASCII/lexical order: 0-9 < A-Z < a-z. Mapping digit
+// values to this order makes base62 value-order match string lexical order, so
+// interpolated boundaries are lexically monotonic.
+static int Base62Val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'z') return c - 'a' + 36;
+    return 0;
+}
+static char Base62Char(int v) {
+    if (v < 10) return static_cast<char>('0' + v);
+    if (v < 36) return static_cast<char>('A' + v - 10);
+    return static_cast<char>('a' + v - 36);
+}
+// First kIdPrec chars -> uint64 (62^10 < 2^63). Enough resolution for <=8 chunks.
+static constexpr int kIdPrec = 10;
+static uint64_t IdToNum(const string &id) {
+    uint64_t v = 0;
+    for (int i = 0; i < kIdPrec; i++) {
+        v = v * 62 + (static_cast<size_t>(i) < id.size() ? Base62Val(id[i]) : 0);
+    }
+    return v;
+}
+static string NumToId(uint64_t v) {
+    string s(kIdPrec, '0');
+    for (int i = kIdPrec - 1; i >= 0; i--) {
+        s[i] = Base62Char(static_cast<int>(v % 62));
+        v /= 62;
+    }
+    return s;
+}
+
+// Build N disjoint, exhaustive WHERE clauses over [min_id, max_id] by uniform
+// lexical interpolation (chunks may be uneven/empty — acceptable, cut 1). Each
+// is combined (AND) with the pushed WHERE. Coverage: chunk 0 starts at min_id,
+// the last ends inclusive at max_id, interior boundaries strictly increasing.
+static vector<string> BuildIdRangeWheres(const string &pushed, const string &min_id,
+                                         const string &max_id, int64_t n) {
+    auto combine = [&](const string &range) {
+        return pushed.empty() ? range : ("(" + pushed + ") AND (" + range + ")");
+    };
+    uint64_t lo_num = IdToNum(min_id), hi_num = IdToNum(max_id);
+    // Boundary strings b[0..n]; b[0]=min_id, b[n]=max_id, interior interpolated.
+    vector<string> b;
+    b.push_back(min_id);
+    for (int64_t i = 1; i < n; i++) {
+        uint64_t v = lo_num + (hi_num - lo_num) * static_cast<uint64_t>(i) / static_cast<uint64_t>(n);
+        b.push_back(NumToId(v));
+    }
+    b.push_back(max_id);
+    vector<string> wheres;
+    for (int64_t i = 0; i < n; i++) {
+        const string &lo = b[i];
+        const string &hi = b[i + 1];
+        if (i > 0 && hi <= lo) {
+            continue; // collapsed boundary -> skip (fewer effective chunks)
+        }
+        string range;
+        if (i == n - 1) {
+            range = "Id >= '" + lo + "' AND Id <= '" + hi + "'"; // last: inclusive max
+        } else {
+            range = "Id >= '" + lo + "' AND Id < '" + hi + "'";
+        }
+        wheres.push_back(combine(range));
+    }
+    return wheres;
+}
 
 static unique_ptr<FunctionData> ScanBind(ClientContext &, TableFunctionBindInput &,
                                          vector<LogicalType> &, vector<string> &) {
@@ -250,13 +324,37 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 
     if (effective == "bulk") {
         gstate->bulk = true;
-        // Quota governor (#v0.4): gate the Bulk job START on the org's API
-        // allocation. REST scans are intentionally not gated.
-        QuotaGuardBulkStart(context, *gstate->session,
-                            gstate->session->Token().instance_url);
-        // Create + poll the job to JobComplete; fetch NO result pages yet (#8).
-        // The header / field_to_csv mapping is built lazily from the first page.
-        gstate->bulk_results_base = gstate->session->BulkStartJob(soql);
+        ResetBulkCreateBodies(); // accumulate one create-body per chunk job (#9)
+        // PK chunking (#v0.7 §9): split into N Id-range chunks when asked + the
+        // MIN/MAX probe succeeds; else a single chunk = the original SOQL. Jobs
+        // are NOT started here — each chunk's job starts lazily in ScanFunction
+        // (quota-gated per job), streamed via §8.
+        int64_t chunks = 1;
+        Value cv;
+        if (context.TryGetCurrentSetting("sf_bulk_chunks", cv) && !cv.IsNull()) {
+            chunks = cv.GetValue<int64_t>();
+        }
+        if (chunks < 1) {
+            chunks = 1;
+        }
+        if (chunks > 8) {
+            chunks = 8; // cap (cut 1)
+        }
+        vector<string> wheres;
+        if (chunks > 1) {
+            string mn, mx;
+            if (gstate->session->TryMinMaxId(bind.object, bind.pushed_where, mn, mx)) {
+                wheres = BuildIdRangeWheres(bind.pushed_where, mn, mx, chunks);
+            }
+        }
+        if (wheres.empty()) {
+            wheres.push_back(bind.pushed_where); // single chunk (no/failed chunking)
+        }
+        for (auto &w : wheres) {
+            gstate->bulk_chunk_soqls.push_back(
+                BuildSelectSoql(bind.object, select_fields, w, optional_idx()));
+        }
+        DiagSetBulkChunks(static_cast<int64_t>(gstate->bulk_chunk_soqls.size()));
     } else {
         // REST: build the initial page path, but fetch NOTHING yet (lazy, #11).
         gstate->next_path = gstate->session->QueryPath(soql);
@@ -376,7 +474,7 @@ static void AppendBulkStruct(Vector &vec, idx_t row, const SalesforceField &fiel
     }
 }
 
-static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
     auto &bind = data.bind_data->Cast<SalesforceScanBindData>();
     auto &gstate = data.global_state->Cast<ScanGlobalState>();
 
@@ -401,9 +499,31 @@ static void ScanFunction(ClientContext &, TableFunctionInput &data, DataChunk &o
     // small LIMIT stops pulling before later pages are downloaded).
     if (gstate.bulk) {
         if (gstate.bulk_cursor >= gstate.bulk_page.size()) {
-            if (!BulkAdvancePage(gstate)) {
-                output.SetCardinality(0);
-                return;
+            // Need a fresh page: advance the current chunk, or start the next one.
+            bool got = false;
+            while (!got) {
+                if (!gstate.bulk_chunk_active) {
+                    if (gstate.bulk_chunk_idx >= gstate.bulk_chunk_soqls.size()) {
+                        output.SetCardinality(0);
+                        return; // all chunks drained
+                    }
+                    // Start this chunk's Bulk job — quota-gated PER job (#9).
+                    QuotaGuardBulkStart(context, *gstate.session,
+                                        gstate.session->Token().instance_url);
+                    gstate.bulk_results_base =
+                        gstate.session->BulkStartJob(gstate.bulk_chunk_soqls[gstate.bulk_chunk_idx]);
+                    gstate.bulk_started = false;
+                    gstate.bulk_done = false;
+                    gstate.bulk_next_locator.clear();
+                    gstate.bulk_seen.clear();
+                    gstate.bulk_chunk_active = true;
+                }
+                if (BulkAdvancePage(gstate)) {
+                    got = true;
+                } else {
+                    gstate.bulk_chunk_active = false; // chunk exhausted -> next
+                    gstate.bulk_chunk_idx++;
+                }
             }
             // Build the field -> CSV column map once the first header is known.
             if (gstate.field_to_csv.empty() && !gstate.bulk_columns.empty()) {

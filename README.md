@@ -62,6 +62,28 @@ Notes / limitations of the `bulk` path:
 - A `Failed`/`Aborted` job, a results HTTP error, or a repeated locator each
   raise a clean, secret-free error.
 
+### PK chunking (`sf_bulk_chunks`, v0.7 §9 — sequential)
+
+For a large Bulk extraction, `sf_bulk_chunks = N` (default `1` = off, capped at
+8) splits the scan into **N disjoint `Id` ranges**, each run as its own Bulk job
+and streamed (§8). Cut 1 runs the chunks **sequentially** (real parallelism is a
+follow-up).
+
+```sql
+SET sf_force_transport = 'bulk';
+SET sf_bulk_chunks = 4;
+SELECT * FROM sf.Account;          -- 4 jobs over Id ranges, unioned
+SELECT bulk_chunks FROM salesforce_query_cost();
+```
+
+- Ranges come from a `MIN(Id), MAX(Id)` probe (one REST call) split by **uniform
+  lexical interpolation**. Chunks may be **uneven or empty** (Salesforce `Id`s
+  aren't uniformly dense) — coverage is exact (disjoint + exhaustive over
+  `[min, max]`), balance is not guaranteed.
+- **Bulk-only** — REST ignores it. The quota governor is consulted **per job**.
+- **No global row order** across chunks (`ORDER BY` if you need it).
+- Probe failure / empty object → falls back to a single chunk.
+
 ### Auto-selection (`'auto'`, v0.3 §2)
 
 `'auto'` is **opt-in**; the default stays `'rest'` so interactive use is

@@ -48,6 +48,7 @@ TableFunction GetSalesforceLastScanPagesFunction();
 // job-create POST (/jobs/query), so tests can assert the job carries the same
 // projection + predicate SOQL as the REST path. Not a stable/public API.
 void SetLastBulkCreateBody(const string &body);
+void ResetBulkCreateBodies(); // reset the accumulator at the start of a Bulk scan
 TableFunction GetSalesforceLastBulkCreateBodyFunction();
 
 // DEBUG / TEST ONLY. The transport the most recent scan resolved to, the probed

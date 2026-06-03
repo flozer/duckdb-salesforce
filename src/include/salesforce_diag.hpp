@@ -22,6 +22,10 @@ void DiagRecordScan(const string &object, const string &soql, const string &tran
 // REST page counter mirror (kept in sync with salesforce_last_scan_pages()).
 void DiagSetPages(int64_t pages);
 
+// Bulk PK-chunk count (#v0.7 §9): how many Id-range chunks the Bulk scan ran
+// (1 = no chunking). Surfaced as salesforce_query_cost().bulk_chunks.
+void DiagSetBulkChunks(int64_t chunks);
+
 // Rows DELIVERED to DuckDB (output cardinality), accumulated across chunks.
 void DiagAddRowsEmitted(int64_t rows);
 

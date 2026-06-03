@@ -452,9 +452,19 @@ TableFunction GetSalesforceLastScanPagesFunction() {
 static std::mutex g_bulk_body_lock;
 static string g_last_bulk_create_body;
 
+// Accumulates one entry per Bulk job-create in a scan (PK chunking, #v0.7 §9
+// can create several). Newline-separated; reset at the start of each Bulk scan.
 void SetLastBulkCreateBody(const string &body) {
     std::lock_guard<std::mutex> g(g_bulk_body_lock);
-    g_last_bulk_create_body = body;
+    if (!g_last_bulk_create_body.empty()) {
+        g_last_bulk_create_body += "\n";
+    }
+    g_last_bulk_create_body += body;
+}
+
+void ResetBulkCreateBodies() {
+    std::lock_guard<std::mutex> g(g_bulk_body_lock);
+    g_last_bulk_create_body.clear();
 }
 
 namespace {
