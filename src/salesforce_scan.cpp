@@ -110,7 +110,11 @@ static char Base62Char(int v) {
     if (v < 36) return static_cast<char>('A' + v - 10);
     return static_cast<char>('a' + v - 36);
 }
-// First kIdPrec chars -> uint64 (62^10 < 2^63). Enough resolution for <=8 chunks.
+// We interpolate over the first kIdPrec chars only (62^10 < 2^63 — enough
+// resolution for <=8 chunks); the boundary is then padded to the FULL Salesforce
+// Id length so the generated `Id < '...'` is a syntactically valid Id (15 or 18
+// chars). The shared object key prefix (e.g. 001) is inside these high digits,
+// so it is preserved automatically. NEVER emit a short/partial boundary (#27).
 static constexpr int kIdPrec = 10;
 static uint64_t IdToNum(const string &id) {
     uint64_t v = 0;
@@ -119,13 +123,19 @@ static uint64_t IdToNum(const string &id) {
     }
     return v;
 }
-static string NumToId(uint64_t v) {
-    string s(kIdPrec, '0');
+// Produce a length-`len` Id boundary: the kIdPrec interpolated chars, right-
+// padded with '0' (lowest base62 value, keeps lexical ordering) to `len`.
+static string NumToId(uint64_t v, idx_t len) {
+    string prefix(kIdPrec, '0');
     for (int i = kIdPrec - 1; i >= 0; i--) {
-        s[i] = Base62Char(static_cast<int>(v % 62));
+        prefix[i] = Base62Char(static_cast<int>(v % 62));
         v /= 62;
     }
-    return s;
+    if (len <= static_cast<idx_t>(kIdPrec)) {
+        return prefix.substr(0, len);
+    }
+    prefix.append(len - kIdPrec, '0'); // pad suffix to a valid Id length
+    return prefix;
 }
 
 // Build N disjoint, exhaustive WHERE clauses over [min_id, max_id] by uniform
@@ -138,12 +148,14 @@ static vector<string> BuildIdRangeWheres(const string &pushed, const string &min
         return pushed.empty() ? range : ("(" + pushed + ") AND (" + range + ")");
     };
     uint64_t lo_num = IdToNum(min_id), hi_num = IdToNum(max_id);
-    // Boundary strings b[0..n]; b[0]=min_id, b[n]=max_id, interior interpolated.
+    // Interior boundaries are padded to the real Id length (15/18) so they are
+    // valid Salesforce Ids; the outer bounds are the actual MIN/MAX(Id) (#27).
+    idx_t id_len = min_id.size() >= max_id.size() ? min_id.size() : max_id.size();
     vector<string> b;
     b.push_back(min_id);
     for (int64_t i = 1; i < n; i++) {
         uint64_t v = lo_num + (hi_num - lo_num) * static_cast<uint64_t>(i) / static_cast<uint64_t>(n);
-        b.push_back(NumToId(v));
+        b.push_back(NumToId(v, id_len));
     }
     b.push_back(max_id);
     vector<string> wheres;
