@@ -672,7 +672,7 @@ Unlike Firebird's empty dependency list, this declares real deps:
 ### 14.4 `community-extensions/description.yml`
 - Metadata for `github.com/duckdb/community-extensions`.
 - **`excluded_platforms`**: `wasm_mvp;wasm_threads;wasm_eh` — same exclusion rationale as Firebird (OpenSSL/native sockets unavailable in WASM). Revisit if a WASM-compatible HTTP/TLS path emerges.
-- `repo.ref`: pinned tag (`v0.1.0`) for reproducible CI builds.
+- `repo.ref`: pinned tag (e.g. `v0.8.0`) for reproducible CI builds.
 
 ---
 
@@ -944,6 +944,13 @@ These six are flagged now so v0.1–v0.7 implementations avoid baking in live-on
 
 ## Appendix C: v0.1 Delivery Track (`v0.1-readonly-rest`)
 
+> **HISTORICAL.** This appendix records the original v0.1 vertical slice and its
+> gates. v0.1 shipped; the project is now at **v0.8** (REST + Bulk + auto, quota
+> governor, COUNT pushdown, parent relationships, Tooling schema, PK chunking,
+> Win/Linux CI). Items deferred to "v0.2" below landed across v0.2–v0.8. The
+> **security gate (C.4/C.5) remains in force** for every release. Kept verbatim
+> for provenance — not rewritten.
+>
 > PM scope lock. The architecture above is the *target*; this appendix defines the **first vertical slice only**. Everything not listed under "In scope" is explicitly a non-goal for v0.1 to prevent scope creep. v0.1 **live validation is manual-only** and must be run only against an org the maintainer is authorized to use; automated CI must never contact Salesforce or require secrets. Not production-hardened.
 
 ### C.1 Scope (the v0.1 vertical slice)

@@ -13,7 +13,7 @@ extension:
   version: 0.8.0
   language: C++
   build: cmake
-  license: <TBD>            # MAINTAINER DECISION — MIT recommended for community-extensions; needs a LICENSE file in the repo
+  license: MIT             # LICENSE file present at repo root
   requires_toolchains: "vcpkg"
   # We have only built/tested linux_amd64 + windows_amd64 (CI). Community CI
   # builds the full set; either add support or exclude the untested platforms.

@@ -79,23 +79,26 @@ Done as a local audit. **No PR/push/branch on `duckdb/community-extensions`.**
   [`community/description.yml.draft`](community/description.yml.draft)) — NOT
   submitted.
 
-### Gaps to close BEFORE any community-extensions PR
+### Gaps — status
 
-1. ⛔ **No `LICENSE` file** — community-extensions requires one. **Maintainer
-   decision needed**: pick a license (MIT recommended) + add `LICENSE`, then set
-   `license:` in the draft `description.yml`. **Blocker.**
-2. ⚠️ **Platform coverage** — only `linux_amd64` + `windows_amd64` are built/
-   tested. Community CI builds the full set; either add support (osx/arm/wasm)
-   or keep them in `excluded_platforms` (current draft excludes them). Decide.
-3. ⚠️ **THIRD-PARTY NOTICES** — add a short notice file crediting httplib (MIT)
-   and OpenSSL, for a clean distribution.
-4. ⚠️ **`docs/ARCHITECTURE.md` Appendix C** references "v0.1" gates in places —
-   sweep remaining stale version strings before submission.
+1. ✅ **`LICENSE`** — **MIT** added at repo root (© 2026 Fernando Lozer);
+   `description.yml` draft set to `license: MIT`. (Was the hard blocker.)
+2. ✅ **THIRD-PARTY NOTICES** — [`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md):
+   httplib (MIT), OpenSSL (Apache-2.0), DuckDB/extension-ci-tools/vcpkg (MIT).
+3. ✅ **Stale-string sweep** — README + SECURITY refreshed to v0.8; `vcpkg.json`
+   0.8.0; `docs/ARCHITECTURE.md` Appendix C marked HISTORICAL + `repo.ref`
+   example updated. (Appendix C kept verbatim for provenance.)
+4. 🟦 **Platform coverage — conscious decision (deferred).** Validated platforms
+   today: **`linux_amd64` + `windows_amd64`** only (CI). macOS/arm/wasm are
+   **out of scope for now** and stay in `excluded_platforms`. **Known gap before
+   a broad community PR**: a wide submission would want macOS at least. Revisit
+   before submission.
 5. ℹ️ **Signing** — community extensions are signed by DuckDB's pipeline; local
    builds stay unsigned (documented in INSTALL.md). No action until submission.
 6. ℹ️ **Submission mechanics** — a PR to `duckdb/community-extensions` adds
    `extensions/salesforce/description.yml` pointing at a tagged ref. Human-gated
    (C.5); not prepared as a branch/PR anywhere.
 
-**Net:** one hard blocker (LICENSE) + platform-scope decision. After those, the
-package is submission-ready pending the explicit human GO above.
+**Net:** mechanical gaps closed. Package is **submission-ready** except the
+deliberate platform-scope choice (#4) and the **explicit human GO** (C.5) — both
+remain open by design. No submission performed.
