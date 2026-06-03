@@ -2,11 +2,11 @@
 
 ## Status & scope
 
-`duckdb-salesforce` is at **v0.1 — early, not production-hardened.**
-Live validation is **manual-only** and must be run only against an org the
-maintainer is **authorized to use**; automated CI must never contact Salesforce
-or require secrets. Treat it as experimental until a versioned release
-explicitly states production readiness.
+`duckdb-salesforce` is at **v0.8 — read-only, feature-complete for local use;
+not yet published to community-extensions.** Live validation is **manual-only**
+and must be run only against an org the maintainer is **authorized to use**;
+automated CI must never contact Salesforce or require secrets. Treat it as
+pre-1.0 until a versioned release explicitly states production readiness.
 
 This policy is the enforced, reviewable form of the security gate in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) Appendix C.4. It is a **hard

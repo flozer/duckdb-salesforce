@@ -57,3 +57,45 @@ auditable, and distributable**. Tick every box first.
 
 Until the final box is checked by a human, the extension stays **local /
 `flozer`-only**.
+
+---
+
+## Audit results (v0.8 community-prep, flozer-only — no submission)
+
+Done as a local audit. **No PR/push/branch on `duckdb/community-extensions`.**
+
+### Pass
+
+- ✅ **No secrets** in tracked files (scan clean; `.gitignore` covers
+  `.env`/`secrets.*`). CI is mock-only, no `SF_LIVE_*`.
+- ✅ **CI green** — Win + Linux × DuckDB v1.5.2/v1.5.3 (run 26888031691).
+- ✅ **SECURITY.md** present; refreshed to v0.8 status.
+- ✅ **README** present; v0.1 status banner refreshed to v0.8.
+- ✅ **Vendored license** — `third_party/httplib` is MIT (Yuji Hirose);
+  OpenSSL via vcpkg (Apache-2.0). Compatible.
+- ✅ **Version stamps** aligned to 0.8.0 (`vcpkg.json`).
+- ✅ **Read-only** + secret-free errors + TLS-on verified earlier.
+- ✅ **description.yml** drafted (staged at
+  [`community/description.yml.draft`](community/description.yml.draft)) — NOT
+  submitted.
+
+### Gaps to close BEFORE any community-extensions PR
+
+1. ⛔ **No `LICENSE` file** — community-extensions requires one. **Maintainer
+   decision needed**: pick a license (MIT recommended) + add `LICENSE`, then set
+   `license:` in the draft `description.yml`. **Blocker.**
+2. ⚠️ **Platform coverage** — only `linux_amd64` + `windows_amd64` are built/
+   tested. Community CI builds the full set; either add support (osx/arm/wasm)
+   or keep them in `excluded_platforms` (current draft excludes them). Decide.
+3. ⚠️ **THIRD-PARTY NOTICES** — add a short notice file crediting httplib (MIT)
+   and OpenSSL, for a clean distribution.
+4. ⚠️ **`docs/ARCHITECTURE.md` Appendix C** references "v0.1" gates in places —
+   sweep remaining stale version strings before submission.
+5. ℹ️ **Signing** — community extensions are signed by DuckDB's pipeline; local
+   builds stay unsigned (documented in INSTALL.md). No action until submission.
+6. ℹ️ **Submission mechanics** — a PR to `duckdb/community-extensions` adds
+   `extensions/salesforce/description.yml` pointing at a tagged ref. Human-gated
+   (C.5); not prepared as a branch/PR anywhere.
+
+**Net:** one hard blocker (LICENSE) + platform-scope decision. After those, the
+package is submission-ready pending the explicit human GO above.

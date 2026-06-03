@@ -5,15 +5,16 @@ official Salesforce REST / Bulk APIs. Architectural sibling of
 [duckdb-firebird](https://github.com/flozer/duckdb-firebird) — same
 catalog/storage + table-function scanner + pushdown design, different backend.
 
-> **Status: v0.1 (read-only REST) — early, not production-hardened.**
-> ATTACH authenticates via OAuth, sObjects are resolved on demand, and
-> `SELECT * FROM salesforce.<Object>` returns typed rows over the REST query
-> API, with SOQL projection + a conservative predicate pushdown.
-> **Live validation is manual-only** and must be run only against an org the
-> maintainer is authorized to use; **automated CI never contacts Salesforce or
-> requires secrets**. See
-> [`v0.1-readonly-rest`](https://github.com/flozer/duckdb-salesforce/milestone/1)
-> and the [limitations](#v01-limitations) below.
+> **Status: v0.8 — read-only, feature-complete for local use; not yet published
+> to community-extensions.** ATTACH authenticates via OAuth (refresh token);
+> sObjects resolve on demand; queries run over REST `/query`, Bulk API 2.0
+> (lazy-streamed, optional PK chunking), or `auto`, with SOQL projection +
+> predicate pushdown, COUNT pushdown, a per-job quota governor, parent
+> relationship (STRUCT) columns, and Tooling-API fast schema. CI builds + runs
+> the offline (mock) suite on **Windows + Linux** across DuckDB v1.5.2/v1.5.3.
+> **Live validation is manual-only**, run only against an org the maintainer is
+> authorized to use; **automated CI never contacts Salesforce or requires
+> secrets**. See [docs/INSTALL.md](docs/INSTALL.md) and the limitations below.
 
 ## Usage
 
