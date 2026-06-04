@@ -68,6 +68,30 @@ As plataformas validadas no CI hoje são `linux_amd64` + `windows_amd64`
 (baseline) e `osx_arm64` (extra). A extensão ainda não foi publicada no catálogo
 community, então ainda não existe um `INSTALL ... FROM community`.
 
+### macOS: bundle de certificados TLS
+
+A extensão **sempre** verifica o certificado TLS do servidor — não existe
+flag insegura para desligar essa checagem em nenhuma plataforma. No macOS,
+porém, o OpenSSL (compilado via `vcpkg`) **não** traz um CA bundle padrão e
+**não** lê o Keychain do macOS. Por causa disso, um `ATTACH` *live* pode
+falhar na verificação de certificado.
+
+A solução é apontar o OpenSSL para um CA bundle através da variável de
+ambiente `SSL_CERT_FILE` (o OpenSSL também respeita `SSL_CERT_DIR`). Isso
+apenas escolhe as âncoras de confiança — a verificação continua **ligada**,
+não é um bypass:
+
+```bash
+export SSL_CERT_FILE=$(brew --prefix)/etc/openssl@3/cert.pem   # bundle do OpenSSL via Homebrew
+export SSL_CERT_FILE=$(python3 -m certifi)                     # bundle certifi do Python
+```
+
+Um `ATTACH` live que falha a verificação no macOS já imprime exatamente essa
+sugestão na mensagem de erro. **Linux** e **Windows** não precisam disso: o
+Linux usa o bundle do sistema e o Windows usa o trust store do SO. Um trust
+store zero-config baseado no Keychain do macOS é um follow-up planejado, ainda
+não entregue.
+
 ## 3. Conectar ao Salesforce
 
 Anexe a org com o tipo de catálogo `salesforce` e suas credenciais OAuth:

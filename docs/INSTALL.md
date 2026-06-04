@@ -27,8 +27,19 @@ Common: `git`, CMake ≥ 3.5, a C++17 compiler, OpenSSL.
   ⚠️ **Live-TLS caveat**: OpenSSL-via-vcpkg does not read the macOS **Keychain**,
   so a *live* `ATTACH` may fail certificate verification. CI only runs the
   offline mock suite, so this is not exercised there. Until the macOS trust
-  store is wired up, point OpenSSL at a CA bundle (e.g. `SSL_CERT_FILE=…`) for
-  live use.
+  store is wired up (planned follow-up), point OpenSSL at a CA bundle via the
+  `SSL_CERT_FILE` environment variable — OpenSSL reads it (and `SSL_CERT_DIR`)
+  at runtime, and verification stays **on**:
+
+  ```sh
+  # Homebrew OpenSSL bundle:
+  export SSL_CERT_FILE=$(brew --prefix)/etc/openssl@3/cert.pem
+  # …or the Python certifi bundle:
+  export SSL_CERT_FILE=$(python3 -m certifi)
+  ```
+
+  A live `ATTACH` that fails verification on macOS now prints this exact
+  suggestion in the error message.
 
 CI validates build + the offline (mock) test suite on **linux_amd64,
 windows_amd64, and osx_arm64** across DuckDB v1.5.2 and v1.5.3.

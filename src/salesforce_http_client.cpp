@@ -158,7 +158,20 @@ private:
 
             auto err = res.error();
             if (err == httplib::Error::SSLServerVerification) {
+#ifdef __APPLE__
+                // macOS ships no OpenSSL-style CA bundle (trust lives in the
+                // Keychain), so OpenSSL's default verify paths often resolve to
+                // nothing. Point it at a bundle via SSL_CERT_FILE. Verification
+                // stays ON — this is guidance, not a bypass.
+                return TransportError(
+                    "TLS certificate verification failed. On macOS, OpenSSL has "
+                    "no default CA bundle; set SSL_CERT_FILE to one and retry, "
+                    "e.g. export SSL_CERT_FILE=$(brew --prefix)/etc/openssl@3/cert.pem "
+                    "(or a certifi bundle: export "
+                    "SSL_CERT_FILE=$(python3 -m certifi))");
+#else
                 return TransportError("TLS certificate verification failed");
+#endif
             }
             if (attempt < kMaxAttempts) {
                 Backoff(attempt);

@@ -108,16 +108,22 @@ Done as a local audit. **No PR/push/branch on `duckdb/community-extensions`.**
    `osx_amd64` (cross-compile), arm-linux, musl, wasm, mingw remain excluded —
    a documented, conscious scope choice. **CI proves the macOS build + offline
    tests, NOT live Salesforce TLS on macOS** (see #5).
-5. ⚠️ **Live-TLS on macOS — known gap (ACCEPTED, not a blocker).** Maintainer
-   decision: ship as a documented gap; do not implement the macOS trust store or
-   run a macOS live smoke now. Status:
+5. ⚠️ **Live-TLS on macOS — known gap, mitigated (option A shipped).**
+   Maintainer decision: ship the `SSL_CERT_FILE` path now (option A); defer the
+   zero-config Keychain trust store (option B) to a follow-up. Status:
    - macOS build + offline (mock) tests: **green** (osx_arm64, v1.5.2/v1.5.3).
-   - live Salesforce TLS on macOS: **not validated**.
-   - workaround: point OpenSSL at a CA bundle via `SSL_CERT_FILE` for live use.
+   - live Salesforce TLS on macOS: **not validated in CI** (mock-only); the
+     supported path is `SSL_CERT_FILE` pointing at a CA bundle.
+   - **A (done):** a macOS TLS-verify failure now prints an actionable hint
+     (`export SSL_CERT_FILE=$(brew --prefix)/etc/openssl@3/cert.pem` or certifi);
+     documented in INSTALL.md, SECURITY.md, and the EN/PT usage guides.
+     Verification stays on — this selects trust anchors, it is not a bypass.
    - **not a blocker** for package / community readiness (CI is mock-only;
      community parity is met by the linux_amd64 + windows_amd64 baseline).
-   - future fix (optional): load the macOS system trust store, mirroring the
-     Windows `wincrypt` path.
+   - **B (follow-up, optional):** load the macOS system trust store via
+     `Security.framework` (`SecTrustCopyAnchorCertificates`), mirroring the
+     Windows `wincrypt` path, for zero-config live use. Implement only when a
+     macOS compile/test cycle is available.
 6. ℹ️ **Signing** — community extensions are signed by DuckDB's pipeline; local
    builds stay unsigned (documented in INSTALL.md). No action until submission.
 7. ℹ️ **Submission mechanics** — a PR to `duckdb/community-extensions` adds

@@ -35,7 +35,10 @@ The two sensitive credentials are `client_secret` and `refresh_token`
    and any handling of a Salesforce account password are **forbidden**.
 5. **TLS always on.** All Salesforce traffic uses HTTPS with certificate
    verification enabled. No `verify=false` / insecure-TLS escape hatch ships
-   in any build.
+   in any build. On macOS, OpenSSL (via vcpkg) has no default CA bundle; point
+   it at one with `SSL_CERT_FILE` (see docs/INSTALL.md). This selects *which*
+   trust anchors to verify against — it is **not** a bypass; verification
+   remains on regardless.
 
 ## Credential hygiene for users
 

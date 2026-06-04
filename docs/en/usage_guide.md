@@ -66,6 +66,29 @@ CI-validated platforms today are `linux_amd64` + `windows_amd64` (baseline) and
 `osx_arm64` (extra). The extension is not yet published to community-extensions,
 so there is no `INSTALL ... FROM community` yet.
 
+### macOS: TLS certificate bundle
+
+The extension always verifies the TLS server certificate when it talks to
+Salesforce. There is no insecure flag, ever. On macOS the OpenSSL that the
+extension is built against (via vcpkg) ships **no default CA bundle** and does
+**not** read the macOS Keychain, so a *live* `ATTACH` can fail certificate
+verification with no trust anchors to check against.
+
+The fix is to point OpenSSL at a CA bundle through the `SSL_CERT_FILE`
+environment variable (OpenSSL also honors `SSL_CERT_DIR` for a directory of
+certificates). This only *selects* the trust anchors — verification stays ON,
+it is not a bypass:
+
+```bash
+export SSL_CERT_FILE=$(brew --prefix)/etc/openssl@3/cert.pem   # Homebrew OpenSSL bundle
+export SSL_CERT_FILE=$(python3 -m certifi)                     # Python certifi bundle
+```
+
+A live `ATTACH` that fails verification on macOS now prints this exact
+suggestion in the error message. Linux and Windows need no such step: Linux
+uses the system bundle and Windows uses the OS trust store. A zero-config macOS
+Keychain trust store is a planned follow-up, not yet shipped.
+
 ## 3. Connect to Salesforce
 
 Attach the org with the `salesforce` catalog type and your OAuth
