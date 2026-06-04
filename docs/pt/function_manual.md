@@ -680,6 +680,107 @@ SELECT Id, Name FROM sf.Account WHERE Industry = 'Technology';
 SELECT * FROM salesforce_query_cost();
 ```
 
+### `salesforce_relationships()`
+
+#### O que faz
+
+Reporta o que a expansão de relacionamentos de pai (parent relationship) fez
+na **última vez** que o schema de um sObject foi resolvido: quais
+relacionamentos `reference` foram expandidos em STRUCT, quais foram pulados e
+por quê. É um diagnóstico **puro** — não muda absolutamente nada no
+comportamento da extensão.
+
+#### Como funciona
+
+A resolução de schema acontece na **primeira referência** ao objeto (um
+`SELECT` ou um `DESCRIBE`). Esta função reflete o objeto resolvido mais
+recentemente. Reconsultar um schema que já está em cache **não** re-resolve,
+então o instantâneo não muda nesse caso — para ver outro objeto, force a
+resolução dele referenciando-o pela primeira vez.
+
+A saída segue um modelo de duas naturezas de linha, com um schema de colunas
+**uniforme** (as colunas que não se aplicam à linha ficam `NULL`):
+
+- exatamente **uma** linha `config`, sempre emitida — mesmo com
+  `sf_relationships = 'off'`. Assim, "off" nunca parece um resultado vazio ou
+  quebrado: você recebe a linha `config` informando o modo, e nenhuma linha
+  `relationship`.
+- depois, **uma** linha `relationship` por campo `reference` considerado na
+  resolução (cada uma com `status` `expanded` ou `skipped`).
+
+Colunas de saída:
+
+| Coluna | Tipo | Linha `config` | Linha `relationship` |
+|---|---|---|---|
+| `row_type` | VARCHAR | `'config'` | `'relationship'` |
+| `object` | VARCHAR | objeto resolvido | objeto resolvido |
+| `relationships_mode` | VARCHAR | valor de `sf_relationships` (`off` / `parent`) | NULL |
+| `relationship_depth` | BIGINT | `sf_relationship_depth` efetivo (`1`..`2`) | NULL |
+| `relationship_name` | VARCHAR | NULL | `relationshipName` do SF (ou o nome do campo) |
+| `parent_object` | VARCHAR | NULL | objeto alvo; NULL se polymorphic |
+| `depth_level` | BIGINT | NULL | `1` = parent, `2` = grandparent |
+| `status` | VARCHAR | NULL | `'expanded'` ou `'skipped'` |
+| `reason` | VARCHAR | NULL | NULL se expanded; senão o motivo do skip |
+| `field_count` | BIGINT | NULL | nº de campos do STRUCT quando expanded; NULL se skipped |
+| `expanded_count` | BIGINT | nº de relacionamentos expandidos | NULL |
+| `skipped_count` | BIGINT | nº de relacionamentos pulados | NULL |
+| `note` | VARCHAR | resumo | nota de over-fetch (linhas expanded) |
+
+Motivos de skip (coluna `reason` nas linhas `skipped`):
+
+- `polymorphic` — o relacionamento tem mais de um alvo, então não há um STRUCT
+  único para expandir.
+- `self_reference` — o relacionamento aponta para o próprio objeto.
+- `cycle` — o pai já está no caminho de expansão atual.
+- `name_collision` — o `relationshipName` colide com uma coluna já existente.
+- `parent_not_describable` — o describe do objeto-pai falhou.
+- `no_fields` — o pai não tem campos úteis para expandir.
+- `no_relationship_name` — o relacionamento não expõe um `relationshipName`.
+
+#### A nota de over-fetch
+
+Este é o insight principal da função. Um pai expandido é buscado como um STRUCT
+**completo**, contendo **todos** os campos escalares queryable do pai —
+inclusive as colunas de id de chave estrangeira. A coluna `field_count` reflete
+exatamente esse número. A projeção aninhada **não** é empurrada para o SOQL,
+então selecionar um único subcampo (por exemplo `Account.Name`) ainda busca o
+`Account` inteiro. A coluna `note` nas linhas `expanded` avisa sobre isso — é
+assim que você identifica e quantifica o over-fetch.
+
+#### Para que serve
+
+Complementa `salesforce_query_cost()`, mas é uma função **separada de
+propósito**: aquela mede o custo de um **scan** (outro ciclo de vida), enquanto
+esta explica a **resolução de schema** — o que a expansão de relacionamentos
+realmente produziu. Use-a para entender por que uma coluna de relacionamento
+não apareceu (qual `reason` de skip), quão fundo a expansão desceu
+(`depth_level`) e quanto over-fetch cada STRUCT acrescenta (`field_count`).
+
+#### Uso no dia a dia
+
+```sql
+SET sf_relationships = 'parent';
+SET sf_relationship_depth = 2;
+SELECT Id FROM sf.Contact LIMIT 1;   -- dispara a resolução de schema
+
+SELECT row_type, relationship_name, parent_object, depth_level, status, reason, field_count
+FROM salesforce_relationships();
+```
+
+Lendo um resultado típico de `Contact`:
+
+- uma linha `config` com `relationships_mode = parent`, `relationship_depth = 2`
+  e os contadores `expanded_count` / `skipped_count`;
+- uma linha `relationship` para `Account`, `status = expanded`, `depth_level = 1`
+  (pai direto), com `field_count` e a `note` de over-fetch;
+- uma linha `relationship` para `What`, `status = skipped`,
+  `reason = polymorphic`, `parent_object` NULL (mais de um alvo);
+- uma linha `relationship` para `Owner`, `status = expanded`, `depth_level = 2`
+  (grandparent — o `User` dono do `Account`).
+
+Com `sf_relationships = 'off'`, a mesma consulta devolve **somente** a linha
+`config` (com `relationships_mode = off`), e nenhuma linha `relationship`.
+
 ### `salesforce_last_soql()`
 
 #### O que faz

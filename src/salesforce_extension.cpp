@@ -8,6 +8,7 @@
 #include "salesforce_soql.hpp"
 #include "salesforce_quota.hpp"
 #include "salesforce_diag.hpp"
+#include "salesforce_reldiag.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
@@ -72,6 +73,15 @@ static void LoadInternal(ExtensionLoader &loader) {
     // delivered, quota, and short selectivity guidance. Aggregates the granular
     // salesforce_last_* diagnostics; does not replace them.
     loader.RegisterFunction(GetSalesforceQueryCostFunction());
+
+    // salesforce_relationships() — LAST-RESOLUTION relationship diagnostics
+    // (#v1.0): one `config` row (sf_relationships mode, effective depth,
+    // expanded/skipped counts) plus one `relationship` row per reference field
+    // considered (expanded with field_count, or skipped with a reason:
+    // polymorphic / self_reference / cycle / name_collision /
+    // parent_not_describable / no_fields / no_relationship_name). Explains
+    // over-fetch and why a parent was or wasn't expanded. Read-only diagnostic.
+    loader.RegisterFunction(GetSalesforceRelationshipsFunction());
 
     // salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the
     // attached catalog issued since ATTACH (proves the metadata cache, #12).

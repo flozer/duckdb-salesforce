@@ -21,6 +21,7 @@
 #include "salesforce_scan.hpp"
 #include "salesforce_session.hpp"
 #include "salesforce_soql.hpp"
+#include "salesforce_reldiag.hpp"
 
 #include <mutex>
 #include <unordered_map>
@@ -197,14 +198,21 @@ public:
         if (transaction.GetContext().TryGetCurrentSetting("sf_relationships", rv) && !rv.IsNull()) {
             relationships = StringUtil::Lower(rv.ToString());
         }
+        // Read effective depth regardless of mode so the diagnostics config row
+        // always reports it (#v1.0). 1 = parent only (default), 2 = + grandparent.
+        int depth = 1;
+        Value dv;
+        if (transaction.GetContext().TryGetCurrentSetting("sf_relationship_depth", dv) &&
+            !dv.IsNull()) {
+            int64_t d = dv.GetValue<int64_t>();
+            depth = d < 1 ? 1 : (d > 2 ? 2 : static_cast<int>(d)); // clamp 1..2
+        }
+        // Stamp the relationship-diagnostics snapshot on EVERY resolution — even
+        // when expansion is off — so salesforce_relationships() always has a
+        // config row (off must not look like an empty bug). Relationship rows
+        // are recorded inside BuildRelationshipFields when mode == parent.
+        RelDiagBegin(describe.object_name, relationships, depth);
         if (relationships == "parent") {
-            int depth = 1; // #v1.0: 1 = parent only (default), 2 = + grandparent
-            Value dv;
-            if (transaction.GetContext().TryGetCurrentSetting("sf_relationship_depth", dv) &&
-                !dv.IsNull()) {
-                int64_t d = dv.GetValue<int64_t>();
-                depth = d < 1 ? 1 : (d > 2 ? 2 : static_cast<int>(d)); // clamp 1..2
-            }
             ExpandParentRelationships(session, describe, depth);
         }
         return BuildAndCacheEntry(describe);
@@ -272,7 +280,7 @@ private:
                                    int depth) {
         std::unordered_set<string> visited;
         visited.insert(StringUtil::Lower(describe.object_name));
-        auto rels = BuildRelationshipFields(session, describe, depth, visited);
+        auto rels = BuildRelationshipFields(session, describe, depth, visited, 1);
         for (auto &e : rels) {
             describe.fields.push_back(std::move(e));
         }
@@ -284,22 +292,34 @@ private:
     // child of its parent STRUCT. Caller holds lock_.
     vector<SalesforceField> BuildRelationshipFields(SalesforceSession &session,
                                                     const SalesforceDescribe &desc, int depth,
-                                                    std::unordered_set<string> &visited) {
+                                                    std::unordered_set<string> &visited, int level) {
         vector<SalesforceField> rels;
         if (depth <= 0) {
             return rels;
         }
         for (auto &f : desc.fields) {
             if (StringUtil::Lower(f.sf_type) != "reference") {
+                continue; // not a relationship candidate -> not recorded
+            }
+            // Each skip below records a diagnostic row (#v1.0) with its reason
+            // and parent level, then continues — behaviour is unchanged.
+            if (f.relationship_name.empty()) {
+                RelDiagRecord(f.name, "", level, "skipped", "no_relationship_name", -1);
                 continue;
             }
-            if (f.relationship_name.empty() || f.reference_to.size() != 1) {
-                continue; // no relationship name, or polymorphic -> skip
+            if (f.reference_to.size() != 1) {
+                RelDiagRecord(f.relationship_name, "", level, "skipped", "polymorphic", -1);
+                continue; // 0 or >1 targets -> no single STRUCT target
             }
             const string &parent = f.reference_to[0];
             string plow = StringUtil::Lower(parent);
-            if (StringUtil::CIEquals(parent, desc.object_name) || visited.count(plow)) {
-                continue; // self / cycle -> skip
+            if (StringUtil::CIEquals(parent, desc.object_name)) {
+                RelDiagRecord(f.relationship_name, parent, level, "skipped", "self_reference", -1);
+                continue;
+            }
+            if (visited.count(plow)) {
+                RelDiagRecord(f.relationship_name, parent, level, "skipped", "cycle", -1);
+                continue;
             }
             bool collide = false; // avoid colliding with an existing column name
             for (auto &g : desc.fields) {
@@ -309,10 +329,13 @@ private:
                 }
             }
             if (collide) {
+                RelDiagRecord(f.relationship_name, parent, level, "skipped", "name_collision", -1);
                 continue;
             }
             const SalesforceDescribe *pd = GetParentDescribe(session, parent);
             if (!pd) {
+                RelDiagRecord(f.relationship_name, parent, level, "skipped",
+                              "parent_not_describable", -1);
                 continue;
             }
             SalesforceField rel;
@@ -332,7 +355,7 @@ private:
             }
             // Recurse one more parent level (grandparent) as nested STRUCT children.
             visited.insert(plow);
-            auto nested = BuildRelationshipFields(session, *pd, depth - 1, visited);
+            auto nested = BuildRelationshipFields(session, *pd, depth - 1, visited, level + 1);
             visited.erase(plow);
             for (auto &n : nested) {
                 bool dup = false; // don't shadow a parent scalar child of the same name
@@ -349,8 +372,11 @@ private:
                 rel.children.push_back(std::move(n));
             }
             if (rel.children.empty()) {
+                RelDiagRecord(f.relationship_name, parent, level, "skipped", "no_fields", -1);
                 continue;
             }
+            RelDiagRecord(f.relationship_name, parent, level, "expanded", "",
+                          static_cast<int64_t>(rel.children.size()));
             rel.duckdb_type = LogicalType::STRUCT(std::move(struct_children));
             rels.push_back(std::move(rel));
         }

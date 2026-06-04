@@ -1,0 +1,145 @@
+# name: test/sql/salesforce_relationships.test
+# description: v1.0 — salesforce_relationships() diagnostics (config row + per-relationship decisions)
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Describe sequence (per ATTACH): Contact -> Account (parent) -> User (grandparent).
+#   Contact.AccountId        -> Account        (expanded)
+#   Contact.WhatId           -> [Account,Contact] polymorphic (skipped)
+#   Contact.ParentContactId  -> Contact        self-reference (skipped)
+#   Account.OwnerId          -> User           (expanded at depth 2)
+#   Account.BackId           -> Contact        cycle at depth 2 (skipped)
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"},{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"]},{"name":"WhatId","type":"reference","relationshipName":"What","referenceTo":["Account","Contact"]},{"name":"ParentContactId","type":"reference","relationshipName":"ParentContact","referenceTo":["Contact"]}]}|~|{"name":"Account","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"},{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User"]},{"name":"BackId","type":"reference","relationshipName":"Back","referenceTo":["Contact"]}]}|~|{"name":"User","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"c1"}]}';
+
+# === off: a config row must still exist (off must not look like an empty bug) =
+statement ok
+SET sf_relationships = 'off';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# Trigger schema resolution so the diagnostic snapshot is stamped.
+statement ok
+SELECT Id FROM sf.Contact;
+
+query TIII
+SELECT relationships_mode, relationship_depth, expanded_count, skipped_count
+FROM salesforce_relationships() WHERE row_type = 'config';
+----
+off	1	0	0
+
+# Off -> only the config row, no relationship rows.
+query I
+SELECT count(*) FROM salesforce_relationships();
+----
+1
+
+statement ok
+DETACH sf;
+
+# === depth 1 (parent): one expanded + two skipped ===========================
+statement ok
+SET sf_relationships = 'parent';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+statement ok
+SELECT Id FROM sf.Contact;
+
+query TIII
+SELECT relationships_mode, relationship_depth, expanded_count, skipped_count
+FROM salesforce_relationships() WHERE row_type = 'config';
+----
+parent	1	1	2
+
+# Expanded single-target Account: parent set, depth 1, status expanded. The
+# parent STRUCT carries every queryable parent scalar (Id, Name, OwnerId,
+# BackId) = 4 fields — this IS the over-fetch the diagnostic explains.
+query TTITI
+SELECT relationship_name, parent_object, depth_level, status, field_count
+FROM salesforce_relationships() WHERE status = 'expanded';
+----
+Account	Account	1	expanded	4
+
+# Expanded relationship carries no skip reason.
+query I
+SELECT count(*) FROM salesforce_relationships()
+WHERE status = 'expanded' AND reason IS NOT NULL;
+----
+0
+
+# Polymorphic What -> skipped, parent_object NULL.
+query TT
+SELECT reason, coalesce(parent_object, 'NULL')
+FROM salesforce_relationships() WHERE relationship_name = 'What';
+----
+polymorphic	NULL
+
+# Self reference -> skipped.
+query T
+SELECT reason FROM salesforce_relationships() WHERE relationship_name = 'ParentContact';
+----
+self_reference
+
+statement ok
+DETACH sf;
+
+# === depth 2 (grandparent): adds Owner (expanded L2) + Back (cycle L2) =======
+statement ok
+SET sf_relationship_depth = 2;
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+statement ok
+SELECT Id FROM sf.Contact;
+
+query TIII
+SELECT relationships_mode, relationship_depth, expanded_count, skipped_count
+FROM salesforce_relationships() WHERE row_type = 'config';
+----
+parent	2	2	3
+
+# Grandparent Owner expanded at depth_level 2 (parent User, 2 fields).
+query TII
+SELECT parent_object, depth_level, field_count
+FROM salesforce_relationships() WHERE relationship_name = 'Owner';
+----
+User	2	2
+
+# Account -> Contact back-reference at depth 2 -> cycle.
+query TI
+SELECT reason, depth_level FROM salesforce_relationships() WHERE relationship_name = 'Back';
+----
+cycle	2
+
+# Counters coherent: config counts match the relationship rows (diff = 0).
+query II
+SELECT
+  (SELECT expanded_count FROM salesforce_relationships() WHERE row_type = 'config')
+    - (SELECT count(*) FROM salesforce_relationships() WHERE status = 'expanded'),
+  (SELECT skipped_count FROM salesforce_relationships() WHERE row_type = 'config')
+    - (SELECT count(*) FROM salesforce_relationships() WHERE status = 'skipped');
+----
+0	0
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_relationship_depth = 1;
+
+statement ok
+SET sf_relationships = 'off';

@@ -466,6 +466,53 @@ A typical workflow is to run your query, then inspect
 `salesforce_query_cost()` to confirm the transport, the pushed vs. residual
 filters, and the `guidance` column for tuning hints.
 
+### Inspecting relationship expansion
+
+`salesforce_relationships()` is a separate diagnostic that reports what
+parent-relationship expansion did the **last time an object's schema was
+resolved** (schema resolution happens on the first `SELECT` or `DESCRIBE` of
+an object — re-querying a cached schema does not re-resolve). It complements
+`salesforce_query_cost()`, which reports per-scan cost; this one reports
+per-schema-resolution relationship expansion.
+
+Resolve an object's schema first, then call it:
+
+```sql
+SET sf_relationships='parent';
+SET sf_relationship_depth=2;
+SELECT Id FROM sf.Contact LIMIT 1;   -- triggers schema resolution
+
+SELECT row_type, relationship_name, parent_object, depth_level, status, reason, field_count
+FROM salesforce_relationships();
+```
+
+The result always starts with exactly one `config` row (mode, effective
+depth, and the `expanded_count` / `skipped_count` totals), followed by one
+`relationship` row per `reference` field considered. Read it to answer four
+questions:
+
+- **Over-fetch.** An expanded parent is fetched as a **full STRUCT** of
+  every queryable parent scalar field, and nested projection is not pushed
+  into SOQL — so selecting `Account.Name` still fetches the whole parent.
+  The `field_count` column (with the `note` on expanded rows) shows how wide
+  that over-fetch is.
+- **Skipped relationships.** A `relationship` row with `status='skipped'`
+  carries a `reason` — `polymorphic` (for example a `What` lookup, with
+  `parent_object` NULL), `self_reference`, `cycle`, `name_collision`,
+  `parent_not_describable`, `no_fields`, or `no_relationship_name`.
+- **Depth.** `depth_level=1` is the direct parent and `depth_level=2` is the
+  grandparent (for example Contact → Account → Owner).
+- **The always-present config row.** Even with `sf_relationships='off'` you
+  still get the single config row (`relationships_mode='off'`) and no
+  `relationship` rows — so "off" never looks like an empty or broken result:
+
+```sql
+SET sf_relationships='off';
+SELECT Id FROM sf.Account LIMIT 1;
+
+SELECT * FROM salesforce_relationships();   -- one config row only
+```
+
 ## 13. Limitations
 
 Know these boundaries before you build on the extension:

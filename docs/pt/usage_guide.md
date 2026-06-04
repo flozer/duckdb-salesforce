@@ -438,6 +438,46 @@ Um fluxo típico é executar sua consulta e então inspecionar
 `salesforce_query_cost()` para confirmar o transporte, os filtros com
 pushdown vs. residuais e a coluna `guidance` para dicas de ajuste.
 
+### Diagnosticar a expansão de relacionamentos
+
+`salesforce_relationships()` explica o que a expansão de relacionamentos de
+pai fez na **última resolução de schema** de um objeto (a resolução ocorre na
+primeira referência ao objeto, não no scan). Use-a para entender o over-fetch,
+quais relacionamentos foram pulados e quão fundo a expansão desceu:
+
+```sql
+SET sf_relationships = 'parent';
+SET sf_relationship_depth = 2;
+SELECT Id FROM sf.Contact LIMIT 1;   -- dispara a resolução de schema
+
+SELECT row_type, relationship_name, parent_object, depth_level, status, reason, field_count
+FROM salesforce_relationships();
+```
+
+Como ler a saída:
+
+- A primeira linha é sempre `row_type = config`: traz `relationships_mode`
+  (`off` / `parent`), o `relationship_depth` efetivo (`1`..`2`) e os contadores
+  `expanded_count` / `skipped_count`. Essa linha é emitida **mesmo com**
+  `sf_relationships = 'off'` — nesse caso você recebe **só** a linha `config`,
+  então "off" nunca parece um resultado vazio ou quebrado.
+- Cada linha `row_type = relationship` é um campo `reference` considerado.
+  Quando `status = expanded`, a coluna `field_count` mostra quantos campos o
+  STRUCT do pai tem e a `note` avisa do over-fetch: o pai é buscado **inteiro**
+  (todos os campos escalares queryable), pois a projeção aninhada não recebe
+  pushdown — selecionar `Account.Name` ainda busca o `Account` completo.
+- Quando `status = skipped`, a coluna `reason` diz o porquê (`polymorphic`,
+  `self_reference`, `cycle`, `name_collision`, `parent_not_describable`,
+  `no_fields` ou `no_relationship_name`). É assim que você descobre por que uma
+  coluna de relacionamento esperada não apareceu.
+- A coluna `depth_level` distingue o pai direto (`1`) do avô (`2`), então você
+  vê exatamente o que a profundidade 2 acrescentou.
+
+Por exemplo, em `sf.Contact` com profundidade 2 você costuma ver `Account`
+expandido em `depth_level = 1`, `Owner` expandido em `depth_level = 2`
+(o `User` dono do `Account`) e `What` pulado com `reason = polymorphic`
+(`parent_object` NULL, pois há mais de um alvo).
+
 ## 12. Lendo registros arquivados e excluídos (queryAll)
 
 Por padrão, um scan vê apenas os registros vivos. Para também incluir os
