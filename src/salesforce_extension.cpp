@@ -91,6 +91,12 @@ static void LoadInternal(ExtensionLoader &loader) {
     // transparent pushdown — the user chooses it. No optimizer / plan rewrite.
     loader.RegisterFunction(GetSalesforceAggregateFunction());
 
+    // salesforce_refresh_metadata(catalog [, object]) — manual metadata-cache
+    // refresh (#v1.3 §10): clears the attached catalog's in-memory schema +
+    // object-listing cache so the next reference re-describes. Empty object =
+    // global; a named object clears only that object. No data/disk cache.
+    loader.RegisterFunction(GetSalesforceRefreshMetadataFunction());
+
     // salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the
     // attached catalog issued since ATTACH (proves the metadata cache, #12).
     loader.RegisterFunction(GetSalesforceDescribeCallsFunction());

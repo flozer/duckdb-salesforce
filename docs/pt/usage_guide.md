@@ -558,6 +558,40 @@ expandido em `depth_level = 1`, `Owner` expandido em `depth_level = 2`
 (o `User` dono do `Account`) e `What` pulado com `reason = polymorphic`
 (`parent_object` NULL, pois há mais de um alvo).
 
+### Atualizar metadados em sessão longa (`salesforce_refresh_metadata`)
+
+O conector resolve o schema de cada objeto **uma vez**, na primeira referência,
+e o mantém em cache em memória pelo tempo do `ATTACH` (junto do *object listing*
+global da org). Numa sessão curta isso é ótimo, mas numa sessão longa há *schema
+drift*: alguém adiciona um campo *custom* em `Account`, ou cria um objeto novo,
+e a sua sessão continua enxergando o schema antigo. Antes era preciso fazer
+`DETACH` e `ATTACH` de novo.
+
+`salesforce_refresh_metadata` resolve isso invalidando o cache em memória, para
+que a **próxima** query rebusque os metadados — a função não faz a chamada de
+rede sozinha, só limpa o cache.
+
+```sql
+-- adicionaram um campo em Account na org; re-descreve só Account na próxima query:
+SELECT * FROM salesforce_refresh_metadata('sf', 'Account');
+
+-- criaram objetos novos / mudou bastante coisa: descarta schemas + object listing:
+SELECT * FROM salesforce_refresh_metadata('sf');
+```
+
+A distinção de escopo é o ponto principal:
+
+- **Com `object`** o refresh é cirúrgico: só o schema daquele objeto é
+  descartado; os demais objetos e o *object listing* continuam em cache.
+- **Sem `object`** o refresh é global: o *object listing* e **todos** os
+  schemas já resolvidos são descartados, então a próxima varredura de objetos e
+  a próxima referência a qualquer objeto rebuscam tudo.
+
+A função devolve uma linha com `catalog`, `scope` (`global` ou `object`) e
+`object` (NULL no refresh global). O `catalog` precisa ser um catálogo
+Salesforce anexado, senão você recebe um erro claro de alias inexistente ou de
+catálogo que não é Salesforce.
+
 ### Agregados server-side explícitos (`salesforce_aggregate`)
 
 Quando você só quer o agregado — um total, uma média, um mínimo/máximo ou uma

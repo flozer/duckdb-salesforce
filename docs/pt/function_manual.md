@@ -958,6 +958,72 @@ SELECT Id, Name FROM sf.Account;
 SELECT * FROM salesforce_last_scan_pages();
 ```
 
+### `salesforce_refresh_metadata(catalog [, object])`
+
+#### O que faz
+
+Invalida o cache de metadados em memória de uma org anexada, de modo que a
+**próxima** referência rebusque os metadados do Salesforce. A função em si
+**não** faz chamada de rede.
+
+#### Como funciona
+
+O conector mantém, por `ATTACH`, um cache de metadados **em memória**: os
+schemas dos objetos (resolvidos de forma lazy na primeira referência), o
+*object listing* global da org e os *describes* dos objetos-pai usados na
+expansão de relacionamentos. Não há cache de **dados** nem cache em **disco**
+— só esses metadados.
+
+Esta função apenas **limpa** esse cache; ela não busca nada por conta
+própria. Quem dispara o rebusca é a próxima query que tocar o metadado
+invalidado.
+
+Argumentos:
+
+| Argumento | Obrigatório | Significado |
+|---|---|---|
+| `catalog` | sim | Alias do `ATTACH` de uma org Salesforce anexada (posicional) |
+| `object` | não | Nome de API de um sObject; quando omitido, o refresh é global (posicional) |
+
+O escopo depende de `object` ter sido informado ou não:
+
+- **`object` omitido → refresh global.** Descarta o *object listing* **e**
+  todos os schemas já resolvidos (e os *describes* de pai). A próxima varredura
+  de listing rebusca a lista de objetos; a próxima referência a **qualquer**
+  objeto re-descreve o schema dele.
+- **`object` informado → refresh só desse objeto.** Limpa apenas o schema
+  resolvido daquele objeto (e a sua entrada de *parent-describe*). Os demais
+  objetos e o *object listing* global ficam **intactos**.
+
+Colunas de saída — devolve **uma** linha:
+
+| Coluna | Tipo | Notas |
+|---|---|---|
+| `catalog` | VARCHAR | O alias informado |
+| `scope` | VARCHAR | `'global'` ou `'object'` |
+| `object` | VARCHAR | Nome do objeto, ou NULL no refresh global |
+
+Erros (claros, sem expor segredos): o `catalog` precisa ser um catálogo
+Salesforce anexado. Caso contrário você recebe `no attached catalog named
+'<x>'` (não existe catálogo com esse alias) ou `catalog '<x>' is not a
+Salesforce catalog` (o alias existe, mas não é uma org Salesforce).
+
+#### Para que serve
+
+Permite capturar mudanças de schema na org — um campo *custom* novo, um objeto
+novo — **dentro de uma sessão longa**, sem precisar de `DETACH` seguido de
+`ATTACH`. Como os schemas são resolvidos e cacheados na primeira referência,
+sem esse refresh a sessão continuaria enxergando o schema antigo.
+
+#### Uso no dia a dia
+
+```sql
+-- após adicionar um campo em Account no Salesforce:
+SELECT * FROM salesforce_refresh_metadata('sf', 'Account');  -- re-descreve Account na próxima query
+-- ou atualizar tudo (schemas + object listing):
+SELECT * FROM salesforce_refresh_metadata('sf');
+```
+
 ## Nível 4 - Funções utilitárias / autônomas
 
 Estas funções recebem as credenciais como argumentos nomeados e **não**

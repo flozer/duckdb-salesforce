@@ -1,0 +1,130 @@
+# name: test/sql/salesforce_refresh_metadata.test
+# description: v1.3 §10 — salesforce_refresh_metadata() clears the in-memory metadata cache
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Describe sequence consumed in order: Account, Contact, Account-again.
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"}]}|~|{"name":"Contact","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"}]}|~|{"name":"Account","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"x1"}]}';
+
+statement ok
+ATTACH 'salesforce://prod' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === object schema cache: hit before refresh, miss after ====================
+statement ok
+SELECT Id FROM sf.Account;
+
+# First reference described Account once.
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# Cached: no new describe.
+statement ok
+SELECT Id FROM sf.Account;
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# Contact is a separate object -> second describe.
+statement ok
+SELECT Id FROM sf.Contact;
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
+
+# Refresh ONLY Account.
+query TTT
+SELECT catalog, scope, object FROM salesforce_refresh_metadata('sf', 'Account');
+----
+sf	object	Account
+
+# Contact cache is untouched -> still no new describe.
+statement ok
+SELECT Id FROM sf.Contact;
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
+
+# Account was cleared -> next reference re-describes (3rd describe).
+statement ok
+SELECT Id FROM sf.Account;
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+3
+
+# === global object listing: refresh clears it ==============================
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true},{"name":"Contact","queryable":true}]}';
+
+# First listing scan = one global describe.
+query I
+SELECT COUNT(*) FROM duckdb_tables() WHERE database_name = 'sf';
+----
+2
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# Cached listing: no new global describe.
+query I
+SELECT COUNT(*) FROM duckdb_tables() WHERE database_name = 'sf';
+----
+2
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# Global refresh clears the object listing (object arg omitted).
+query TTT
+SELECT catalog, scope, object FROM salesforce_refresh_metadata('sf');
+----
+sf	global	NULL
+
+# Next listing scan re-fetches -> second global describe.
+query I
+SELECT COUNT(*) FROM duckdb_tables() WHERE database_name = 'sf';
+----
+2
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+2
+
+# === errors ================================================================
+statement error
+SELECT * FROM salesforce_refresh_metadata('nope');
+----
+no attached catalog named 'nope'
+
+statement error
+SELECT * FROM salesforce_refresh_metadata('memory');
+----
+is not a Salesforce catalog
+
+statement ok
+DETACH sf;

@@ -15,6 +15,10 @@ class ClientContext;
 void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias,
                                      SalesforceConfig &cfg, SalesforceTokenSet &token);
 
+// salesforce_refresh_metadata(catalog [, object]) — clear an attached salesforce
+// catalog's in-memory metadata cache (#v1.3 §10). Empty object = global.
+TableFunction GetSalesforceRefreshMetadataFunction();
+
 // Returns the StorageExtension registered under the name "salesforce" so that
 //
 //     ATTACH 'salesforce://production' AS sf (TYPE salesforce);

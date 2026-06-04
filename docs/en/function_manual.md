@@ -1079,6 +1079,72 @@ FROM salesforce_query(
 );
 ```
 
+### `salesforce_refresh_metadata(catalog [, object])`
+
+#### What it does
+
+Clears the in-memory metadata cache the connector keeps for an attached
+Salesforce org, so the **next** reference re-fetches schema (and the object
+listing) fresh from Salesforce. It is how you pick up org schema changes — a
+new custom field, a new object — within a long-lived session **without** a
+`DETACH` / `ATTACH`.
+
+#### How it works
+
+The connector caches metadata in memory **per `ATTACH`**: each object's schema
+(resolved lazily on first reference), the global object listing, and the
+parent-object describes used for relationship expansion. There is **no** data
+cache and **no** on-disk cache — only this in-memory metadata.
+
+This function clears that cache. It makes **no network call itself**; it only
+drops the cached entries so the next reference re-fetches. The scope depends on
+whether you pass `object`:
+
+| Call | Scope | What is cleared | Effect on the next reference |
+|---|---|---|---|
+| `salesforce_refresh_metadata(catalog)` | global | the object listing **and** every resolved object schema (and parent describes) | the next listing scan re-fetches; the next reference to any object re-describes |
+| `salesforce_refresh_metadata(catalog, object)` | object | **only** that object's resolved schema (and its parent-describe entry) | only that object re-describes; other objects and the object listing are left intact |
+
+Arguments:
+
+| Argument | Required | Meaning |
+|---|---|---|
+| `catalog` | yes | The `ATTACH` alias of an attached Salesforce org (for example `'sf'`). |
+| `object` | no | An sObject name. Omit it for a global refresh; pass it to refresh just that object. |
+
+It returns exactly **one** row:
+
+| Column | Type | Notes |
+|---|---|---|
+| `catalog` | VARCHAR | The alias you passed |
+| `scope` | VARCHAR | `'global'` (no `object`) or `'object'` (`object` given) |
+| `object` | VARCHAR | The object name, or `NULL` for a global refresh |
+
+#### Errors
+
+The errors are clear and secret-free. The alias must be an attached Salesforce
+catalog:
+
+- If no catalog with that alias is attached: `no attached catalog named '<x>'`.
+- If the alias names a catalog that is not a Salesforce catalog:
+  `catalog '<x>' is not a Salesforce catalog`.
+
+#### Why use it
+
+To pick up org schema changes within a long-lived session without tearing down
+the attachment. When someone adds a custom field to `Account` or creates a new
+object, refresh the cache and the next query sees the change — no `DETACH` /
+`ATTACH` round trip needed.
+
+#### Daily use
+
+```sql
+-- after adding a field to Account in Salesforce:
+SELECT * FROM salesforce_refresh_metadata('sf', 'Account');  -- re-describe Account on next query
+-- or refresh everything (schemas + object listing):
+SELECT * FROM salesforce_refresh_metadata('sf');
+```
+
 ## Level 5 - Server-side aggregates
 
 This is a single table function that runs a SOQL aggregate query for you and

@@ -425,6 +425,29 @@ private:
         object_list_loaded_ = true;
     }
 
+public:
+    // Manual metadata-cache refresh (#v1.3 §10). Clears the in-memory caches so
+    // the next reference re-describes. Empty `object` = global: drop the object
+    // listing AND every resolved schema (+ parent describes), so the next
+    // listing scan re-fetches and every object re-describes. A named object
+    // drops only that object's resolved schema + its parent-describe entry,
+    // leaving other objects and the listing intact. No data cache exists; no
+    // network call here.
+    void RefreshMetadata(const string &object) {
+        std::lock_guard<std::mutex> g(lock_);
+        if (object.empty()) {
+            tables_.clear();
+            listing_.clear();
+            parent_describe_cache_.clear();
+            object_list_loaded_ = false;
+            return;
+        }
+        const string key = StringUtil::Lower(object);
+        tables_.erase(key);
+        parent_describe_cache_.erase(key);
+    }
+
+private:
     [[noreturn]] static void Unsupported(const char *op) {
         throw NotImplementedException(
             std::string("Salesforce ATTACH catalog is read-only — ") + op +
@@ -463,6 +486,14 @@ public:
     // In-memory credentials, reused by salesforce_aggregate() (#v1.0).
     const SalesforceConfig &GetConfig() const { return config_; }
     const SalesforceTokenSet &GetToken() const { return token_; }
+
+    // Manual metadata-cache refresh (#v1.3 §10). No-op if not yet initialized
+    // (nothing is cached before first use).
+    void RefreshMetadata(const string &object) {
+        if (main_schema_) {
+            main_schema_->RefreshMetadata(object);
+        }
+    }
 
     void Initialize(bool) override {
         ResetDescribeCalls();       // DEBUG/TEST: baseline per-catalog describe counter
@@ -621,6 +652,108 @@ void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias
     auto &sf = catalog->Cast<SalesforceCatalog>();
     cfg = sf.GetConfig();
     token = sf.GetToken();
+}
+
+// ---------------------------------------------------------------------------
+//  salesforce_refresh_metadata(catalog [, object])  (#v1.3 §10)
+// ---------------------------------------------------------------------------
+
+// Resolve + validate the catalog and clear its metadata cache. Empty `object`
+// = global refresh. Throws a clear error if the alias is not a Salesforce
+// catalog. No network call; in-memory only (there is no data or disk cache).
+void RefreshSalesforceCatalogMetadata(ClientContext &context, const string &alias,
+                                      const string &object) {
+    Catalog *catalog = nullptr;
+    try {
+        catalog = &Catalog::GetCatalog(context, alias);
+    } catch (...) {
+        catalog = nullptr;
+    }
+    if (!catalog) {
+        throw BinderException(
+            "salesforce_refresh_metadata: no attached catalog named '%s' — ATTACH "
+            "a Salesforce org first, then pass its alias.",
+            alias);
+    }
+    if (catalog->GetCatalogType() != "salesforce") {
+        throw BinderException(
+            "salesforce_refresh_metadata: catalog '%s' is not a Salesforce catalog.",
+            alias);
+    }
+    catalog->Cast<SalesforceCatalog>().RefreshMetadata(object);
+}
+
+namespace {
+
+struct RefreshMetadataBindData : public TableFunctionData {
+    string alias;
+    string object; // empty -> global
+};
+
+struct RefreshMetadataGlobalState : public GlobalTableFunctionState {
+    bool emitted = false;
+    idx_t MaxThreads() const override { return 1; }
+};
+
+unique_ptr<FunctionData> RefreshMetadataBind(ClientContext &, TableFunctionBindInput &input,
+                                             vector<LogicalType> &return_types,
+                                             vector<string> &names) {
+    auto &args = input.inputs;
+    if (args.size() < 1 || args.size() > 2) {
+        throw BinderException(
+            "salesforce_refresh_metadata(catalog [, object]) takes 1 or 2 arguments.");
+    }
+    for (idx_t i = 0; i < args.size(); i++) {
+        if (args[i].IsNull()) {
+            throw BinderException(
+                "salesforce_refresh_metadata: argument %llu must not be NULL.",
+                (unsigned long long)(i + 1));
+        }
+    }
+    auto bind = make_uniq<RefreshMetadataBindData>();
+    bind->alias = args[0].ToString();
+    StringUtil::Trim(bind->alias);
+    if (args.size() == 2) {
+        bind->object = args[1].ToString();
+        StringUtil::Trim(bind->object);
+    }
+    names = {"catalog", "scope", "object"};
+    return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
+    return std::move(bind);
+}
+
+unique_ptr<GlobalTableFunctionState> RefreshMetadataInit(ClientContext &,
+                                                         TableFunctionInitInput &) {
+    return make_uniq<RefreshMetadataGlobalState>();
+}
+
+void RefreshMetadataFunction(ClientContext &context, TableFunctionInput &data,
+                             DataChunk &output) {
+    auto &bd = data.bind_data->Cast<RefreshMetadataBindData>();
+    auto &gs = data.global_state->Cast<RefreshMetadataGlobalState>();
+    if (gs.emitted) {
+        output.SetCardinality(0);
+        return;
+    }
+    RefreshSalesforceCatalogMetadata(context, bd.alias, bd.object);
+    output.data[0].SetValue(0, Value(bd.alias));
+    output.data[1].SetValue(0, Value(bd.object.empty() ? "global" : "object"));
+    if (bd.object.empty()) {
+        output.data[2].SetValue(0, Value(LogicalType::VARCHAR)); // NULL
+    } else {
+        output.data[2].SetValue(0, Value(bd.object));
+    }
+    gs.emitted = true;
+    output.SetCardinality(1);
+}
+
+} // namespace
+
+TableFunction GetSalesforceRefreshMetadataFunction() {
+    TableFunction fn("salesforce_refresh_metadata", {LogicalType::VARCHAR},
+                     RefreshMetadataFunction, RefreshMetadataBind, RefreshMetadataInit);
+    fn.varargs = LogicalType::VARCHAR; // optional 2nd arg: object
+    return fn;
 }
 
 } // namespace duckdb

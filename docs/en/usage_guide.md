@@ -608,6 +608,42 @@ SELECT Id FROM sf.Account LIMIT 1;
 SELECT * FROM salesforce_relationships();   -- one config row only
 ```
 
+### Refreshing the metadata cache
+
+The connector caches object metadata in memory **per `ATTACH`**: each object's
+schema (resolved lazily on first reference), the global object listing, and the
+parent describes used for relationship expansion. There is no data cache and no
+on-disk cache. That cache is what makes a long session fast, but it also means a
+schema change made in Salesforce — a new custom field, a new object — is not
+seen until the cache is cleared.
+
+`salesforce_refresh_metadata(catalog [, object])` clears that cache so the
+**next** reference re-fetches from Salesforce. It makes no network call itself
+— it only drops cached entries. Use it to pick up org schema drift within a
+long-lived session **without** a `DETACH` / `ATTACH`.
+
+The optional `object` argument is the global-vs-object distinction:
+
+- **Global** — omit `object` to drop the object listing **and** every resolved
+  object schema (and parent describes). The next listing scan re-fetches, and
+  the next reference to any object re-describes.
+- **Object** — pass an sObject name to clear **only** that object's resolved
+  schema (and its parent-describe entry). Other objects and the object listing
+  are left intact.
+
+```sql
+-- after adding a field to Account in Salesforce:
+SELECT * FROM salesforce_refresh_metadata('sf', 'Account');  -- re-describe Account on next query
+-- or refresh everything (schemas + object listing):
+SELECT * FROM salesforce_refresh_metadata('sf');
+```
+
+It returns one row: `catalog` (the alias), `scope` (`'global'` or `'object'`),
+and `object` (the object name, or `NULL` for a global refresh). The `catalog`
+must be an attached Salesforce catalog — otherwise you get a clear,
+secret-free error (`no attached catalog named '<x>'` or `catalog '<x>' is not a
+Salesforce catalog`).
+
 ## 13. Server-side aggregates (opt-in)
 
 Transparent `MIN`/`MAX`/`SUM`/`AVG` pushdown is not available yet (aggregate
