@@ -1085,7 +1085,7 @@ This is a single table function that runs a SOQL aggregate query for you and
 returns the computed result, rather than dragging the underlying rows down
 into DuckDB. It reuses an org you have already attached.
 
-### `salesforce_aggregate(catalog, object, aggregates [, filter])`
+### `salesforce_aggregate(catalog, object, aggregates [, filter [, group_by]])`
 
 #### What it does
 
@@ -1096,7 +1096,7 @@ scan.
 
 #### How it works
 
-All four arguments are `VARCHAR` string literals:
+All arguments are `VARCHAR` string literals:
 
 | Argument | Required | Meaning |
 |---|---|---|
@@ -1104,22 +1104,42 @@ All four arguments are `VARCHAR` string literals:
 | `object` | yes | The sObject to aggregate (for example `'Account'`). Must be a valid identifier. |
 | `aggregates` | yes | Comma-separated SOQL aggregate terms (see below). |
 | `filter` | no | A SOQL `WHERE` body **without** the `WHERE` keyword (for example `Industry = 'Technology'`). |
+| `group_by` | no | Comma-separated **simple** field identifiers to group by (for example `'Industry'` or `'Industry, Type'`). |
 
 The `aggregates` argument is a comma-separated list of SOQL aggregate terms.
 The allowed aggregate functions are `MIN`, `MAX`, `SUM`, `AVG`, `COUNT`, and
 `COUNT_DISTINCT`. Each term may carry an alias in SOQL style — space-separated
 after the function — for example `MIN(AnnualRevenue) minRev`.
 
-Internally it runs `SELECT <aggregates> FROM <object> [WHERE <filter>]` over
-REST and returns exactly **one** row.
+The optional fifth argument, `group_by`, is a comma-separated list of **simple**
+field identifiers (for example `'Industry'` or `'Industry, Type'`). It is
+**positional after `filter`** — to group **without** a filter, pass an **empty
+string** for `filter`:
+
+```sql
+salesforce_aggregate('sf', 'Account', 'COUNT(Id) n', '', 'Industry')
+```
+
+Only plain field names are accepted: no dotted / relationship fields, no
+expressions, and no `ROLLUP` / `CUBE` / `HAVING` in this cut — those are
+rejected with a clear error.
+
+Internally it runs
+`SELECT <group_by>, <aggregates> FROM <object> [WHERE <filter>] GROUP BY <group_by>`
+over REST. Without `group_by` it runs `SELECT <aggregates> FROM <object>
+[WHERE <filter>]` and returns exactly **one** row.
 
 The return model:
 
+- Without `group_by` the function returns exactly **one** row. With `group_by`
+  it returns **one row per group** (multiple rows).
+- When grouping, the **group columns come first**, each named by its field, then
+  the aggregate columns follow.
 - There is **one output column per aggregate term**.
 - Every output column is typed `VARCHAR`. You cast in DuckDB (for example
   `CAST(n AS BIGINT)` or `CAST(minRev AS DECIMAL(18,2))`).
-- A column is named by the term's alias when one is given; otherwise it is
-  named `expr0`, `expr1`, ... in term order.
+- An aggregate column is named by the term's alias when one is given; otherwise
+  it is named `expr0`, `expr1`, ... in term order.
 
 It honors `sf_query_mode` (`query` / `queryAll`), so the aggregate can include
 or exclude archived and soft-deleted records the same way a table scan does.
@@ -1130,7 +1150,11 @@ The SOQL it sends is recorded in the diagnostics — see
 
 - **Every term must be an aggregate function.** Bare fields are rejected; this
   is what keeps the single-row contract.
-- **No `GROUP BY`** in this cut — the function always returns one row.
+- **`GROUP BY` is supported** via the optional `group_by` argument, but only
+  for **simple field identifiers** — no dotted / relationship fields, no
+  expressions. `ROLLUP`, `CUBE`, and `HAVING` remain out of scope and are
+  rejected with a clear error. Without `group_by` the function still returns
+  exactly one row.
 - `;` and nested `SELECT` are rejected.
 - The `object` must be a valid identifier, and the arguments are length-capped.
 - Relationship / polymorphic aggregates are passed through to SOQL as written;
@@ -1172,6 +1196,19 @@ FROM salesforce_aggregate(
   'MIN(AnnualRevenue) minRev, MAX(AnnualRevenue) maxRev, COUNT(Id) n',
   'Industry = ''Technology''');
 ```
+
+Group by a field to get one row per group. To group **without** a filter, pass
+an empty string for the filter:
+
+```sql
+SELECT Industry, CAST(n AS BIGINT) AS account_count
+FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id) n', '', 'Industry')
+ORDER BY account_count DESC;
+```
+
+Combine a non-empty filter with `group_by` to group only the matching rows —
+for example
+`salesforce_aggregate('sf', 'Account', 'COUNT(Id) n', 'AnnualRevenue > 0', 'Industry')`.
 
 ## Pushdown reference
 

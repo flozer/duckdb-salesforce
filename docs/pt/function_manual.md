@@ -1053,7 +1053,7 @@ FROM salesforce_query(
 );
 ```
 
-### `salesforce_aggregate(catalog, object, aggregates [, filter])`
+### `salesforce_aggregate(catalog, object, aggregates [, filter [, group_by]])`
 
 #### O que faz
 
@@ -1077,22 +1077,41 @@ Todos os argumentos são literais `VARCHAR`:
 | `object` | sim | O sObject a consultar (ex. `'Account'`); deve ser um identifier válido |
 | `aggregates` | sim | Termos de agregação SOQL separados por vírgula (veja abaixo) |
 | `filter` | não | Um corpo de `WHERE` SOQL **sem** a palavra `WHERE` (ex. `Industry = 'Technology'`) |
+| `group_by` | não | Uma lista de identifiers de campo **simples** separados por vírgula (ex. `Industry` ou `Industry, Type`) para agrupar o resultado |
 
 Internamente, a função monta e executa
 `SELECT <aggregates> FROM <object> [WHERE <filter>]` via REST e devolve a
-única linha de resultado.
+única linha de resultado. Quando você passa `group_by`, ela monta
+`SELECT <group_by>, <aggregates> FROM <object> [WHERE <filter>] GROUP BY <group_by>`
+e devolve **uma linha por grupo**.
+
+**O argumento `group_by` (5º, opcional).** É uma lista de identifiers de
+campo **simples** separados por vírgula — só nomes de campo (ex. `Industry`
+ou `Industry, Type`). Não são aceitos dotted/relationship fields, expressões,
+nem `ROLLUP` / `CUBE` / `HAVING` neste corte: qualquer um desses é
+**rejeitado com erro claro**. O argumento é **posicional depois de `filter`**;
+para agrupar **sem** filtro, passe uma string **vazia** em `filter`:
+
+```sql
+salesforce_aggregate('sf', 'Account', 'COUNT(Id) n', '', 'Industry')
+```
 
 **O argumento `aggregates`.** É uma lista de termos separados por vírgula.
 Cada termo deve ser uma função de agregação; as permitidas são `MIN`, `MAX`,
 `SUM`, `AVG`, `COUNT` e `COUNT_DISTINCT`. Cada termo pode receber um alias no
 estilo SOQL (separado por espaço): `MIN(AnnualRevenue) minRev`.
 
-**O modelo de retorno (uma linha, tudo VARCHAR).** A saída tem exatamente
-**uma** linha e **uma coluna por termo**, todas de tipo `VARCHAR`. A coluna é
-nomeada pelo alias do termo; quando o termo não tem alias, ela recebe um nome
-posicional `expr0`, `expr1`, ... (na ordem dos termos). Como todo valor volta
-como texto, é você quem faz o cast no DuckDB (por exemplo `CAST(n AS BIGINT)`
-ou `CAST(minRev AS DECIMAL(18,2))`).
+**O modelo de retorno (tudo VARCHAR).** Sem `group_by`, a saída tem
+exatamente **uma** linha e **uma coluna por termo**, todas de tipo `VARCHAR`.
+A coluna é nomeada pelo alias do termo; quando o termo não tem alias, ela
+recebe um nome posicional `expr0`, `expr1`, ... (na ordem dos termos). Como
+todo valor volta como texto, é você quem faz o cast no DuckDB (por exemplo
+`CAST(n AS BIGINT)` ou `CAST(minRev AS DECIMAL(18,2))`).
+
+**Com `group_by`, a saída tem múltiplas linhas — uma por grupo.** As colunas
+de **GROUP vêm primeiro** (cada uma nomeada pelo campo correspondente), e em
+seguida vêm as colunas de **aggregate** (alias do termo ou `expr0`,
+`expr1`, ...). Tudo continua `VARCHAR`, então o cast segue por sua conta.
 
 **Diagnósticos e modo de leitura.** A função honra a configuração
 `sf_query_mode` (`query` / `queryAll`). O SOQL gerado é registrado nos
@@ -1104,7 +1123,10 @@ diagnósticos da sessão, então `salesforce_last_soql()` e
 - **Só termos de agregação.** Campos "nus" (bare fields, sem função de
   agregação) são **rejeitados** — é isso que garante o contrato de uma única
   linha.
-- **Sem `GROUP BY`** neste corte.
+- **`GROUP BY` suportado** via o argumento `group_by`, mas **só com campos
+  simples** (identifiers separados por vírgula). Dotted/relationship fields,
+  expressões e `ROLLUP` / `CUBE` / `HAVING` continuam **fora de escopo** e são
+  rejeitados com erro claro.
 - O `object` deve ser um identifier válido; `;` e `SELECT` aninhado são
   rejeitados; os argumentos têm limite de tamanho.
 - Agregados de relacionamento/polymorphic são passados direto ao SOQL: se o
@@ -1146,6 +1168,29 @@ FROM salesforce_aggregate(
   'sf', 'Account',
   'MIN(AnnualRevenue) minRev, MAX(AnnualRevenue) maxRev, COUNT(Id) n',
   'Industry = ''Technology''');
+```
+
+Para agrupar **sem** filtro, passe uma string vazia em `filter` e o campo de
+agrupamento em `group_by` (note que agora há uma linha por grupo, com a coluna
+de GROUP primeiro):
+
+```sql
+SELECT Industry, CAST(n AS BIGINT) AS account_count
+FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id) n', '', 'Industry')
+ORDER BY account_count DESC;
+```
+
+E para combinar **filtro + agrupamento**, basta preencher os dois argumentos
+(filter não-vazio + group_by):
+
+```sql
+SELECT Industry, CAST(n AS BIGINT) AS active_count
+FROM salesforce_aggregate(
+  'sf', 'Account',
+  'COUNT(Id) n',
+  'AnnualRevenue > 1000000',
+  'Industry')
+ORDER BY active_count DESC;
 ```
 
 ## Referência de pushdown

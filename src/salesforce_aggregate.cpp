@@ -161,7 +161,9 @@ struct AggBindData : public TableFunctionData {
 };
 
 struct AggGlobalState : public GlobalTableFunctionState {
-    bool emitted = false;
+    bool fetched = false;
+    vector<string> records; // raw JSON record objects (one per group row)
+    idx_t cursor = 0;
     idx_t MaxThreads() const override {
         return 1;
     }
@@ -170,10 +172,10 @@ struct AggGlobalState : public GlobalTableFunctionState {
 unique_ptr<FunctionData> AggBind(ClientContext &context, TableFunctionBindInput &input,
                                  vector<LogicalType> &return_types, vector<string> &names) {
     auto &args = input.inputs;
-    if (args.size() < 3 || args.size() > 4) {
+    if (args.size() < 3 || args.size() > 5) {
         throw BinderException(
-            "salesforce_aggregate(catalog, object, aggregates [, filter]) takes 3 "
-            "or 4 arguments.");
+            "salesforce_aggregate(catalog, object, aggregates [, filter [, "
+            "group_by]]) takes 3 to 5 arguments.");
     }
     for (idx_t i = 0; i < args.size(); i++) {
         if (args[i].IsNull()) {
@@ -184,7 +186,8 @@ unique_ptr<FunctionData> AggBind(ClientContext &context, TableFunctionBindInput 
     string alias = Trim(args[0].ToString());
     string object = Trim(args[1].ToString());
     string aggregates = Trim(args[2].ToString());
-    string filter = args.size() == 4 ? Trim(args[3].ToString()) : string();
+    string filter = args.size() >= 4 ? Trim(args[3].ToString()) : string();
+    string group_by = args.size() == 5 ? Trim(args[4].ToString()) : string();
 
     if (!IsIdentifier(object)) {
         throw BinderException(
@@ -198,7 +201,33 @@ unique_ptr<FunctionData> AggBind(ClientContext &context, TableFunctionBindInput 
         RejectUnsafe("filter", filter);
     }
 
+    // group_by: simple field identifiers only (no dotted fields, expressions,
+    // ROLLUP/CUBE — those fail the identifier check). Group columns come FIRST.
+    vector<string> group_fields;
+    if (!group_by.empty()) {
+        RejectUnsafe("group_by", group_by);
+        for (auto &g : SplitTopLevelCommas(group_by)) {
+            string field = Trim(g);
+            if (!IsIdentifier(field)) {
+                throw BinderException(
+                    "salesforce_aggregate: group_by '%s' must be a simple field "
+                    "identifier (no dotted fields, functions, ROLLUP/CUBE/HAVING).",
+                    field);
+            }
+            group_fields.push_back(field);
+        }
+    }
+
     auto bind = make_uniq<AggBindData>();
+    // Group columns first, named by field; the JSON key is the field name.
+    for (auto &field : group_fields) {
+        AggColumn col;
+        col.name = field;
+        col.key = field;
+        names.push_back(col.name);
+        return_types.push_back(LogicalType::VARCHAR);
+        bind->columns.push_back(std::move(col));
+    }
     idx_t unaliased = 0;
     for (auto &term : SplitTopLevelCommas(aggregates)) {
         AggColumn col = ParseTerm(term, unaliased);
@@ -207,9 +236,17 @@ unique_ptr<FunctionData> AggBind(ClientContext &context, TableFunctionBindInput 
         bind->columns.push_back(std::move(col));
     }
 
-    bind->soql = "SELECT " + aggregates + " FROM " + object;
+    string group_clause = StringUtil::Join(group_fields, ", ");
+    bind->soql = "SELECT ";
+    if (!group_fields.empty()) {
+        bind->soql += group_clause + ", ";
+    }
+    bind->soql += aggregates + " FROM " + object;
     if (!filter.empty()) {
         bind->soql += " WHERE " + filter;
+    }
+    if (!group_fields.empty()) {
+        bind->soql += " GROUP BY " + group_clause;
     }
 
     // Reuse the attached catalog's authenticated credentials (validates the
@@ -225,44 +262,48 @@ unique_ptr<GlobalTableFunctionState> AggInit(ClientContext &, TableFunctionInitI
 void AggFunction(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
     auto &bd = data.bind_data->Cast<AggBindData>();
     auto &gs = data.global_state->Cast<AggGlobalState>();
-    if (gs.emitted) {
-        output.SetCardinality(0);
-        return;
+
+    // Fetch once: run the SOQL and keep every group row. GROUP BY can return
+    // many rows, so they are emitted across calls via the cursor below.
+    if (!gs.fetched) {
+        auto client = BuildHttpClientForContext(context);
+        SalesforceSession session(bd.config, *client);
+        session.SetToken(bd.token);
+
+        bool query_all = false;
+        Value qm;
+        if (context.TryGetCurrentSetting("sf_query_mode", qm) && !qm.IsNull()) {
+            query_all = StringUtil::Lower(qm.ToString()) == "queryall";
+        }
+        session.SetQueryAll(query_all);
+
+        SetLastSoql(bd.soql);
+        SetLastTransport("rest", -1,
+                         query_all ? "explicit aggregate (queryAll)" : "explicit aggregate");
+
+        SalesforceQueryResult res = session.Query(bd.soql);
+        gs.records = std::move(res.records);
+        gs.fetched = true;
     }
 
-    auto client = BuildHttpClientForContext(context);
-    SalesforceSession session(bd.config, *client);
-    session.SetToken(bd.token);
-
-    // Honor sf_query_mode (query | queryAll).
-    bool query_all = false;
-    Value qm;
-    if (context.TryGetCurrentSetting("sf_query_mode", qm) && !qm.IsNull()) {
-        query_all = StringUtil::Lower(qm.ToString()) == "queryall";
-    }
-    session.SetQueryAll(query_all);
-
-    SetLastSoql(bd.soql);
-    SetLastTransport("rest", -1, query_all ? "explicit aggregate (queryAll)" : "explicit aggregate");
-
-    SalesforceQueryResult res = session.Query(bd.soql);
-    string record = res.records.empty() ? string() : res.records[0];
-
-    for (idx_t c = 0; c < bd.columns.size(); c++) {
-        string val;
-        bool found = false, is_null = false;
-        if (!record.empty()) {
+    idx_t produced = 0;
+    while (gs.cursor < gs.records.size() && produced < STANDARD_VECTOR_SIZE) {
+        const string &record = gs.records[gs.cursor];
+        for (idx_t c = 0; c < bd.columns.size(); c++) {
+            string val;
+            bool found = false, is_null = false;
             sfjson::GetValue(record, bd.columns[c].key, val, found, is_null);
+            if (!found || is_null) {
+                FlatVector::SetNull(output.data[c], produced, true);
+            } else {
+                FlatVector::GetData<string_t>(output.data[c])[produced] =
+                    StringVector::AddString(output.data[c], val);
+            }
         }
-        if (!found || is_null) {
-            FlatVector::SetNull(output.data[c], 0, true);
-        } else {
-            FlatVector::GetData<string_t>(output.data[c])[0] =
-                StringVector::AddString(output.data[c], val);
-        }
+        gs.cursor++;
+        produced++;
     }
-    gs.emitted = true;
-    output.SetCardinality(1);
+    output.SetCardinality(produced);
 }
 
 } // namespace

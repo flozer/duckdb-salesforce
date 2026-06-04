@@ -562,8 +562,9 @@ expandido em `depth_level = 1`, `Owner` expandido em `depth_level = 2`
 
 Quando você só quer o agregado — um total, uma média, um mínimo/máximo ou uma
 contagem — e não quer trazer as linhas para o DuckDB, a table function
-`salesforce_aggregate(catalog, object, aggregates [, filter])` pede o cálculo
-direto ao Salesforce e devolve **uma única linha**. Ela **reutiliza a sessão
+`salesforce_aggregate(catalog, object, aggregates [, filter [, group_by]])`
+pede o cálculo direto ao Salesforce e devolve **uma única linha** (ou, com
+`group_by`, uma linha por grupo). Ela **reutiliza a sessão
 autenticada** do catálogo que você já anexou (o primeiro argumento é o alias
 do `ATTACH`, ex. `'sf'`), então não há credenciais na chamada.
 
@@ -599,13 +600,43 @@ FROM salesforce_aggregate(
   'Industry = ''Technology''');
 ```
 
+O quinto argumento (opcional) é `group_by`: identifiers de campo **simples**
+separados por vírgula (ex. `Industry` ou `Industry, Type`). Com ele, a função
+monta `SELECT <group_by>, <aggregates> FROM <object> [WHERE <filter>] GROUP BY
+<group_by>` e devolve **uma linha por grupo** — as colunas de **GROUP vêm
+primeiro** (nomeadas pelo campo), depois as de aggregate (alias ou `expr0`,
+`expr1`, ...), tudo ainda `VARCHAR`. Como `group_by` é **posicional depois de
+`filter`**, para agrupar **sem** filtro passe uma string **vazia** no quarto
+argumento:
+
+```sql
+SELECT Industry, CAST(n AS BIGINT) AS account_count
+FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id) n', '', 'Industry')
+ORDER BY account_count DESC;
+```
+
+Para combinar filtro e agrupamento, preencha os dois (filter não-vazio +
+group_by):
+
+```sql
+SELECT Industry, CAST(n AS BIGINT) AS active_count
+FROM salesforce_aggregate(
+  'sf', 'Account',
+  'COUNT(Id) n',
+  'AnnualRevenue > 1000000',
+  'Industry')
+ORDER BY active_count DESC;
+```
+
 Funções permitidas: `MIN`, `MAX`, `SUM`, `AVG`, `COUNT` e `COUNT_DISTINCT`. A
 função honra `sf_query_mode` e registra o SOQL nos diagnósticos
 (`salesforce_last_soql()`, `salesforce_query_cost()`). Limites a conhecer:
 
 - **Só termos de agregação.** Campos "nus" (sem função de agregação) são
   rejeitados — é o que mantém o contrato de uma única linha.
-- **Sem `GROUP BY`** neste corte.
+- **`GROUP BY` suportado** pelo argumento `group_by`, mas **só com campos
+  simples**; dotted/relationship fields, expressões e `ROLLUP` / `CUBE` /
+  `HAVING` continuam fora de escopo e são rejeitados com erro claro.
 - O `object` deve ser um identifier válido; agregados de
   relacionamento/polymorphic vão direto ao SOQL e qualquer erro do Salesforce
   aparece como veio.

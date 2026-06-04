@@ -109,5 +109,56 @@ SELECT * FROM salesforce_aggregate('nope', 'Account', 'COUNT(Id)');
 ----
 no attached catalog named 'nope'
 
+# === GROUP BY: multi-row, group column first (empty filter = no WHERE) =======
+# COUNT(...) in the SOQL routes to the count mock sequence.
+statement ok
+SET sf_mock_count_body = '{"done":true,"records":[{"Industry":"Tech","n":3},{"Industry":"Finance","n":5}]}';
+
+query TI
+SELECT Industry, CAST(n AS BIGINT) AS n
+FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id) n', '', 'Industry')
+ORDER BY Industry;
+----
+Finance	5
+Tech	3
+
+# SOQL has SELECT <group>, <agg> ... GROUP BY <group>, no WHERE.
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT Industry, COUNT(Id) n FROM Account GROUP BY Industry
+
+# GROUP BY + filter together.
+query T
+SELECT soql LIKE 'SELECT Industry, COUNT(Id) n FROM Account WHERE Type = ''Customer'' GROUP BY Industry'
+FROM (
+  SELECT Industry FROM salesforce_aggregate(
+    'sf', 'Account', 'COUNT(Id) n', 'Type = ''Customer''', 'Industry') LIMIT 1
+), salesforce_last_soql();
+----
+true
+
+# expr numbering unaffected by a leading group field.
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Industry":"Tech","expr0":"10"}]}';
+
+query TT
+SELECT Industry, expr0
+FROM salesforce_aggregate('sf', 'Account', 'MIN(AnnualRevenue)', '', 'Industry');
+----
+Tech	10
+
+# group_by rejects a dotted field
+statement error
+SELECT * FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id)', '', 'Account.Name');
+----
+must be a simple field identifier
+
+# group_by rejects ROLLUP/CUBE (parenthesised -> not a simple identifier)
+statement error
+SELECT * FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id)', '', 'ROLLUP(Industry)');
+----
+must be a simple field identifier
+
 statement ok
 DETACH sf;
