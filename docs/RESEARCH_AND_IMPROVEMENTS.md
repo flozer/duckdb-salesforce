@@ -13,6 +13,31 @@ Guiding filter for everything below: **correctness first, read-only only, keep
 CI offline/secret-free.** An idea earns a place here only if it improves
 performance, materialization, correctness, or UX without violating those.
 
+## Current-state audit (2026-06-04)
+
+Honest baseline: **none of the ideas below are implemented yet** — they are
+captured here for follow-up. Verified against the source on
+`claude/apex-mdapi-analysis-EUteR` (latest feature commit: v0.6 §7 parent
+traversal):
+
+| Suggested improvement | Status in code | Evidence |
+| --- | --- | --- |
+| Parallel scan | ❌ single-threaded by design | `salesforce_scan.cpp` `MaxThreads()` returns `1` |
+| PK chunking (Bulk) | ❌ absent | no chunk logic; Bulk path is one job |
+| Streaming Bulk | ❌ eager | `ScanGlobalState.bulk_result` fully materialized before first row |
+| SFDX auth URL / JWT | ❌ absent | `salesforce_config.cpp` accepts only `client_id`/`client_secret`/`refresh_token`/`login_url`/`api_version` |
+| Incremental (`SystemModstamp`) | ❌ absent | no replication-key/cursor code |
+| `queryAll` / deleted records | ❌ absent | scan uses `/query` only |
+| Manual metadata-cache refresh | ❌ absent | cache is in-memory per-ATTACH, dropped on DETACH; no refresh function (ARCHITECTURE §10 planned `salesforce_refresh_metadata`) |
+
+What **is** solid today: OAuth refresh-token auth + TLS, describe/Tooling schema,
+lazy REST paging (`queryMore` loop-guarded), eager Bulk 2.0 with
+`Sforce-Locator` paging, `'auto'` transport (row-count probe), quota governor
+on Bulk starts, COUNT pushdown, projection + residual-safe predicate pushdown,
+parent STRUCT traversal. The connector is well-built for interactive + medium
+extraction; the gaps above are the **large-extraction / materialization /
+headless-auth** frontier.
+
 ## How to read this
 
 Each surveyed project gets an honest verdict — what is transferable, what is
@@ -157,6 +182,16 @@ Surveyed to find performance + materialization patterns with actual code:
    excludes deleted/archived rows. A faithful snapshot needs `queryAll` (recycle
    bin, `isDeleted=true`). Make it opt-in so default behavior is unchanged.
 
+8b. **`getUpdated()` / `getDeleted()` Replication API** — the *canonical*
+   Salesforce delta primitive (SOAP; some REST exposure). Returns the IDs
+   changed/deleted in a timespan plus a `latestDateCovered` cursor to carry into
+   the next run. This is the **only reliable way to capture hard deletes** for an
+   incremental materialization — a `SystemModstamp > x` filter (C6) catches
+   updates but never sees rows that vanished. Pair C6 (updates) with
+   `getDeleted()` (tombstones) for a correct incremental snapshot.
+   - Refs: Salesforce `getUpdated()`/`getDeleted()` SOAP docs; "Monitoring Record
+     Activity via Data Replication API's" (Andy in the Cloud).
+
 8. **Bulk CSV datetime decoding** — Bulk CSV can return datetimes as
    integer/epoch (`simple-salesforce#290`); our CSV decoder
    (`salesforce_csv` / `salesforce_value`) must handle this explicitly so the
@@ -188,6 +223,28 @@ Surveyed to find performance + materialization patterns with actual code:
 13. **Confirm `__mdt` / Custom Settings** are queryable through the existing
     scanner and document it.
 
+### G. Operability / cache
+
+14. **Manual metadata-cache refresh** — the DuckDB `postgres_scanner` exposes
+    `pg_clear_cache()`; `mysql_scanner` likewise. We cache schema in-memory per
+    ATTACH with no way to refresh without DETACH/ATTACH. Add the
+    `salesforce_refresh_metadata('sf')` function ARCHITECTURE §10 already
+    specifies (global + per-object). Cheap, high operability value; mirrors a
+    proven core-extension pattern.
+    - Refs: DuckDB `duckdb-postgres` (schema cache + `pg_clear_cache`).
+
+## Evaluated but low fit
+
+- **GraphQL API** (`/services/data/vXX.0/graphql`). *Not* aligned with our
+  large-extraction core: without `upperBound` (v60.0+) a query caps at **4,000
+  records**; `first` is **200–2000**; **≤10 subqueries**, each ≤2000 rows. It is
+  cursor-paginated like SOQL but with tighter ceilings — strictly worse than
+  REST `queryMore`/Bulk for volume. Its *only* real edge is **consolidated
+  relationship fetch in one round-trip**, which could help the §7 parent/child
+  traversal (e.g. reduce over-fetch, reach grandparents) — a narrow, later
+  optimization, never the bulk path. Refs: `jpmonette/salesforce-graphql`;
+  Salesforce GraphQL pagination/limits docs.
+
 ---
 
 ## Suggested priority
@@ -200,7 +257,12 @@ Surveyed to find performance + materialization patterns with actual code:
 5. **Rate-limit early-exit/resume** (D9) — on top of the quota governor.
 
 Lower / opportunistic: streaming Bulk (A2), REST-vs-Bulk deny-list (A3), Vault
-Mode (B4), JWT (E11), SOAP picklist enrichment (F12), `__mdt` confirmation (F13).
+Mode (B4), JWT (E11), SOAP picklist enrichment (F12), `__mdt` confirmation (F13),
+manual cache refresh (G14, cheap — easy early win).
+
+Refinement to #2/#3: a *correct* incremental snapshot is `SystemModstamp`
+(updates, C6) **plus** `getDeleted()` (tombstones, C8b) — neither alone is
+sufficient.
 
 ---
 
@@ -226,6 +288,20 @@ Incremental / ETL / materialization:
 - `dlthub/dlt`: <https://github.com/dlt-hub/dlt>
 - `neowit/backup-force.com`: <https://github.com/neowit/backup-force.com>
 - `graxlabs/duckdb` (verify availability): <https://github.com/graxlabs/duckdb>
+- GRAX + DuckDB write-up: <https://www.grax.com/blog/sql-and-salesforce-with-duckdb-and-grax/>
+
+Replication / delta API:
+- `getUpdated()` SOAP: <https://developer.salesforce.com/docs/atlas.en-us.api.meta/api/sforce_api_calls_getupdated.htm>
+- `getDeleted()` SOAP: <https://developer.salesforce.com/docs/atlas.en-us.api.meta/api/sforce_api_calls_getdeleted.htm>
+- Data Replication APIs walkthrough (Andy in the Cloud): <https://andyinthecloud.com/2016/03/26/monitoring-record-activity-via-data-replication-apis/>
+
+GraphQL (low fit — see "Evaluated but low fit"):
+- Salesforce GraphQL pagination/limits: <https://developer.salesforce.com/docs/platform/graphql/guide/paginate.html>
+- `jpmonette/salesforce-graphql`: <https://github.com/jpmonette/salesforce-graphql>
+
+DuckDB core-extension patterns (architecture reference):
+- `duckdb/duckdb-postgres` (ATTACH scanner, schema cache, `pg_clear_cache`): <https://github.com/duckdb/duckdb-postgres>
+- PostgreSQL extension docs: <https://duckdb.org/docs/lts/core_extensions/postgres>
 
 Streaming & correctness gotchas:
 - jsforce BulkV2 (streaming): <https://jsforce.github.io/jsforce/classes/api_bulk2.BulkV2.html>
