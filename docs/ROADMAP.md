@@ -260,6 +260,123 @@ Acceptance:
 - CI remains mock-only.
 - No secrets are introduced.
 
+## v1.3: Operability And Salesforce Coverage Hardening
+
+Goal: improve the bridge's reliability and day-to-day operability without
+turning the connector into an ETL or replication system.
+
+### 10. Manual Metadata Cache Refresh
+
+Add an explicit cache refresh helper, similar in spirit to cache-clear functions
+in other DuckDB scanners.
+
+Candidate surface:
+
+- `salesforce_refresh_metadata('sf')` refreshes global/object-list and schema
+  cache for the attached Salesforce catalog.
+- `salesforce_refresh_metadata('sf', 'Account')` refreshes one object.
+
+Scope:
+
+- In-memory cache only.
+- No persistent cache.
+- No data/record cache.
+- Clear diagnostics for missing catalog or non-Salesforce catalog.
+
+Acceptance:
+
+- Repeated schema resolution uses cache before refresh.
+- Refresh causes a new Describe/global describe on next access.
+- Object-specific refresh does not clear unrelated objects.
+- Offline mock tests prove describe counters before/after refresh.
+
+### 11. REST-vs-Bulk Compatibility Guard
+
+Add conservative guards so Bulk is not selected for objects or field shapes known
+to be unreliable through Bulk API 2.0.
+
+Scope:
+
+- Maintain a small documented deny-list or compatibility rule set.
+- Consider field/type signals from Describe where available, for example fields
+  that cannot be represented safely in Bulk CSV.
+- Apply the guard to `sf_force_transport='auto'`.
+- Decide whether forced `sf_force_transport='bulk'` should error clearly or
+  warn and proceed; default should favor correctness.
+
+Out of scope:
+
+- Broad object-specific behavior copied blindly from ETL tools.
+- Hidden fallback that surprises the user.
+
+Acceptance:
+
+- Auto transport avoids denied objects/types.
+- Diagnostics explain the decision.
+- Forced Bulk behavior is explicit and documented.
+
+### 12. Custom Metadata And Custom Settings Confirmation
+
+Confirm and document how Salesforce Custom Metadata Types (`__mdt`) and Custom
+Settings behave through the existing scanner.
+
+Scope:
+
+- Verify queryability through global object listing and scans.
+- Document expected naming and limitations.
+- Add mock or live-smoke guidance if the behavior depends on org setup.
+
+Acceptance:
+
+- Docs explain whether `__mdt` / Custom Settings can be queried like other
+  sObjects.
+- Any limitation is visible and not left as tribal knowledge.
+
+### 13. Bulk Datetime Epoch Hardening
+
+Salesforce Bulk CSV implementations and client libraries have historically
+reported datetime edge cases, including epoch/integer-like values. Strengthen
+the decoder if needed.
+
+Scope:
+
+- Add regression tests for datetime CSV values that arrive as integer/epoch-like
+  cells if Salesforce can emit them for some Bulk paths.
+- Preserve existing ISO datetime behavior.
+- Keep errors field-named and secret-free.
+
+Acceptance:
+
+- ISO datetime behavior remains unchanged.
+- Epoch-like datetime input is either decoded correctly or rejected clearly with
+  a documented reason.
+- REST JSON and Bulk CSV parity remains tested.
+
+### 14. Narrow Metadata Fallback For Picklists And Record Types
+
+Evaluate a narrow, lazy metadata enrichment path for cases where Describe or
+Tooling does not expose enough detail for analytical users.
+
+Scope:
+
+- Read-only metadata only.
+- Picklist values and record type labels are the first candidates.
+- Lazy and cached per ATTACH.
+- REST/Tooling/Describe remain the primary schema path.
+
+Out of scope:
+
+- Metadata deploy/retrieve.
+- Apex Metadata API CRUD.
+- SOAP write operations.
+- Data catalog or governance features.
+
+Acceptance:
+
+- Feature is opt-in or lazy enough not to slow common scans.
+- No metadata writes exist.
+- Docs state exactly which metadata is enriched.
+
 ## Documentation-Only: Materialization With DuckDB
 
 Materialization is a DuckDB workflow, not a connector feature.
