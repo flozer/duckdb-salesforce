@@ -1,10 +1,9 @@
-# Release notes — v0.9.0 (DRAFT — NOT TAGGED)
+# Release notes — v0.9.0 (VALIDATED — tagged on flozer)
 
-> **Status: DRAFT.** This release is **not tagged** and **not published**. No
-> remote CI run, no GitHub release, nothing submitted to
-> `duckdb/community-extensions`. This document summarizes the work accumulated
-> since `v0.8.1` so a tag/smoke decision can be made deliberately. Until a
-> maintainer GO (see *Community status*), it stays a draft.
+> **Status: VALIDATED.** Offline suite green and a manual live smoke against a
+> real org passed (see *Live smoke*). Tagged `v0.9.0` on the `flozer` remote
+> only. **Not published**: no GitHub release, nothing submitted to
+> `duckdb/community-extensions` (still blocked by C.5 — see *Community status*).
 
 Range: `v0.8.1..HEAD` (commits `bf99798` → `a4b23a0`).
 
@@ -108,19 +107,31 @@ DuckDB aggregation.
   (baseline) and `osx_arm64` (extra) across DuckDB v1.5.2 / v1.5.3 — but the
   pipeline is **manual-only** now, so no run is attached to this draft.
 
-## Live-smoke checklist (optional, pre-tag)
+## Live smoke (VALIDATED)
 
-Not required for the draft; run against a real org before tagging if desired.
-No secrets in the repo or CI.
+Run on 2026-06-04 against a real org via `scripts/run_smoke_v0.9.ps1`
+(`auth_source 'env'`), exit code 0. Evidence is counts / timestamps / schema
+only — no row data, no secrets. The output was scanned: no token, secret, JWT,
+or key appeared. (Bugfix `f0f16ad` — empty `sf_mock_env` now falls through to
+the real OS environment — was required for `env` auth and is included here.)
 
-- [ ] `auth_source 'options'` ATTACH + a trivial `SELECT` from a real org.
-- [ ] `auth_source 'env'` and `'sfdx_url'` ATTACH.
-- [ ] `auth_source 'jwt'` ATTACH against a pre-authorized Connected App.
-- [ ] `sf_query_mode = 'queryAll'` returns archived/deleted rows.
-- [ ] `sf_relationships = 'parent'`, depth 1 and 2, nested field access.
-- [ ] `salesforce_aggregate()` with/without filter and GROUP BY.
-- [ ] macOS live TLS with `SSL_CERT_FILE` set.
-- [ ] Verify no token/secret/JWT/key appears in any error or log.
+- [x] basic `SELECT` + `COUNT(*)` pushdown — `account_rows = 54714`.
+- [x] `sf_query_mode = 'queryAll'` returns archived/deleted — `54716` (+2).
+- [x] `salesforce_aggregate()` simple — `n = 54714`,
+      `min_created = 2021-07-22T16:31:53Z`, `max_created = 2026-06-03T21:31:16Z`.
+- [x] `salesforce_aggregate()` GROUP BY — one group (`Industry = NULL`, `n = 54714`).
+- [x] grandparent traversal (depth 2) — `Account` column resolves as `STRUCT(...)`.
+- [x] `salesforce_relationships()` — mode `parent`, depth `2`, expanded `35`,
+      skipped `33` (e.g. Owner / CreatedBy / LastModifiedBy expanded; a
+      self-reference skipped).
+- [x] simple Bulk scan — `account_rows_bulk = 54714` (matches REST).
+- [x] secret-free `last SOQL` diagnostic — `SELECT Id FROM Account`.
+- [x] output scanned: no token / secret / JWT / key present.
+
+Not exercised in this smoke (acceptable): `auth_source 'options'`/`'sfdx_url'`
+(same refresh-token code path as the validated `'env'`); `auth_source 'jwt'`
+(no pre-authorized Connected App on hand); macOS live TLS (no macOS host) —
+all remain offline-covered.
 
 ## Community status
 
