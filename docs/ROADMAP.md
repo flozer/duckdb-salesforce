@@ -132,18 +132,32 @@ Acceptance:
 - Result correctness is asserted against fallback behavior.
 - Unsupported shapes remain correct through DuckDB.
 
-### 4. Simple Aggregate Pushdown
+### 4. Simple Aggregate Pushdown — TRANSPARENT FORM DEFERRED
 
-Evaluate `MIN`, `MAX`, `SUM`, and `AVG` for simple single-object scans.
+> **Status: TRANSPARENT pushdown DEFERRED (PM decision, feasibility-checked).**
+> Transparent `MIN`/`MAX`/`SUM`/`AVG` pushdown is NOT achievable without a plan
+> rewrite. DuckDB runs the aggregate in an operator ABOVE the scan, so the scan
+> must project the column and sees `column_ids = {x}` — indistinguishable from a
+> plain `SELECT x`. The `TableFunction` API (v1.5.3) has projection/filter/limit
+> pushdown hooks but **no aggregate-pushdown hook**, and the scan cannot
+> speculate (emitting a single aggregate row would corrupt a non-aggregate
+> `SELECT x`). The `COUNT(*)` zero-column trick does not transfer, because
+> `MIN/MAX` always project the column. Enabling it would require an
+> **OptimizerExtension** (rewrite `Aggregate→Scan`) — the same machinery that
+> deferred `COUNT(field)` (§3). Per ACTION_GUIDE (strengthen simple core > add
+> heavy layers), deferred. `MIN/MAX/SUM/AVG` remain correct today via the normal
+> scan + DuckDB aggregation.
+>
+> **Planned instead: an explicit, opt-in `salesforce_aggregate()` table
+> function** — server-side SOQL aggregates without dragging rows down, chosen
+> explicitly by the user (no pretense of transparent pushdown, no optimizer).
+> Short plan pending.
 
-Scope:
+Future (only if/when an OptimizerExtension is justified) — transparent form:
 
 - Only scalar fields with safe type mappings.
 - No relationship aggregate pushdown in the first cut.
 - No partial or approximate results.
-
-Acceptance:
-
 - Pushdown only occurs for safe fields and aggregate shapes.
 - Unsupported expressions remain local in DuckDB.
 - Diagnostics show pushed aggregate versus fallback.
