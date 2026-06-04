@@ -460,6 +460,10 @@ public:
 
     string GetCatalogType() override { return "salesforce"; }
 
+    // In-memory credentials, reused by salesforce_aggregate() (#v1.0).
+    const SalesforceConfig &GetConfig() const { return config_; }
+    const SalesforceTokenSet &GetToken() const { return token_; }
+
     void Initialize(bool) override {
         ResetDescribeCalls();       // DEBUG/TEST: baseline per-catalog describe counter
         ResetGlobalDescribeCalls(); // DEBUG/TEST: baseline global describe counter
@@ -591,6 +595,32 @@ unique_ptr<StorageExtension> GetSalesforceStorageExtension() {
     ext->attach = SalesforceAttach;
     ext->create_transaction_manager = SalesforceCreateTransactionManager;
     return ext;
+}
+
+// Resolve an attached salesforce catalog by ATTACH alias and copy its in-memory
+// credentials. Throws a clear, secret-free BinderException if the alias is not
+// an attached Salesforce catalog. Used by salesforce_aggregate() (#v1.0).
+void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias,
+                                     SalesforceConfig &cfg, SalesforceTokenSet &token) {
+    Catalog *catalog = nullptr;
+    try {
+        catalog = &Catalog::GetCatalog(context, alias);
+    } catch (...) {
+        catalog = nullptr;
+    }
+    if (!catalog) {
+        throw BinderException(
+            "salesforce_aggregate: no attached catalog named '%s' — ATTACH a "
+            "Salesforce org first, then pass its alias.",
+            alias);
+    }
+    if (catalog->GetCatalogType() != "salesforce") {
+        throw BinderException(
+            "salesforce_aggregate: catalog '%s' is not a Salesforce catalog.", alias);
+    }
+    auto &sf = catalog->Cast<SalesforceCatalog>();
+    cfg = sf.GetConfig();
+    token = sf.GetToken();
 }
 
 } // namespace duckdb

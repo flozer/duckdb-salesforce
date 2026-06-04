@@ -5,6 +5,16 @@
 
 namespace duckdb {
 
+struct SalesforceConfig;
+struct SalesforceTokenSet;
+class ClientContext;
+
+// Resolve an attached salesforce catalog by ATTACH alias and copy its in-memory
+// credentials (config + token). Throws a clear, secret-free BinderException if
+// `alias` is not an attached Salesforce catalog. Used by salesforce_aggregate().
+void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias,
+                                     SalesforceConfig &cfg, SalesforceTokenSet &token);
+
 // Returns the StorageExtension registered under the name "salesforce" so that
 //
 //     ATTACH 'salesforce://production' AS sf (TYPE salesforce);

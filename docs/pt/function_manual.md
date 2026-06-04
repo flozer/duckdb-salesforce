@@ -1053,6 +1053,101 @@ FROM salesforce_query(
 );
 ```
 
+### `salesforce_aggregate(catalog, object, aggregates [, filter])`
+
+#### O que faz
+
+Executa agregados SOQL **server-side** explícitos contra um sObject e
+retorna exatamente **uma** linha com o resultado de cada agregação. É a forma
+opt-in de pedir um `MIN`/`MAX`/`SUM`/`AVG`/`COUNT` direto ao Salesforce, **sem
+baixar as linhas** para o DuckDB.
+
+#### Como funciona
+
+Diferente das funções utilitárias do Nível 4, esta **não** recebe
+credenciais: ela **reutiliza a sessão autenticada** de um catálogo já anexado
+por `ATTACH`. Você passa o alias desse catálogo no primeiro argumento — sem
+reautenticar e sem segredos na chamada.
+
+Todos os argumentos são literais `VARCHAR`:
+
+| Argumento | Obrigatório | Significado |
+|---|---|---|
+| `catalog` | sim | O alias do `ATTACH` de um org Salesforce já anexado (ex. `'sf'`). A sessão autenticada desse catálogo é reutilizada |
+| `object` | sim | O sObject a consultar (ex. `'Account'`); deve ser um identifier válido |
+| `aggregates` | sim | Termos de agregação SOQL separados por vírgula (veja abaixo) |
+| `filter` | não | Um corpo de `WHERE` SOQL **sem** a palavra `WHERE` (ex. `Industry = 'Technology'`) |
+
+Internamente, a função monta e executa
+`SELECT <aggregates> FROM <object> [WHERE <filter>]` via REST e devolve a
+única linha de resultado.
+
+**O argumento `aggregates`.** É uma lista de termos separados por vírgula.
+Cada termo deve ser uma função de agregação; as permitidas são `MIN`, `MAX`,
+`SUM`, `AVG`, `COUNT` e `COUNT_DISTINCT`. Cada termo pode receber um alias no
+estilo SOQL (separado por espaço): `MIN(AnnualRevenue) minRev`.
+
+**O modelo de retorno (uma linha, tudo VARCHAR).** A saída tem exatamente
+**uma** linha e **uma coluna por termo**, todas de tipo `VARCHAR`. A coluna é
+nomeada pelo alias do termo; quando o termo não tem alias, ela recebe um nome
+posicional `expr0`, `expr1`, ... (na ordem dos termos). Como todo valor volta
+como texto, é você quem faz o cast no DuckDB (por exemplo `CAST(n AS BIGINT)`
+ou `CAST(minRev AS DECIMAL(18,2))`).
+
+**Diagnósticos e modo de leitura.** A função honra a configuração
+`sf_query_mode` (`query` / `queryAll`). O SOQL gerado é registrado nos
+diagnósticos da sessão, então `salesforce_last_soql()` e
+`salesforce_query_cost()` mostram exatamente o que foi enviado.
+
+#### Validação e limitações
+
+- **Só termos de agregação.** Campos "nus" (bare fields, sem função de
+  agregação) são **rejeitados** — é isso que garante o contrato de uma única
+  linha.
+- **Sem `GROUP BY`** neste corte.
+- O `object` deve ser um identifier válido; `;` e `SELECT` aninhado são
+  rejeitados; os argumentos têm limite de tamanho.
+- Agregados de relacionamento/polymorphic são passados direto ao SOQL: se o
+  Salesforce recusar, o erro dele aparece **verbatim**.
+- As mensagens de erro **nunca** contêm segredos.
+
+#### Não é pushdown transparente
+
+Esta função é **explícita e opt-in**: é você quem decide pedir o agregado
+server-side. Ela **não** é um pushdown transparente de `MIN`/`MAX`/`SUM`/`AVG`
+— não há OptimizerExtension nem reescrita de plano por trás. Um pushdown
+transparente desses agregados exigiria uma OptimizerExtension do DuckDB
+(deferido — veja o ROADMAP); enquanto isso, esta função entrega o agregado
+server-side sem essa maquinaria. (O `COUNT(*)` continua sendo o único
+agregado com pushdown transparente; veja a "Referência de pushdown" abaixo.)
+
+#### Para que serve
+
+Quando você só precisa do agregado — um total, uma média, um mínimo/máximo,
+uma contagem distinta — e não quer trazer as linhas para o DuckDB só para
+agregá-las localmente. O cálculo acontece no Salesforce e volta em uma única
+linha.
+
+#### Uso no dia a dia
+
+```sql
+ATTACH 'salesforce://production' AS sf (
+  TYPE salesforce,
+  client_id     'YOUR_CONSUMER_KEY',
+  client_secret 'YOUR_CONSUMER_SECRET',
+  refresh_token 'YOUR_REFRESH_TOKEN'
+);
+
+SELECT
+  CAST(minRev AS DECIMAL(18,2)) AS min_rev,
+  CAST(maxRev AS DECIMAL(18,2)) AS max_rev,
+  CAST(n AS BIGINT)             AS n
+FROM salesforce_aggregate(
+  'sf', 'Account',
+  'MIN(AnnualRevenue) minRev, MAX(AnnualRevenue) maxRev, COUNT(Id) n',
+  'Industry = ''Technology''');
+```
+
 ## Referência de pushdown
 
 O planejador de scan aplica pushdown ao SOQL do máximo da consulta que for

@@ -558,6 +558,58 @@ expandido em `depth_level = 1`, `Owner` expandido em `depth_level = 2`
 (o `User` dono do `Account`) e `What` pulado com `reason = polymorphic`
 (`parent_object` NULL, pois há mais de um alvo).
 
+### Agregados server-side explícitos (`salesforce_aggregate`)
+
+Quando você só quer o agregado — um total, uma média, um mínimo/máximo ou uma
+contagem — e não quer trazer as linhas para o DuckDB, a table function
+`salesforce_aggregate(catalog, object, aggregates [, filter])` pede o cálculo
+direto ao Salesforce e devolve **uma única linha**. Ela **reutiliza a sessão
+autenticada** do catálogo que você já anexou (o primeiro argumento é o alias
+do `ATTACH`, ex. `'sf'`), então não há credenciais na chamada.
+
+Isto é **opt-in**, não um pushdown transparente: é você quem escolhe pedir o
+agregado server-side. O `COUNT(*)` continua sendo o único agregado com
+pushdown automático em um `SELECT` normal (seção 6); os demais agregados você
+pede explicitamente com esta função.
+
+Todos os argumentos são literais `VARCHAR`. Cada termo de `aggregates` pode ter
+um alias no estilo SOQL (separado por espaço, ex. `MIN(AnnualRevenue) minRev`).
+A saída traz **uma coluna por termo**, todas `VARCHAR`, nomeadas pelo alias do
+termo — ou `expr0`, `expr1`, ... quando o termo não tem alias. Como os valores
+voltam como texto, faça o cast no DuckDB:
+
+```sql
+SELECT
+  CAST(minRev AS DECIMAL(18,2)) AS min_rev,
+  CAST(maxRev AS DECIMAL(18,2)) AS max_rev,
+  CAST(n AS BIGINT)             AS n
+FROM salesforce_aggregate(
+  'sf', 'Account',
+  'MIN(AnnualRevenue) minRev, MAX(AnnualRevenue) maxRev, COUNT(Id) n');
+```
+
+O quarto argumento (opcional) é um corpo de `WHERE` SOQL **sem** a palavra
+`WHERE` — útil para restringir o cálculo:
+
+```sql
+SELECT CAST(n AS BIGINT) AS n
+FROM salesforce_aggregate(
+  'sf', 'Account',
+  'COUNT(Id) n',
+  'Industry = ''Technology''');
+```
+
+Funções permitidas: `MIN`, `MAX`, `SUM`, `AVG`, `COUNT` e `COUNT_DISTINCT`. A
+função honra `sf_query_mode` e registra o SOQL nos diagnósticos
+(`salesforce_last_soql()`, `salesforce_query_cost()`). Limites a conhecer:
+
+- **Só termos de agregação.** Campos "nus" (sem função de agregação) são
+  rejeitados — é o que mantém o contrato de uma única linha.
+- **Sem `GROUP BY`** neste corte.
+- O `object` deve ser um identifier válido; agregados de
+  relacionamento/polymorphic vão direto ao SOQL e qualquer erro do Salesforce
+  aparece como veio.
+
 ## 12. Lendo registros arquivados e excluídos (queryAll)
 
 Por padrão, um scan vê apenas os registros vivos. Para também incluir os

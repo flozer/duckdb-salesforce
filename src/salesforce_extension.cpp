@@ -9,6 +9,7 @@
 #include "salesforce_quota.hpp"
 #include "salesforce_diag.hpp"
 #include "salesforce_reldiag.hpp"
+#include "salesforce_aggregate.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
@@ -82,6 +83,13 @@ static void LoadInternal(ExtensionLoader &loader) {
     // parent_not_describable / no_fields / no_relationship_name). Explains
     // over-fetch and why a parent was or wasn't expanded. Read-only diagnostic.
     loader.RegisterFunction(GetSalesforceRelationshipsFunction());
+
+    // salesforce_aggregate(catalog, object, aggregates [, filter]) — explicit,
+    // opt-in server-side SOQL aggregates (#v1.0): runs
+    // SELECT <aggregates> FROM <object> [WHERE <filter>] over an attached
+    // catalog and returns one row, one VARCHAR column per aggregate term. Not
+    // transparent pushdown — the user chooses it. No optimizer / plan rewrite.
+    loader.RegisterFunction(GetSalesforceAggregateFunction());
 
     // salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the
     // attached catalog issued since ATTACH (proves the metadata cache, #12).

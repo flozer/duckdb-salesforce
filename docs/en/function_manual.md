@@ -33,6 +33,7 @@ that are **not a stable API**.
 - [Level 2 - Session settings](#level-2---session-settings-set-)
 - [Level 3 - Diagnostics and observability](#level-3---diagnostics-and-observability)
 - [Level 4 - Utility / standalone functions](#level-4---utility--standalone-functions)
+- [Level 5 - Server-side aggregates](#level-5---server-side-aggregates)
 - [Pushdown reference](#pushdown-reference)
 - [Debug / test-only functions](#debug--test-only-functions)
 
@@ -1076,6 +1077,100 @@ FROM salesforce_query(
   client_secret := 'SECRET',
   refresh_token := 'TOKEN'
 );
+```
+
+## Level 5 - Server-side aggregates
+
+This is a single table function that runs a SOQL aggregate query for you and
+returns the computed result, rather than dragging the underlying rows down
+into DuckDB. It reuses an org you have already attached.
+
+### `salesforce_aggregate(catalog, object, aggregates [, filter])`
+
+#### What it does
+
+Runs an explicit, opt-in server-side SOQL aggregate over an attached org and
+returns exactly one row of the computed values. You choose to call it — it is
+**not** a transparent pushdown of `MIN`/`MAX`/`SUM`/`AVG` on a normal table
+scan.
+
+#### How it works
+
+All four arguments are `VARCHAR` string literals:
+
+| Argument | Required | Meaning |
+|---|---|---|
+| `catalog` | yes | The ATTACH alias of an already-attached Salesforce org (for example `'sf'`). The function **reuses** that catalog's authenticated session — no re-auth, and no credentials in the call. |
+| `object` | yes | The sObject to aggregate (for example `'Account'`). Must be a valid identifier. |
+| `aggregates` | yes | Comma-separated SOQL aggregate terms (see below). |
+| `filter` | no | A SOQL `WHERE` body **without** the `WHERE` keyword (for example `Industry = 'Technology'`). |
+
+The `aggregates` argument is a comma-separated list of SOQL aggregate terms.
+The allowed aggregate functions are `MIN`, `MAX`, `SUM`, `AVG`, `COUNT`, and
+`COUNT_DISTINCT`. Each term may carry an alias in SOQL style — space-separated
+after the function — for example `MIN(AnnualRevenue) minRev`.
+
+Internally it runs `SELECT <aggregates> FROM <object> [WHERE <filter>]` over
+REST and returns exactly **one** row.
+
+The return model:
+
+- There is **one output column per aggregate term**.
+- Every output column is typed `VARCHAR`. You cast in DuckDB (for example
+  `CAST(n AS BIGINT)` or `CAST(minRev AS DECIMAL(18,2))`).
+- A column is named by the term's alias when one is given; otherwise it is
+  named `expr0`, `expr1`, ... in term order.
+
+It honors `sf_query_mode` (`query` / `queryAll`), so the aggregate can include
+or exclude archived and soft-deleted records the same way a table scan does.
+The SOQL it sends is recorded in the diagnostics — see
+`salesforce_last_soql()` and `salesforce_query_cost()`.
+
+#### Validation and limitations
+
+- **Every term must be an aggregate function.** Bare fields are rejected; this
+  is what keeps the single-row contract.
+- **No `GROUP BY`** in this cut — the function always returns one row.
+- `;` and nested `SELECT` are rejected.
+- The `object` must be a valid identifier, and the arguments are length-capped.
+- Relationship / polymorphic aggregates are passed through to SOQL as written;
+  any Salesforce error surfaces verbatim. Errors never contain secrets.
+
+#### Not a transparent pushdown
+
+Transparent `MIN`/`MAX`/`SUM`/`AVG` pushdown — rewriting an ordinary aggregate
+query on `sf.Account` into server-side SOQL automatically — would require a
+DuckDB `OptimizerExtension` and plan rewrite, which is deferred (see the
+roadmap). This explicit function gives you the same benefit (the aggregation
+happens on Salesforce, so no rows are dragged down into DuckDB) without that
+optimizer machinery. There is no optimizer or plan rewrite involved: you opt in
+by calling the function.
+
+#### Why use it
+
+When you want a server-side aggregate — a `MIN`/`MAX`/`SUM`/`AVG`/`COUNT` over a
+large sObject — without fetching the underlying rows into DuckDB, and you are
+willing to ask for it explicitly. It is the available stand-in for transparent
+aggregate pushdown.
+
+#### Daily use
+
+```sql
+ATTACH 'salesforce://production' AS sf (
+  TYPE salesforce,
+  client_id     'YOUR_CONSUMER_KEY',
+  client_secret 'YOUR_CONSUMER_SECRET',
+  refresh_token 'YOUR_REFRESH_TOKEN'
+);
+
+SELECT
+  CAST(minRev AS DECIMAL(18,2)) AS min_rev,
+  CAST(maxRev AS DECIMAL(18,2)) AS max_rev,
+  CAST(n AS BIGINT)             AS n
+FROM salesforce_aggregate(
+  'sf', 'Account',
+  'MIN(AnnualRevenue) minRev, MAX(AnnualRevenue) maxRev, COUNT(Id) n',
+  'Industry = ''Technology''');
 ```
 
 ## Pushdown reference

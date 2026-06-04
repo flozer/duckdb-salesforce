@@ -1,0 +1,113 @@
+# name: test/sql/salesforce_aggregate.test
+# description: v1.0 — salesforce_aggregate() explicit server-side SOQL aggregates
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+ATTACH 'salesforce://prod' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === MIN/MAX with aliases + optional filter (routes to /query) ==============
+statement ok
+SET sf_mock_query_body = '{"done":true,"totalSize":1,"records":[{"minRev":100,"maxRev":900}]}';
+
+query TT
+SELECT minRev, maxRev FROM salesforce_aggregate(
+  'sf', 'Account',
+  'MIN(AnnualRevenue) minRev, MAX(AnnualRevenue) maxRev',
+  'Industry = ''Technology''');
+----
+100	900
+
+# VARCHAR output is cast by the user in DuckDB.
+query I
+SELECT CAST(maxRev AS BIGINT) - CAST(minRev AS BIGINT) AS spread
+FROM salesforce_aggregate('sf', 'Account', 'MIN(AnnualRevenue) minRev, MAX(AnnualRevenue) maxRev');
+----
+800
+
+# === unaliased term -> expr0 column =========================================
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"expr0":"5"}]}';
+
+query T
+SELECT expr0 FROM salesforce_aggregate('sf', 'Account', 'MIN(AnnualRevenue)');
+----
+5
+
+# === COUNT (routes to the count sequence) ===================================
+statement ok
+SET sf_mock_count_body = '{"done":true,"records":[{"n":42}]}';
+
+query T
+SELECT n FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id) n');
+----
+42
+
+# === queryAll mode -> /queryAll endpoint ====================================
+statement ok
+SET sf_query_mode = 'queryAll';
+
+statement ok
+SET sf_mock_queryall_body = '{"done":true,"records":[{"minId":"001000000000001"}]}';
+
+query T
+SELECT minId FROM salesforce_aggregate('sf', 'Account', 'MIN(Id) minId');
+----
+001000000000001
+
+statement ok
+SET sf_query_mode = 'query';
+
+# === SOQL recorded in diagnostics ===========================================
+query T
+SELECT soql LIKE 'SELECT MIN(Id) minId FROM Account%' FROM salesforce_last_soql();
+----
+true
+
+# === rejections (all fail at bind, no network) ==============================
+
+# bare field is not an aggregate
+statement error
+SELECT * FROM salesforce_aggregate('sf', 'Account', 'AnnualRevenue');
+----
+not an aggregate
+
+# unsupported function
+statement error
+SELECT * FROM salesforce_aggregate('sf', 'Account', 'MEDIAN(AnnualRevenue)');
+----
+not a supported aggregate function
+
+# nested SELECT in filter
+statement error
+SELECT * FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id)', 'Id IN (SELECT Id FROM Contact)');
+----
+must not contain a nested SELECT
+
+# statement separator
+statement error
+SELECT * FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id); DROP');
+----
+must not contain ';'
+
+# invalid object name
+statement error
+SELECT * FROM salesforce_aggregate('sf', 'Account-bad', 'COUNT(Id)');
+----
+is not a valid sObject name
+
+# unknown catalog alias
+statement error
+SELECT * FROM salesforce_aggregate('nope', 'Account', 'COUNT(Id)');
+----
+no attached catalog named 'nope'
+
+statement ok
+DETACH sf;

@@ -608,7 +608,59 @@ SELECT Id FROM sf.Account LIMIT 1;
 SELECT * FROM salesforce_relationships();   -- one config row only
 ```
 
-## 13. Limitations
+## 13. Server-side aggregates (opt-in)
+
+Transparent `MIN`/`MAX`/`SUM`/`AVG` pushdown is not available yet (aggregate
+pushdown is COUNT-only on a normal scan). When you want an aggregate computed
+**on Salesforce** — so the rows are never dragged down into DuckDB — call the
+`salesforce_aggregate()` table function explicitly. It reuses an org you have
+already attached, so there is no re-auth and no credentials in the call.
+
+The arguments are `salesforce_aggregate(catalog, object, aggregates [, filter])`,
+all `VARCHAR` string literals: the ATTACH alias (here `'sf'`), the sObject, a
+comma-separated list of SOQL aggregate terms, and an optional `WHERE` body
+(without the `WHERE` keyword). The allowed aggregate functions are `MIN`,
+`MAX`, `SUM`, `AVG`, `COUNT`, and `COUNT_DISTINCT`.
+
+It returns exactly one row, one `VARCHAR` column per term. Cast the results in
+DuckDB:
+
+```sql
+SELECT CAST(n AS BIGINT) AS n
+FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id) n');
+```
+
+Give each term an alias (SOQL style, space-separated) to name its column;
+without an alias the columns are `expr0`, `expr1`, ... in order. Add a filter
+as the fourth argument — note the doubled single quotes for the inner string
+literal:
+
+```sql
+SELECT
+  CAST(minRev AS DECIMAL(18,2)) AS min_rev,
+  CAST(maxRev AS DECIMAL(18,2)) AS max_rev,
+  CAST(n AS BIGINT)             AS n
+FROM salesforce_aggregate(
+  'sf', 'Account',
+  'MIN(AnnualRevenue) minRev, MAX(AnnualRevenue) maxRev, COUNT(Id) n',
+  'Industry = ''Technology''');
+```
+
+It honors `sf_query_mode`, and the SOQL it sends shows up in
+`salesforce_last_soql()` and `salesforce_query_cost()`.
+
+Scope and caveats:
+
+- **Every term must be an aggregate function** — bare fields are rejected,
+  which is what keeps the single-row result.
+- **No `GROUP BY`** in this cut: the function always returns exactly one row.
+- `;` and nested `SELECT` are rejected; the `object` must be a valid
+  identifier; arguments are length-capped.
+- This is **not** transparent pushdown — you opt in by calling the function;
+  there is no optimizer or plan rewrite. Any Salesforce error from a
+  relationship / polymorphic aggregate surfaces verbatim.
+
+## 14. Limitations
 
 Know these boundaries before you build on the extension:
 
