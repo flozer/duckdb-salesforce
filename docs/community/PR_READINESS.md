@@ -25,10 +25,14 @@ maintainer's explicit GO (C.5).**
 - [x] `v0.9.0` tag exists and is the intended commit (validated by the live
       smoke — see docs/RELEASE_NOTES_v0.9.md).
 - [x] Offline suite green at the ref: 28 files / 777 assertions (local).
-- [ ] Remote CI green at `v0.9.0`: linux_amd64 + windows_amd64 + osx_arm64 ×
+- [x] Remote CI green at `v0.9.0`: linux_amd64 + windows_amd64 + osx_arm64 ×
       DuckDB v1.5.2/v1.5.3 (offline mock suite, no `SF_LIVE_*`). Remote CI is
-      manual-only (`workflow_dispatch`); a one-time run at the submission ref is
-      triggered before the C.5 GO. Run evidence: _pending — filled when green._
+      manual-only (`workflow_dispatch`); a one-time run at the submission ref was
+      triggered for the package. Evidence: run **26972597225**, conclusion
+      **success**, all 6 platform×version jobs green
+      ([run 26972597225](https://github.com/flozer/duckdb-salesforce/actions/runs/26972597225)).
+      Note: runner emitted Node.js 20 action-deprecation warnings (non-blocking;
+      bump action versions at a future maintenance pass).
 - [x] `vcpkg.json` declares the only dependency (OpenSSL); community CI resolves it.
 - [x] `Makefile` + `extension_config.cmake` drive the standard build.
 - [x] Submodules (`duckdb`, `extension-ci-tools`) pinned.
