@@ -55,6 +55,15 @@ auditable, and distributable**. Tick every box first.
 - [x] Read-only: all mutating catalog ops throw.
 - [x] Errors are secret-free (no bearer/body/secret in messages).
 - [x] Quota governor + REQUEST_LIMIT_EXCEEDED handling documented.
+- [x] Bulk CSV decode hardened + REST/Bulk type parity tested (v0.9 §2).
+
+### Known behaviour / future hardening (non-blockers)
+
+- `sfcsv::Parse` is **lenient on a malformed unterminated quote** — it flushes
+  the trailing field instead of erroring. Real Salesforce Bulk CSV is
+  well-formed, so this is accepted as-is; adding strict detection is a future
+  hardening item, not a blocker (clear errors already fire on invalid typed
+  conversion).
 
 ## Sign-off
 
