@@ -311,5 +311,3 @@ Streaming & correctness gotchas:
 Surveyed, no value (recorded so we don't revisit):
 - `Shankar-naik-123/salesforce-backup-v2` (stock .NET scaffold, no SF code):
   <https://github.com/Shankar-naik-123/salesforce-backup-v2>
-</content>
-</invoke>
