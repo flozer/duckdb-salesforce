@@ -43,6 +43,20 @@ Acme
 statement ok
 DETACH sf;
 
+# === empty sf_mock_env falls through to the real OS environment =============
+# The setting defaults to "" (non-null). Empty MUST NOT hijack the lookup — it
+# falls through to std::getenv, which is unset in the offline test env, so env
+# auth fails with the clean missing-var error (proving no stale-mock hijack and
+# that the getenv fallback is reached). The positive getenv read is covered by
+# the live smoke, not here (sqllogictest cannot set OS env vars).
+statement ok
+SET sf_mock_env = '';
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+----
+missing required environment variable 'SF_CLIENT_ID'
+
 # === sfdx_url: parse force://...@host from SF_SFDX_AUTH_URL ==================
 statement ok
 SET sf_mock_env = 'SF_SFDX_AUTH_URL=force://ci:cs:rt@mydom.my.salesforce.com';

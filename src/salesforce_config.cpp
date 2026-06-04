@@ -29,20 +29,30 @@ static bool EnvLookup(ClientContext &context, const char *name, string &out) {
     Value mv;
     if (context.TryGetCurrentSetting("sf_mock_env", mv) && !mv.IsNull()) {
         string blob = mv.ToString();
-        for (auto &entry : StringUtil::Split(blob, ';')) {
-            auto eq = entry.find('=');
-            if (eq == string::npos) {
-                continue;
+        string probe = blob;
+        StringUtil::LTrim(probe);
+        StringUtil::RTrim(probe);
+        // Only treat sf_mock_env as an override when it is non-empty. The
+        // setting defaults to "" (non-null), so an empty value MUST fall
+        // through to the real OS environment — otherwise env/sfdx_url/jwt auth
+        // would be dead outside the offline tests that set this hook.
+        if (!probe.empty()) {
+            for (auto &entry : StringUtil::Split(blob, ';')) {
+                auto eq = entry.find('=');
+                if (eq == string::npos) {
+                    continue;
+                }
+                string k = entry.substr(0, eq);
+                StringUtil::LTrim(k);
+                StringUtil::RTrim(k);
+                if (k == name) {
+                    out = entry.substr(eq + 1);
+                    return !out.empty();
+                }
             }
-            string k = entry.substr(0, eq);
-            StringUtil::LTrim(k);
-            StringUtil::RTrim(k);
-            if (k == name) {
-                out = entry.substr(eq + 1);
-                return !out.empty();
-            }
+            return false; // mock active but this var absent
         }
-        return false; // sf_mock_env present but this var absent
+        // empty sf_mock_env -> fall through to the real OS environment
     }
     const char *v = std::getenv(name);
     if (v == nullptr || v[0] == '\0') {
