@@ -31,9 +31,9 @@ SELECT Id, Name FROM sf.Account WHERE Name = 'Acme';
 
 ### Credential sources (`auth_source`)
 
-`auth_source` chooses where the OAuth credentials come from (the refresh-token
-flow itself is unchanged). Default is `options` (inline `ATTACH` options, shown
-above). Two alternatives keep secrets out of SQL text:
+`auth_source` chooses where the credentials come from. Default is `options`
+(inline `ATTACH` options, shown above). The alternatives keep secrets out of
+SQL text:
 
 ```sql
 -- env: read SF_CLIENT_ID, SF_CLIENT_SECRET, SF_REFRESH_TOKEN (+ optional SF_LOGIN_URL)
@@ -43,8 +43,21 @@ ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
 ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
 ```
 
-Environment values and the SFDX URL are never logged, and tokens/secrets never
-appear in error messages. See
+`auth_source 'jwt'` uses the **OAuth 2.0 JWT bearer** flow — no refresh token,
+ideal for headless pipelines. It RS256-signs a short-lived assertion with a
+local private key. Point `SF_JWT_KEY_FILE` at the PEM key (recommended for
+pipelines; an inline `private_key_file` option also works for local dev):
+
+```sql
+-- export SF_JWT_KEY_FILE=/secure/server.key
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'jwt',
+    client_id 'your_consumer_key', username 'svc@example.com');
+```
+
+The Connected App must be pre-authorized (admin-approved or pre-authorized
+user); only unencrypted PKCS#1/PKCS#8 keys are supported. Environment values,
+the SFDX URL, the private key, and the signed JWT are never logged, and
+tokens/secrets never appear in error messages. See
 [docs/en/usage_guide.md](docs/en/usage_guide.md) for terminal, backend, and
 Python examples.
 

@@ -13,6 +13,8 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 
 namespace duckdb {
 
@@ -170,6 +172,32 @@ static void ParseSfdxAuthUrl(const string &url, SalesforceConfig &cfg) {
     ValidateLoginUrl(cfg.login_url);
 }
 
+// Read a PEM private-key file into memory. The PATH is not a secret (safe to
+// echo on error); the CONTENTS are SENSITIVE and never logged. Only unencrypted
+// PKCS#1/PKCS#8 PEM is supported — an encrypted key is rejected with a clear,
+// secret-free message.
+static string LoadPrivateKeyFile(const string &pathv) {
+    std::ifstream f(pathv, std::ios::binary);
+    if (!f) {
+        throw BinderException(
+            "salesforce ATTACH (jwt): cannot open private key file '%s'.", pathv);
+    }
+    std::stringstream ss;
+    ss << f.rdbuf();
+    string pem = ss.str();
+    if (pem.find("-----BEGIN") == string::npos) {
+        throw BinderException(
+            "salesforce ATTACH (jwt): file '%s' is not a PEM private key.", pathv);
+    }
+    if (pem.find("ENCRYPTED") != string::npos) {
+        throw BinderException(
+            "salesforce ATTACH (jwt): encrypted private keys are not supported; "
+            "provide an unencrypted PKCS#1/PKCS#8 PEM key (file '%s').",
+            pathv);
+    }
+    return pem;
+}
+
 SalesforceConfig SalesforceConfig::ParseAndValidate(const string &path, AttachInfo &info,
                                                     ClientContext &context) {
     SalesforceConfig cfg;
@@ -199,12 +227,14 @@ SalesforceConfig SalesforceConfig::ParseAndValidate(const string &path, AttachIn
             !StringUtil::CIEquals(key, "client_id") &&
             !StringUtil::CIEquals(key, "client_secret") &&
             !StringUtil::CIEquals(key, "refresh_token") &&
+            !StringUtil::CIEquals(key, "username") &&
+            !StringUtil::CIEquals(key, "private_key_file") &&
             !StringUtil::CIEquals(key, "login_url") &&
             !StringUtil::CIEquals(key, "api_version")) {
             throw BinderException(
                 "salesforce ATTACH: unknown option '%s'. Valid options: "
                 "auth_source, client_id, client_secret, refresh_token, "
-                "login_url, api_version.",
+                "username, private_key_file, login_url, api_version.",
                 key);
         }
         opts[key] = kv.second.ToString();
@@ -243,10 +273,35 @@ SalesforceConfig SalesforceConfig::ParseAndValidate(const string &path, AttachIn
     } else if (auth_source == "sfdx_url") {
         // SFDX auth URL from SF_SFDX_AUTH_URL.
         ParseSfdxAuthUrl(RequireEnv(context, "SF_SFDX_AUTH_URL"), cfg);
+    } else if (auth_source == "jwt") {
+        // JWT bearer flow (#v1.0 Auth UX cut 2): no client_secret / refresh
+        // token. iss=client_id, sub=username, signed with a local PEM key.
+        cfg.auth_method = SalesforceAuthMethod::kJwt;
+        cfg.client_id = RequireOption(opts, "client_id");
+        cfg.username = RequireOption(opts, "username");
+        // Key PATH: inline private_key_file option, else SF_JWT_KEY_FILE env.
+        // Docs recommend the env var for pipelines; inline is for local dev.
+        string key_path;
+        auto pk_it = opts.find("private_key_file");
+        if (pk_it != opts.end() && !Trimmed(pk_it->second).empty()) {
+            key_path = Trimmed(pk_it->second);
+        } else if (!EnvLookup(context, "SF_JWT_KEY_FILE", key_path)) {
+            throw BinderException(
+                "salesforce ATTACH (jwt): set 'private_key_file' or the "
+                "SF_JWT_KEY_FILE environment variable to a PEM private key path.");
+        }
+        cfg.private_key = LoadPrivateKeyFile(Trimmed(key_path));
+        auto login_it = opts.find("login_url");
+        if (login_it != opts.end() && !Trimmed(login_it->second).empty()) {
+            cfg.login_url = Trimmed(login_it->second);
+            ValidateLoginUrl(cfg.login_url);
+        } else {
+            cfg.login_url = kDefaultLoginUrl;
+        }
     } else {
         throw BinderException(
-            "salesforce ATTACH: 'auth_source' must be 'options', 'env', or "
-            "'sfdx_url' (got: '%s').",
+            "salesforce ATTACH: 'auth_source' must be 'options', 'env', "
+            "'sfdx_url', or 'jwt' (got: '%s').",
             auth_source);
     }
 

@@ -125,7 +125,7 @@ in your org and complete the OAuth flow as described in
 
 The `auth_source` `ATTACH` option chooses *where* the OAuth credentials come
 from. The OAuth refresh-token flow is unchanged — only the source differs.
-There are three modes:
+There are four modes:
 
 - **`options`** (default): credentials are read from the inline `ATTACH`
   options `client_id`, `client_secret`, and `refresh_token` (all required),
@@ -149,8 +149,32 @@ There are three modes:
   ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
   ```
 
-The `api_version` option works in all three modes. With `env` and `sfdx_url`,
-the credential options are not needed (the source wins).
+- **`jwt`**: the OAuth 2.0 JWT bearer flow, ideal for headless / CI / pipeline
+  use. There is no refresh token: the extension RS256-signs a short-lived JWT
+  assertion (`iss` = `client_id`, `sub` = `username`, `aud` = `login_url`,
+  `exp` = now + 300s) and exchanges it at `<login_url>/services/oauth2/token`.
+  The access token is held in memory; on a `401` the extension simply re-signs
+  a fresh assertion. You provide `client_id` (the issuer) and `username` (the
+  Salesforce user to impersonate) in SQL, and a private key through the
+  `SF_JWT_KEY_FILE` environment variable (recommended) or the inline
+  `private_key_file` option (local dev only). The key must be an **unencrypted**
+  PKCS#1 or PKCS#8 PEM RSA key. `login_url` (default
+  `https://login.salesforce.com`; use `https://test.salesforce.com` for a
+  sandbox) and `api_version` work as in the other modes.
+
+  ```sql
+  ATTACH 'salesforce://production' AS sf (
+    TYPE salesforce, auth_source 'jwt',
+    client_id 'YOUR_CONSUMER_KEY', username 'svc@example.com'
+  );
+  ```
+
+  **Prerequisite:** the Connected App must be **pre-authorized** for the user —
+  either admin-approved, or pre-authorized by the user through the digital
+  certificate ("Use digital signatures") JWT setup.
+
+The `api_version` option works in all four modes. With `env`, `sfdx_url`, and
+`jwt`, the refresh-token credential options are not needed (the source wins).
 
 #### Example: terminal
 
@@ -208,6 +232,68 @@ con.execute(
 )
 ```
 
+#### Example: JWT bearer (`auth_source 'jwt'`)
+
+The JWT mode needs no refresh token — only `client_id`, `username`, and the
+private key. Keep the key path in `SF_JWT_KEY_FILE` so it never appears in the
+SQL. **Prerequisite:** the Connected App must be pre-authorized for the user
+(admin-approved, or pre-authorized via the digital certificate / "Use digital
+signatures" JWT setup).
+
+**Terminal** — export the key path, then start DuckDB and attach:
+
+```bash
+export SF_JWT_KEY_FILE=/secure/server.key
+# optional: export SF_LOGIN_URL=https://test.salesforce.com
+
+duckdb
+```
+
+```sql
+ATTACH 'salesforce://production' AS sf (
+  TYPE salesforce, auth_source 'jwt',
+  client_id 'YOUR_CONSUMER_KEY', username 'svc@example.com'
+);
+```
+
+**Web UI / backend service** — the application or container injects
+`SF_JWT_KEY_FILE` (for example, a mounted secret). The backend attaches with
+`auth_source 'jwt'`, so no key path or secret ever appears in the SQL:
+
+```sql
+ATTACH 'salesforce://production' AS sf (
+  TYPE salesforce, auth_source 'jwt',
+  client_id 'YOUR_CONSUMER_KEY', username 'svc@example.com'
+);
+```
+
+**Python / pipeline:**
+
+```python
+import os
+import duckdb
+
+os.environ["SF_JWT_KEY_FILE"] = "/secure/server.key"
+
+con = duckdb.connect()
+con.execute(
+    "ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'jwt', "
+    "client_id '...', username 'svc@example.com')"
+)
+```
+
+**Local dev (inline key)** — for local development only, you can pass the key
+path inline instead of through the environment; prefer `SF_JWT_KEY_FILE` in
+pipelines:
+
+```sql
+ATTACH 'salesforce://production' AS sf (
+  TYPE salesforce, auth_source 'jwt',
+  client_id 'YOUR_CONSUMER_KEY', username 'svc@example.com',
+  private_key_file '/path/to/server.key'
+);
+```
+
 #### Security note
 
 Environment values and the SFDX auth URL are never logged, and tokens or
@@ -217,10 +303,19 @@ without echoing it; `invalid_grant` is reported as "refresh token is invalid,
 expired, or revoked"; `invalid_client` as "client_id / client_secret is
 incorrect".
 
+For `jwt`, the private key, the assembled JWT, and the signed assertion are
+never logged and never appear in error messages. A missing key path names the
+option / variable expected (`private_key_file` or `SF_JWT_KEY_FILE`); a missing
+key file names only the path; a non-PEM, unparseable, or encrypted key is
+reported without echoing its contents; `invalid_grant` from the JWT exchange is
+reported as "invalid, expired, or the user is not authorized for this Connected
+App".
+
 #### Not supported in this cut
 
 These are out of scope for this release: a browser / web OAuth flow, secret
-storage, JWT Bearer, an OS credential manager, and token persistence.
+storage, encrypted private keys, an OS credential manager, and token / key
+persistence.
 
 ## 4. First queries
 

@@ -73,7 +73,7 @@ SalesforceSession::SalesforceSession(SalesforceConfig config, SalesforceHttpClie
 }
 
 void SalesforceSession::Authenticate() {
-    token_ = SalesforceAuth::ExchangeRefreshToken(config_, client_);
+    token_ = SalesforceAuth::AcquireToken(config_, client_);
 }
 
 HttpResponse SalesforceSession::AuthorizedSend(bool post, const string &path,
@@ -97,8 +97,9 @@ HttpResponse SalesforceSession::AuthorizedSend(bool post, const string &path,
                           resp.transport_error);
     }
     if (resp.status == 401) {
-        // Token may be expired/revoked — refresh once and retry once.
-        token_ = SalesforceAuth::ExchangeRefreshToken(config_, client_);
+        // Token may be expired/revoked — re-auth once and retry once. For JWT
+        // this re-signs a fresh assertion (there is no refresh token).
+        token_ = SalesforceAuth::AcquireToken(config_, client_);
         resp = do_req();
         if (!resp.transport_ok) {
             throw IOException("salesforce: request to %s failed to reach the server (%s).", path,

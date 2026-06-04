@@ -1,0 +1,126 @@
+# name: test/sql/salesforce_jwt.test
+# description: v1.0 Auth UX cut 2 — auth_source='jwt' (RS256 JWT bearer flow)
+# group: [salesforce]
+#
+# Offline: a TEST-ONLY RSA key (test/keys/jwt_test_key.pem) is really
+# RS256-signed; the mock transport returns the token. No org is contacted and
+# no secret appears in any error. Tests run from the repo root, so the key
+# paths are repo-relative.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"a1","Name":"Acme"}]}';
+
+# === jwt via inline private_key_file: sign + exchange + query ================
+statement ok
+ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'jwt',
+    client_id 'cid', username 'svc@example.com',
+    private_key_file 'test/keys/jwt_test_key.pem');
+
+query I
+SELECT Name FROM sf.Account;
+----
+Acme
+
+statement ok
+DETACH sf;
+
+# === jwt via SF_JWT_KEY_FILE env (mocked): no inline path ===================
+statement ok
+SET sf_mock_env = 'SF_JWT_KEY_FILE=test/keys/jwt_test_key.pem';
+
+statement ok
+ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'jwt',
+    client_id 'cid', username 'svc@example.com');
+
+query I
+SELECT Name FROM sf.Account;
+----
+Acme
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_mock_env = '';
+
+# === missing key path entirely -> clear error ===============================
+statement error
+ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'jwt',
+    client_id 'cid', username 'svc@example.com');
+----
+set 'private_key_file' or the SF_JWT_KEY_FILE
+
+# === missing key file -> clear, path-only error =============================
+statement error
+ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'jwt',
+    client_id 'cid', username 'svc@example.com',
+    private_key_file 'test/keys/does_not_exist.pem');
+----
+cannot open private key file
+
+# === not a PEM (no BEGIN marker) -> clear error =============================
+statement error
+ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'jwt',
+    client_id 'cid', username 'svc@example.com',
+    private_key_file 'test/keys/not_pem.txt');
+----
+is not a PEM private key
+
+# === PEM markers but unparseable body -> signing error, secret-free =========
+statement error
+ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'jwt',
+    client_id 'cid', username 'svc@example.com',
+    private_key_file 'test/keys/corrupt_key.pem');
+----
+could not parse the private key
+
+# === invalid_grant -> actionable, secret-free hint ==========================
+statement ok
+SET sf_mock_token_status = 400;
+
+statement ok
+SET sf_mock_token_body = '{"error":"invalid_grant","error_description":"user hasn''t approved this consumer"}';
+
+statement error
+ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'jwt',
+    client_id 'cid', username 'svc@example.com',
+    private_key_file 'test/keys/jwt_test_key.pem');
+----
+invalid_grant
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# === 401 on a request -> re-auth re-signs a fresh JWT and retries ===========
+statement ok
+SET sf_mock_describe_status = '401,200';
+
+statement ok
+ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'jwt',
+    client_id 'cid', username 'svc@example.com',
+    private_key_file 'test/keys/jwt_test_key.pem');
+
+query I
+SELECT Name FROM sf.Account;
+----
+Acme
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_mock_describe_status = '200';

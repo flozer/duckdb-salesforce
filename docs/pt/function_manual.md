@@ -75,7 +75,7 @@ Parâmetros do `ATTACH`:
 | `refresh_token` | sim | — | Refresh token OAuth do usuário de leitura |
 | `login_url` | não | `https://login.salesforce.com` | Host OAuth; use o host de My Domain / sandbox quando aplicável |
 | `api_version` | não | padrão da extensão | Versão da API do Salesforce, ex. `60.0` |
-| `auth_source` | não | `'options'` | De onde o `ATTACH` obtém as credenciais OAuth: `'options'`, `'env'` ou `'sfdx_url'` |
+| `auth_source` | não | `'options'` | De onde o `ATTACH` obtém as credenciais OAuth: `'options'`, `'env'`, `'sfdx_url'` ou `'jwt'` |
 
 Notas de comportamento:
 
@@ -89,7 +89,7 @@ Notas de comportamento:
 ##### Fonte das credenciais: `auth_source`
 
 A opção `auth_source` decide **de onde** o `ATTACH` lê as credenciais OAuth.
-Ela aceita três valores:
+Ela aceita quatro valores:
 
 - **`'options'`** (padrão, inalterado) — as credenciais vêm das próprias
   opções do `ATTACH`: `client_id`, `client_secret` e `refresh_token`
@@ -103,10 +103,37 @@ Ela aceita três valores:
   formato `force://<clientId>:<clientSecret>:<refreshToken>@<host-da-instancia>`
   (o `clientSecret` pode ser vazio). As opções de credencial do `ATTACH`
   também não são necessárias neste modo.
+- **`'jwt'`** — fluxo **OAuth 2.0 JWT bearer**, pensado para uso
+  headless/CI/pipeline. A extensão assina via **RS256** um JWT curto
+  (`iss` = `client_id`, `sub` = `username`, `aud` = `login_url`,
+  `exp` = agora + 300s) e o troca em `<login_url>/services/oauth2/token`
+  com `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`. O retorno é
+  um access token mantido **em memória**. **Não há refresh token**: diante de
+  um `401`, a extensão simplesmente re-assina um novo assertion. As opções
+  obrigatórias neste modo são `client_id` (o *issuer*), `username` (o
+  *subject* — o usuário Salesforce a personificar) e uma chave privada.
 
-`api_version` funciona em **todos** os modos. Com `'env'` ou `'sfdx_url'`, as
-opções de credencial do `ATTACH` não precisam ser informadas — a fonte
-escolhida vence.
+  O caminho da chave privada vem de uma destas fontes:
+
+  - a variável de ambiente **`SF_JWT_KEY_FILE`** (**recomendado** — mantém
+    caminhos de chave fora do SQL; use em pipelines); ou
+  - a opção inline **`private_key_file`** do `ATTACH` (aceita apenas para
+    desenvolvimento local / ergonomia).
+
+  A chave deve ser **PEM RSA PKCS#1 ou PKCS#8 não criptografada**. Chaves
+  criptografadas **não** são suportadas (fora de escopo). `login_url` é
+  opcional (padrão `https://login.salesforce.com`; use
+  `https://test.salesforce.com` para sandbox) e `api_version` funciona como
+  nos outros modos.
+
+  **Pré-requisito:** o Connected App deve estar **pré-autorizado** — *admin-
+  approved*, ou o usuário pré-autorizado (a configuração de certificado
+  digital / *"Use digital signatures"* do JWT). Sem essa pré-autorização, a
+  troca falha.
+
+`api_version` funciona em **todos** os modos. Com `'env'`, `'sfdx_url'` ou
+`'jwt'`, as opções de credencial do `ATTACH` não precisam ser informadas —
+a fonte escolhida vence.
 
 Exemplos com `'env'` e `'sfdx_url'`:
 
@@ -116,6 +143,30 @@ ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
 
 ```sql
 ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+```
+
+Exemplo com `'jwt'` (caminho da chave via `SF_JWT_KEY_FILE`, recomendado):
+
+```sql
+ATTACH 'salesforce://production' AS sf (
+  TYPE salesforce,
+  auth_source 'jwt',
+  client_id 'YOUR_CONSUMER_KEY',
+  username  'svc@example.com'
+);
+```
+
+Para desenvolvimento local, você pode informar a chave inline com
+`private_key_file` (prefira a env var em pipelines):
+
+```sql
+ATTACH 'salesforce://production' AS sf (
+  TYPE salesforce,
+  auth_source 'jwt',
+  client_id 'YOUR_CONSUMER_KEY',
+  username  'svc@example.com',
+  private_key_file '/path/to/server.key'
+);
 ```
 
 Notas de segurança e de erro:
@@ -130,9 +181,21 @@ Notas de segurança e de erro:
   expirado ou revogado".
 - `invalid_client` é traduzido como "client_id / client_secret incorreto".
 
+Notas de segurança e de erro específicas do modo `'jwt'`:
+
+- A chave privada, o JWT montado e o assertion assinado **nunca** são
+  logados e **nunca** aparecem em mensagens de erro.
+- Caminho de chave ausente: o erro nomeia a opção/env var que faltou
+  (`SF_JWT_KEY_FILE` ou `private_key_file`), sem revelar valor.
+- Arquivo de chave ausente: o erro nomeia **apenas** o caminho.
+- Chave não-PEM, ilegível ou criptografada: é reportada **sem** ecoar o
+  conteúdo da chave.
+- `invalid_grant` na troca JWT é traduzido como "inválido, expirado, ou o
+  usuário não está autorizado neste Connected App".
+
 Fora de escopo neste corte (não suportado): fluxo OAuth via browser/web,
-secret storage, JWT Bearer, gerenciador de credenciais do sistema
-operacional e persistência de token.
+secret storage, chaves privadas criptografadas, gerenciador de credenciais
+do sistema operacional e persistência de token/chave.
 
 #### Para que serve
 

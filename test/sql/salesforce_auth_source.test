@@ -80,7 +80,7 @@ not a valid SFDX auth URL
 statement error
 ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'nope');
 ----
-must be 'options', 'env', or 'sfdx_url'
+must be 'options', 'env', 'sfdx_url', or 'jwt'
 
 # === OAuth error mapping (secret-free, actionable) ==========================
 statement ok
@@ -95,7 +95,7 @@ SET sf_mock_token_body = '{"error":"invalid_grant","error_description":"expired 
 statement error
 ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
 ----
-refresh token is invalid
+is invalid, expired, or
 
 statement ok
 SET sf_mock_token_body = '{"error":"invalid_client","error_description":"bad client"}';

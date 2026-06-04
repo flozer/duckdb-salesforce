@@ -127,8 +127,8 @@ Connected App na sua org e conclua o fluxo OAuth conforme descrito em
 
 Por padrão, o `ATTACH` lê as credenciais das próprias opções do comando
 (como nos exemplos acima). A opção `auth_source` permite escolher de onde
-elas vêm, o que é útil para não deixar segredos no texto SQL. Os três modos
-são:
+elas vêm, o que é útil para não deixar segredos no texto SQL. Os quatro
+modos são:
 
 - **`'options'`** (padrão) — credenciais nas opções do `ATTACH`:
   `client_id`, `client_secret` e `refresh_token` (obrigatórios), mais os
@@ -139,10 +139,24 @@ são:
 - **`'sfdx_url'`** — credenciais na variável `SF_SFDX_AUTH_URL`, no formato
   `force://<clientId>:<clientSecret>:<refreshToken>@<host-da-instancia>` (o
   `clientSecret` pode ser vazio).
+- **`'jwt'`** — fluxo **OAuth 2.0 JWT bearer**, ideal para uso
+  headless/CI/pipeline. **Sem refresh token**: a extensão assina um JWT
+  curto (RS256) e o troca por um access token mantido em memória; diante de
+  um `401`, re-assina um novo assertion. Exige `client_id` (o *issuer*),
+  `username` (o *subject* — o usuário Salesforce a personificar) e uma chave
+  privada, cujo caminho vem da variável de ambiente `SF_JWT_KEY_FILE`
+  (recomendado) ou da opção inline `private_key_file` (apenas dev local). A
+  chave deve ser **PEM RSA PKCS#1 ou PKCS#8 não criptografada**. `login_url`
+  é opcional (padrão `https://login.salesforce.com`; use
+  `https://test.salesforce.com` para sandbox).
 
-`api_version` funciona em todos os modos. Com `'env'` ou `'sfdx_url'`, você
-**não** precisa informar as opções de credencial no `ATTACH` — a fonte
-escolhida vence.
+`api_version` funciona em todos os modos. Com `'env'`, `'sfdx_url'` ou
+`'jwt'`, você **não** precisa informar as opções de credencial no `ATTACH`
+— a fonte escolhida vence.
+
+> **Pré-requisito do modo `'jwt'`:** o Connected App deve estar
+> **pré-autorizado** — *admin-approved*, ou o usuário pré-autorizado (a
+> configuração de certificado digital / *"Use digital signatures"* do JWT).
 
 #### Contexto 1 — Terminal
 
@@ -172,6 +186,36 @@ duckdb
 ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
 ```
 
+Para o modo `'jwt'`, exporte o caminho da chave em `SF_JWT_KEY_FILE` e então
+faça o `ATTACH` com `client_id` e `username`:
+
+```bash
+export SF_JWT_KEY_FILE=/secure/server.key
+duckdb
+```
+
+```sql
+ATTACH 'salesforce://production' AS sf (
+  TYPE salesforce,
+  auth_source 'jwt',
+  client_id 'YOUR_CONSUMER_KEY',
+  username  'svc@example.com'
+);
+```
+
+Apenas para desenvolvimento local, você pode informar a chave inline com
+`private_key_file` (em pipelines, prefira a env var):
+
+```sql
+ATTACH 'salesforce://production' AS sf (
+  TYPE salesforce,
+  auth_source 'jwt',
+  client_id 'YOUR_CONSUMER_KEY',
+  username  'svc@example.com',
+  private_key_file '/secure/server.key'
+);
+```
+
 #### Contexto 2 — Web UI / backend
 
 O app ou container injeta as variáveis `SF_*` (por exemplo, a partir de um
@@ -180,6 +224,19 @@ secret manager). O backend abre o DuckDB e faz o `ATTACH` com `auth_source
 
 ```sql
 ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+```
+
+Para o modo `'jwt'`, o app ou container injeta `SF_JWT_KEY_FILE` (por
+exemplo, um secret montado) e o backend faz o `ATTACH` sem caminho de chave
+nem secret no SQL:
+
+```sql
+ATTACH 'salesforce://production' AS sf (
+  TYPE salesforce,
+  auth_source 'jwt',
+  client_id 'YOUR_CONSUMER_KEY',
+  username  'svc@example.com'
+);
 ```
 
 #### Contexto 3 — Python / pipeline
@@ -200,6 +257,21 @@ con.execute(
 )
 ```
 
+Para o modo `'jwt'`, defina `SF_JWT_KEY_FILE` no ambiente do processo e
+informe `client_id` e `username` no `ATTACH`:
+
+```python
+import os, duckdb
+
+os.environ["SF_JWT_KEY_FILE"] = "/secure/server.key"
+
+con = duckdb.connect()
+con.execute(
+    "ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'jwt', "
+    "client_id '...', username 'svc@example.com')"
+)
+```
+
 #### Nota de segurança
 
 Os valores das variáveis de ambiente e a URL SFDX nunca são logados, e
@@ -209,11 +281,19 @@ URL SFDX malformada é sinalizada sem ser ecoada; `invalid_grant` vira
 "refresh token inválido, expirado ou revogado"; e `invalid_client` vira
 "client_id / client_secret incorreto".
 
+No modo `'jwt'`, a chave privada, o JWT montado e o assertion assinado nunca
+são logados e nunca aparecem em mensagens de erro. Os erros continuam
+claros: um caminho de chave ausente nomeia a opção/env var que faltou
+(`SF_JWT_KEY_FILE` ou `private_key_file`); um arquivo de chave ausente
+nomeia apenas o caminho; uma chave não-PEM, ilegível ou criptografada é
+reportada sem ecoar o conteúdo; e `invalid_grant` vira "inválido, expirado,
+ou o usuário não está autorizado neste Connected App".
+
 #### Fora de escopo (neste corte)
 
 Os seguintes recursos **não** são suportados nesta versão: fluxo OAuth via
-browser/web, secret storage, JWT Bearer, gerenciador de credenciais do
-sistema operacional e persistência de token.
+browser/web, secret storage, chaves privadas criptografadas, gerenciador de
+credenciais do sistema operacional e persistência de token/chave.
 
 ## 4. Primeiras consultas
 

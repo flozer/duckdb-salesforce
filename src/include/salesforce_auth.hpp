@@ -31,6 +31,21 @@ public:
     // access_token / instance_url.
     static SalesforceTokenSet ExchangeRefreshToken(const SalesforceConfig &config,
                                                    SalesforceHttpClient &client);
+
+    // OAuth 2.0 JWT bearer flow (#v1.0 Auth UX cut 2): build + RS256-sign a
+    // short-lived JWT (iss=client_id, sub=username, aud=login_url, exp=now+300)
+    // and POST it as grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer.
+    // No refresh token is involved. Same guarantees as ExchangeRefreshToken,
+    // plus: the private key, the assembled JWT, and the assertion are NEVER
+    // logged or echoed in any error.
+    static SalesforceTokenSet ExchangeJwtBearer(const SalesforceConfig &config,
+                                                SalesforceHttpClient &client);
+
+    // Obtain a token using whichever flow config.auth_method selects. Used for
+    // the initial exchange AND the 401 re-auth path (a JWT is simply re-signed,
+    // since there is no refresh token).
+    static SalesforceTokenSet AcquireToken(const SalesforceConfig &config,
+                                           SalesforceHttpClient &client);
 };
 
 } // namespace duckdb

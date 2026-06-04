@@ -577,7 +577,7 @@ static unique_ptr<Catalog> SalesforceAttach(optional_ptr<StorageExtensionInfo>, 
     SalesforceConfig config =
         SalesforceConfig::ParseAndValidate(attach_info.path, attach_info, context);
     auto http = BuildHttpClientForContext(context);
-    SalesforceTokenSet token = SalesforceAuth::ExchangeRefreshToken(config, *http);
+    SalesforceTokenSet token = SalesforceAuth::AcquireToken(config, *http);
     return make_uniq_base<Catalog, SalesforceCatalog>(db, std::move(config), std::move(token));
 }
 

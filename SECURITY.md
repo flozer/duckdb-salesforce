@@ -30,9 +30,12 @@ The two sensitive credentials are `client_secret` and `refresh_token`
    the ATTACH and never written to disk. No on-disk token cache, no plaintext
    in the catalog or metadata cache, until a separate, reviewed secure-storage
    design exists.
-4. **Refresh-token / JWT only.** Only the OAuth 2.0 refresh-token flow (and,
-   later, the JWT bearer flow) are permitted. The username-password OAuth flow
-   and any handling of a Salesforce account password are **forbidden**.
+4. **Refresh-token / JWT only.** Only the OAuth 2.0 refresh-token flow and the
+   JWT bearer flow (`auth_source 'jwt'`, RS256, unencrypted PEM key) are
+   permitted. The JWT private key, the assembled JWT, and the signed assertion
+   are held in memory only and never logged, echoed in errors, or persisted.
+   The username-password OAuth flow and any handling of a Salesforce account
+   password are **forbidden**.
 5. **TLS always on.** All Salesforce traffic uses HTTPS with certificate
    verification enabled. No `verify=false` / insecure-TLS escape hatch ships
    in any build. On macOS, OpenSSL (via vcpkg) has no default CA bundle; point

@@ -76,7 +76,7 @@ Parameters:
 | Parameter | Required | Default | Meaning |
 |---|---|---|---|
 | `TYPE salesforce` | yes | — | Selects this storage extension |
-| `auth_source` | no | `'options'` | Where credentials come from: `'options'`, `'env'`, or `'sfdx_url'` |
+| `auth_source` | no | `'options'` | Where credentials come from: `'options'`, `'env'`, `'sfdx_url'`, or `'jwt'` |
 | `client_id` | with `'options'` | — | Connected App consumer key |
 | `client_secret` | with `'options'` | — | Connected App consumer secret |
 | `refresh_token` | with `'options'` | — | OAuth refresh token for the read user |
@@ -117,8 +117,54 @@ described above.
   ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
   ```
 
-The `api_version` option works in all three modes. With `'env'` and
-`'sfdx_url'` you do not pass the credential options at all.
+- **`'jwt'`**: the OAuth 2.0 JWT bearer flow, for headless / CI / pipeline use.
+  Instead of a refresh token, the extension RS256-signs a short-lived JWT
+  assertion (`iss` = `client_id`, `sub` = `username`, `aud` = `login_url`,
+  `exp` = now + 300s) and exchanges it at `<login_url>/services/oauth2/token`
+  with `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`. The returned
+  access token is held in memory; there is **no** refresh token, so on a `401`
+  the extension simply re-signs a fresh assertion. Required:
+
+  - `client_id` — the JWT issuer (the Connected App consumer key).
+  - `username` — the JWT subject, i.e. the Salesforce user to impersonate.
+  - a private key, supplied **either** through the `SF_JWT_KEY_FILE`
+    environment variable (recommended — keeps key paths out of the SQL text)
+    **or** through the inline `private_key_file` `ATTACH` option (accepted for
+    local-dev ergonomics only).
+
+  `login_url` is optional (default `https://login.salesforce.com`; use
+  `https://test.salesforce.com` for a sandbox) and `api_version` works as in
+  the other modes. The key must be an **unencrypted** PKCS#1 or PKCS#8 PEM RSA
+  key — encrypted keys are not supported.
+
+  ```sql
+  -- key path from the environment (recommended for pipelines)
+  ATTACH 'salesforce://production' AS sf (
+    TYPE salesforce,
+    auth_source 'jwt',
+    client_id   'YOUR_CONSUMER_KEY',
+    username    'svc@example.com'
+  );
+  ```
+
+  ```sql
+  -- inline key path (local dev only; prefer SF_JWT_KEY_FILE in pipelines)
+  ATTACH 'salesforce://production' AS sf (
+    TYPE salesforce,
+    auth_source      'jwt',
+    client_id        'YOUR_CONSUMER_KEY',
+    username         'svc@example.com',
+    private_key_file '/path/to/server.key'
+  );
+  ```
+
+  **Prerequisite:** the Connected App must be **pre-authorized** for this user
+  — either admin-approved, or pre-authorized by the user through the digital
+  certificate ("Use digital signatures") JWT setup. The token exchange fails
+  otherwise.
+
+The `api_version` option works in all four modes. With `'env'`, `'sfdx_url'`,
+and `'jwt'` you do not pass the refresh-token credential options at all.
 
 #### Security and error messages
 
@@ -130,15 +176,26 @@ actionable without leaking anything:
   `SF_REFRESH_TOKEN`), never its value.
 - A malformed `SF_SFDX_AUTH_URL` reports that it is malformed without echoing
   the URL.
-- `invalid_grant` from the token exchange is reported as "refresh token is
-  invalid, expired, or revoked".
+- `invalid_grant` from the refresh-token exchange is reported as "refresh
+  token is invalid, expired, or revoked".
 - `invalid_client` is reported as "client_id / client_secret is incorrect".
+
+For `'jwt'`, the private key, the assembled JWT, and the signed assertion are
+**never** logged and **never** appear in error messages:
+
+- A missing key path names the option / environment variable that is expected
+  (`private_key_file` or `SF_JWT_KEY_FILE`).
+- A missing key file names **only** the path.
+- A non-PEM, unparseable, or encrypted key is reported as such without echoing
+  the key contents.
+- `invalid_grant` from the JWT exchange is reported as "invalid, expired, or
+  the user is not authorized for this Connected App".
 
 #### Not supported in this cut
 
 The following are explicitly out of scope for this release: a browser / web
-OAuth flow, secret storage, JWT Bearer, an OS credential manager, and token
-persistence.
+OAuth flow, secret storage, encrypted private keys, an OS credential manager,
+and token / key persistence.
 
 #### Why use it
 
