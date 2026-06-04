@@ -189,6 +189,20 @@ static vector<string> BuildIdRangeWheres(const string &pushed, const string &min
     return wheres;
 }
 
+// Emit SOQL dotted paths for a relationship STRUCT field, recursing into nested
+// (grandparent) relationship children (#v1.0). `path` is the dotted prefix so
+// far (e.g. "Account", then "Account.Owner").
+static void EmitRelationshipSoql(const SalesforceField &rel, const string &path,
+                                 vector<string> &out) {
+    for (auto &child : rel.children) {
+        if (child.is_relationship) {
+            EmitRelationshipSoql(child, path + "." + child.name, out);
+        } else {
+            out.push_back(path + "." + child.name);
+        }
+    }
+}
+
 static unique_ptr<FunctionData> ScanBind(ClientContext &, TableFunctionBindInput &,
                                          vector<LogicalType> &, vector<string> &) {
     throw InternalException(
@@ -208,11 +222,10 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
         if (col < bind.fields.size()) {
             const auto &f = bind.fields[col];
             if (f.is_relationship) {
-                // Parent STRUCT (#v0.6 §7): emit dotted child fields (over-fetch
-                // all parent scalars — struct-subfield projection isn't exposed).
-                for (auto &child : f.children) {
-                    select_fields.push_back(f.relationship_name + "." + child.name);
-                }
+                // Parent STRUCT (#v0.6 §7 / depth-2 #v1.0): emit dotted child
+                // fields recursively (Account.Name, Account.Owner.Name) —
+                // over-fetches all scalars at every level.
+                EmitRelationshipSoql(f, f.relationship_name, select_fields);
             } else {
                 select_fields.push_back(f.name);
             }
@@ -488,15 +501,25 @@ static bool BulkAdvancePage(ScanGlobalState &g, ScanLocalState &l) {
     }
 }
 
-// Decode a parent-relationship STRUCT (#v0.6 §7) from Bulk CSV columns named
-// "<relationship>.<child>". A row with every child cell missing/empty -> null
-// struct; a missing/empty child -> null entry.
+// Decode a parent-relationship STRUCT (#v0.6 §7, depth-2 #v1.0) from Bulk CSV
+// columns named "<path>.<child>" (e.g. "Account.Name", "Account.Owner.Name").
+// `path` is the dotted prefix. Nested relationship children recurse. A struct
+// with no populated descendant cell -> null struct; missing/empty cell -> null.
 static void AppendBulkStruct(Vector &vec, idx_t row, const SalesforceField &field,
-                             const vector<string> &cells, const vector<string> &columns) {
+                             const string &path, const vector<string> &cells,
+                             const vector<string> &columns) {
     auto &entries = StructVector::GetEntries(vec);
     bool any = false;
     for (idx_t c = 0; c < field.children.size() && c < entries.size(); c++) {
-        string header = field.relationship_name + "." + field.children[c].name;
+        const auto &child = field.children[c];
+        if (child.is_relationship) {
+            AppendBulkStruct(*entries[c], row, child, path + "." + child.name, cells, columns);
+            if (!FlatVector::IsNull(*entries[c], row)) {
+                any = true;
+            }
+            continue;
+        }
+        string header = path + "." + child.name;
         int64_t ci = -1;
         for (idx_t k = 0; k < columns.size(); k++) {
             if (StringUtil::CIEquals(columns[k], header)) {
@@ -507,7 +530,7 @@ static void AppendBulkStruct(Vector &vec, idx_t row, const SalesforceField &fiel
         if (ci < 0 || static_cast<idx_t>(ci) >= cells.size() || cells[ci].empty()) {
             FlatVector::SetNull(*entries[c], row, true);
         } else {
-            AppendTypedCell(*entries[c], row, field.children[c], cells[ci]);
+            AppendTypedCell(*entries[c], row, child, cells[ci]);
             any = true;
         }
     }
@@ -594,7 +617,8 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
                 column_t col = gstate.column_ids[j];
                 if (col < bind.fields.size() && bind.fields[col].is_relationship) {
                     // Parent STRUCT from CSV columns "rel.child" (#v0.6 §7).
-                    AppendBulkStruct(output.data[j], row, bind.fields[col], cells, lstate.columns);
+                    AppendBulkStruct(output.data[j], row, bind.fields[col],
+                                     bind.fields[col].relationship_name, cells, lstate.columns);
                     continue;
                 }
                 int64_t ci = (col < bind.fields.size()) ? lstate.field_to_csv[col] : -1;

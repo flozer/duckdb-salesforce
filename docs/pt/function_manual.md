@@ -465,6 +465,10 @@ colunas STRUCT.
 Com `'parent'`, os relacionamentos-pai aparecem como colunas STRUCT
 aninhadas ao lado dos campos planos do sObject.
 
+Por padrão, a expansão tem um nível (apenas o pai direto). A profundidade
+da travessia é controlada pela configuração `sf_relationship_depth`, que
+permite estender a expansão até o avô (grandparent).
+
 #### Para que serve
 
 Facilita ler campos do registro-pai (por exemplo, o `Account` de um
@@ -475,6 +479,59 @@ Facilita ler campos do registro-pai (por exemplo, o `Account` de um
 ```sql
 SET sf_relationships = 'parent';
 SELECT Id, Email FROM sf.Contact;
+```
+
+### `sf_relationship_depth`
+
+#### O que faz
+
+Define até quantos níveis de relacionamento-pai a expansão de STRUCT vai
+descer. Só tem efeito quando `sf_relationships = 'parent'`.
+
+#### Como funciona
+
+- Tipo: `BIGINT`
+- Padrão: `1`
+- Valor máximo: `2`
+
+Com `1` (padrão), apenas o pai direto é expandido — o comportamento é
+idêntico ao de `sf_relationships = 'parent'` (um nível de STRUCT de pai).
+
+Com `2`, a expansão também desce ao **avô (grandparent)**: o pai
+(single-target) de um relacionamento de pai single-target vira um STRUCT
+**aninhado**. Por exemplo, `Account.Owner.Name` em `sf.Contact` percorre
+`Contact → Account → Owner` (um `User`).
+
+Regras da travessia:
+
+- Cada salto precisa ser single-target; **relacionamentos polimórficos são
+  pulados em qualquer nível**, assim como relacionamentos para si mesmo
+  (self) e ciclos.
+- A profundidade é limitada estritamente a `2` (não os 5 níveis que o
+  Salesforce permite em SOQL).
+- Predicados sobre subcampos continuam **residuais** (não há pushdown de,
+  por exemplo, `Account.Owner.Name` no `WHERE`), igual ao pai de um nível.
+- O over-fetch cresce com a profundidade: ao projetar o STRUCT, a extensão
+  busca todos os campos escalares de cada nível expandido (mesmo trade-off
+  documentado para o pai de um nível).
+- A expansão acontece somente no caminho de **describe**; o schema obtido
+  via Tooling continua flat, sem expansão. Os describes de pai e de avô
+  reutilizam o cache por `ATTACH`.
+- O transporte REST decodifica o JSON aninhado; o Bulk decodifica os
+  headers CSV aninhados (`Account.Owner.Name`).
+
+#### Para que serve
+
+Permite ler campos do avô (por exemplo, o dono `User` do `Account` de um
+`Contact`) em uma única consulta, sem joins manuais e sem precisar expandir
+o objeto intermediário separadamente.
+
+#### Uso no dia a dia
+
+```sql
+SET sf_relationships = 'parent';
+SET sf_relationship_depth = 2;
+SELECT Account.Owner.Name FROM sf.Contact LIMIT 10;
 ```
 
 ### `sf_query_mode`

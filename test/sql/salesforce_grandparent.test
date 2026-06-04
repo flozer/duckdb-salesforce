@@ -1,0 +1,107 @@
+# name: test/sql/salesforce_grandparent.test
+# description: v1.0 — grandparent relationship traversal (depth 2), opt-in
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Describe sequence consumed within ONE LookupEntry (same client):
+#   Contact -> Account (parent) -> User (grandparent, via Account.Owner).
+# Account.WhatId is polymorphic (User|Contact... here Account|Contact) -> skipped.
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"},{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"]}]}|~|{"name":"Account","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"},{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User"]},{"name":"WhatId","type":"reference","relationshipName":"What","referenceTo":["Account","Contact"]}]}|~|{"name":"User","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"}]}';
+
+# Nested REST record: Contact -> Account -> Owner.
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"c1","Account":{"Id":"a1","Name":"Acme","Owner":{"Id":"u1","Name":"Alice"}}}]}';
+
+statement ok
+SET sf_relationships = 'parent';
+
+# === depth 1 (default): Account STRUCT is flat — no nested Owner =============
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# Account column is a single-level STRUCT (no nested STRUCT inside).
+query I
+SELECT column_type LIKE 'STRUCT%' AND NOT (column_type LIKE '%STRUCT%STRUCT%')
+FROM (DESCRIBE SELECT * FROM sf.Contact) WHERE column_name = 'Account';
+----
+true
+
+# Contact + Account described; User (grandparent) NOT described at depth 1.
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
+
+statement ok
+DETACH sf;
+
+# === depth 2: Account STRUCT gains a nested Owner STRUCT ====================
+statement ok
+SET sf_relationship_depth = 2;
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# Now nested: STRUCT(... Owner STRUCT(...)). Polymorphic What is NOT expanded.
+query I
+SELECT column_type LIKE '%STRUCT%STRUCT%' AND contains(column_type, 'Owner')
+   AND NOT contains(column_type, 'What STRUCT')
+FROM (DESCRIBE SELECT * FROM sf.Contact) WHERE column_name = 'Account';
+----
+true
+
+# Grandparent field access works (REST nested JSON decode).
+query I
+SELECT Account.Owner.Name FROM sf.Contact;
+----
+Alice
+
+# Contact + Account + User described once each (grandparent describe cached).
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+3
+
+# Re-query: schema cached, no extra describe.
+query I
+SELECT Account.Owner.Name FROM sf.Contact;
+----
+Alice
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+3
+
+# --- Bulk: nested "Account.Owner.Name" CSV header decodes ------------------
+statement ok
+SET sf_force_transport = 'bulk';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Account.Id,Account.Name,Account.Owner.Id,Account.Owner.Name
+c1,a1,Acme,u1,Alice';
+
+query I
+SELECT Account.Owner.Name FROM sf.Contact;
+----
+Alice
+
+statement ok
+SET sf_force_transport = 'rest';
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_relationship_depth = 1;
+
+statement ok
+SET sf_relationships = 'off';

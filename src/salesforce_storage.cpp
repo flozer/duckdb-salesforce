@@ -24,6 +24,7 @@
 
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
@@ -197,7 +198,14 @@ public:
             relationships = StringUtil::Lower(rv.ToString());
         }
         if (relationships == "parent") {
-            ExpandParentRelationships(session, describe);
+            int depth = 1; // #v1.0: 1 = parent only (default), 2 = + grandparent
+            Value dv;
+            if (transaction.GetContext().TryGetCurrentSetting("sf_relationship_depth", dv) &&
+                !dv.IsNull()) {
+                int64_t d = dv.GetValue<int64_t>();
+                depth = d < 1 ? 1 : (d > 2 ? 2 : static_cast<int>(d)); // clamp 1..2
+            }
+            ExpandParentRelationships(session, describe, depth);
         }
         return BuildAndCacheEntry(describe);
     }
@@ -257,12 +265,31 @@ private:
         }
     }
 
-    // Append synthesised parent-relationship STRUCT columns (#v0.6 §7) to a
-    // describe. Depth 1, single-target only (polymorphic + self skipped); the
-    // STRUCT children are the parent's queryable SCALAR fields. Caller holds lock_.
-    void ExpandParentRelationships(SalesforceSession &session, SalesforceDescribe &describe) {
-        vector<SalesforceField> extra;
-        for (auto &f : describe.fields) {
+    // Append synthesised parent-relationship STRUCT columns (#v0.6 §7, depth-2
+    // #v1.0). `depth` = how many parent levels to expand (1 = parent only,
+    // 2 = + grandparent). Caller holds lock_.
+    void ExpandParentRelationships(SalesforceSession &session, SalesforceDescribe &describe,
+                                   int depth) {
+        std::unordered_set<string> visited;
+        visited.insert(StringUtil::Lower(describe.object_name));
+        auto rels = BuildRelationshipFields(session, describe, depth, visited);
+        for (auto &e : rels) {
+            describe.fields.push_back(std::move(e));
+        }
+    }
+
+    // Build the relationship STRUCT fields for `desc`, expanding up to `depth`
+    // parent levels. Single-target only (polymorphic skipped); self + already-
+    // visited objects skipped (cycle guard). A nested level becomes a STRUCT
+    // child of its parent STRUCT. Caller holds lock_.
+    vector<SalesforceField> BuildRelationshipFields(SalesforceSession &session,
+                                                    const SalesforceDescribe &desc, int depth,
+                                                    std::unordered_set<string> &visited) {
+        vector<SalesforceField> rels;
+        if (depth <= 0) {
+            return rels;
+        }
+        for (auto &f : desc.fields) {
             if (StringUtil::Lower(f.sf_type) != "reference") {
                 continue;
             }
@@ -270,12 +297,12 @@ private:
                 continue; // no relationship name, or polymorphic -> skip
             }
             const string &parent = f.reference_to[0];
-            if (StringUtil::CIEquals(parent, describe.object_name)) {
-                continue; // self-reference -> skip (avoid trivial cycle, cut 1)
+            string plow = StringUtil::Lower(parent);
+            if (StringUtil::CIEquals(parent, desc.object_name) || visited.count(plow)) {
+                continue; // self / cycle -> skip
             }
-            // Avoid colliding with an existing column of the same name.
-            bool collide = false;
-            for (auto &g : describe.fields) {
+            bool collide = false; // avoid colliding with an existing column name
+            for (auto &g : desc.fields) {
                 if (StringUtil::CIEquals(g.name, f.relationship_name)) {
                     collide = true;
                     break;
@@ -297,21 +324,37 @@ private:
                 if (!IsQueryableField(pf)) {
                     continue; // drop compound
                 }
-                SalesforceField child = pf; // scalar copy (depth 1: no nesting)
+                SalesforceField child = pf; // scalar copy
                 child.is_relationship = false;
                 child.children.clear();
                 struct_children.emplace_back(child.name, child.duckdb_type);
                 rel.children.push_back(std::move(child));
             }
+            // Recurse one more parent level (grandparent) as nested STRUCT children.
+            visited.insert(plow);
+            auto nested = BuildRelationshipFields(session, *pd, depth - 1, visited);
+            visited.erase(plow);
+            for (auto &n : nested) {
+                bool dup = false; // don't shadow a parent scalar child of the same name
+                for (auto &c : rel.children) {
+                    if (StringUtil::CIEquals(c.name, n.name)) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (dup) {
+                    continue;
+                }
+                struct_children.emplace_back(n.name, n.duckdb_type);
+                rel.children.push_back(std::move(n));
+            }
             if (rel.children.empty()) {
                 continue;
             }
             rel.duckdb_type = LogicalType::STRUCT(std::move(struct_children));
-            extra.push_back(std::move(rel));
+            rels.push_back(std::move(rel));
         }
-        for (auto &e : extra) {
-            describe.fields.push_back(std::move(e));
-        }
+        return rels;
     }
 
     void EmitResolved(CatalogType type, const std::function<void(CatalogEntry &)> &callback) {

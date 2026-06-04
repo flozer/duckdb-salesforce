@@ -243,11 +243,38 @@ LIMIT 10;
 
 Escopo e ressalvas:
 
-- A profundidade é 1 (apenas o pai direto).
+- A profundidade padrão é 1 (apenas o pai direto); use
+  `sf_relationship_depth` para estender até o avô (veja abaixo).
 - Lookups polimórficos são ignorados.
 - Predicados sobre subcampos são avaliados como filtros residuais (no
   DuckDB).
 - O padrão é `'off'`.
+
+### Traversal de avô (profundidade 2)
+
+Com `sf_relationships='parent'`, a configuração `sf_relationship_depth`
+controla quantos níveis a expansão desce. O padrão é `1` (só o pai direto);
+com `2`, o pai (single-target) de um relacionamento de pai single-target
+também é expandido, como um STRUCT aninhado:
+
+```sql
+SET sf_relationships='parent';
+SET sf_relationship_depth=2;
+
+SELECT Account.Owner.Name
+FROM sf.Contact
+LIMIT 10;
+```
+
+Aqui o caminho é `Contact → Account → Owner` (um `User`). Ressalvas:
+
+- A profundidade é limitada a 2 (não os 5 níveis do SOQL).
+- Cada salto precisa ser single-target; relacionamentos polimórficos são
+  pulados em qualquer nível.
+- Predicados sobre subcampos (por exemplo, `Account.Owner.Name` no `WHERE`)
+  continuam residuais, sem pushdown.
+- O over-fetch cresce com a profundidade: projetar o STRUCT busca todos os
+  campos escalares de cada nível expandido.
 
 ## 10. Origem do schema
 
@@ -335,8 +362,9 @@ Conheça estes limites antes de construir sobre a extensão:
   `LIMIT` pequeno).
 - **auto não enxerga o `LIMIT`** ao sondar. Para uma consulta com `LIMIT`
   pequeno em um objeto enorme, force `rest`.
-- **Relacionamentos são apenas de pai, profundidade 1**; lookups
-  polimórficos são ignorados e predicados sobre subcampos são residuais.
+- **Relacionamentos são apenas de pai, profundidade até 2**
+  (`sf_relationship_depth`, do pai ao avô); lookups polimórficos são
+  ignorados e predicados sobre subcampos são residuais.
 - **A origem de schema tooling produz tipos mais grosseiros** e reduz o
   pushdown.
 - **O pushdown de agregação é apenas para COUNT.**

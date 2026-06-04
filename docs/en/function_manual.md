@@ -453,7 +453,8 @@ Controls whether parent relationships are exposed as nested STRUCT columns.
 
 With `'off'` only flat fields are exposed. With `'parent'`, parent
 relationships are surfaced as nested STRUCT columns alongside the flat
-fields.
+fields. By default this is one level deep (the direct parent); to also
+expand the grandparent, raise `sf_relationship_depth` to `2`.
 
 #### Why use it
 
@@ -466,6 +467,54 @@ example a Contact's parent Account) without writing your own join.
 SET sf_relationships = 'parent';
 
 SELECT Id, Name FROM sf.Contact;
+```
+
+### `sf_relationship_depth`
+
+#### What it does
+
+Controls how many levels of parent relationships are expanded as nested
+STRUCT columns. Only meaningful when `sf_relationships = 'parent'`.
+
+#### How it works
+
+- Type: `BIGINT`
+- Default: `1`
+- Capped at `2`
+
+With `1` (the default) only the direct parent is expanded — one level of
+parent STRUCT columns, exactly the behavior described under
+`sf_relationships`. With `2`, a single-target parent relationship's own
+single-target parent (the **grandparent**) is also expanded, becoming a
+nested STRUCT child of the parent STRUCT — for example Contact → Account →
+Owner (User).
+
+Expansion is single-target only at each hop: **polymorphic relationships
+are skipped at every level**, and self-references or cycles are skipped.
+The depth is strictly capped at `2` (it does not follow Salesforce's full
+5-level relationship chains). Predicates on subfields stay **residual**
+(there is no pushdown on `Account.Owner.Name` in `WHERE`), the same as at
+depth 1. Over-fetch grows with depth: selecting the STRUCT fetches all
+scalar fields at every expanded level — a documented trade-off, the same as
+at depth 1. Grandparent expansion is describe-source only (the Tooling
+schema stays flat, with no relationship expansion); the parent and
+grandparent describes reuse the per-attach cache. On the wire, REST decodes
+the nested JSON and Bulk decodes the nested CSV headers
+(`Account.Owner.Name`).
+
+#### Why use it
+
+Raise it to `2` when you need a field two hops up the parent chain (for
+example a Contact's Account's Owner) without writing your own join, while
+keeping the read scoped and predictable.
+
+#### Daily use
+
+```sql
+SET sf_relationships = 'parent';
+SET sf_relationship_depth = 2;
+
+SELECT Account.Owner.Name FROM sf.Contact LIMIT 10;
 ```
 
 ### `sf_query_mode`

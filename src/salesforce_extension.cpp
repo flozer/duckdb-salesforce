@@ -220,8 +220,16 @@ static void LoadInternal(ExtensionLoader &loader) {
         "sf_relationships",
         "Parent relationship traversal: 'off' (default) or 'parent' (expose each "
         "single-target parent as a STRUCT column, e.g. SELECT Account.Name FROM "
-        "sf.Contact). Depth 1; polymorphic/child relationships not expanded.",
+        "sf.Contact). Polymorphic/child relationships not expanded.",
         LogicalType::VARCHAR, Value("off"));
+    // Depth of parent traversal when sf_relationships='parent' (#v1.0): 1
+    // (default, parent only) or 2 (+ grandparent, e.g. Account.Owner.Name as a
+    // nested STRUCT). Capped at 2; single-target only at each hop.
+    config.AddExtensionOption(
+        "sf_relationship_depth",
+        "Parent traversal depth when sf_relationships='parent': 1 (default, "
+        "parent only) or 2 (also grandparent, nested STRUCT). Capped at 2.",
+        LogicalType::BIGINT, Value::BIGINT(1));
 
     // Mocked Tooling query (§v0.6). GET .../tooling/query -> this sequence.
     config.AddExtensionOption("sf_mock_tooling_status",

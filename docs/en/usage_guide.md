@@ -238,10 +238,36 @@ LIMIT 10;
 
 Scope and caveats:
 
-- Depth is 1 (direct parent only).
+- Depth is 1 (direct parent only) by default; raise `sf_relationship_depth`
+  to `2` to also expand the grandparent.
 - Polymorphic lookups are skipped.
 - Predicates on subfields are evaluated as residual filters (in DuckDB).
 - The default is `'off'`.
+
+### Grandparent traversal (depth 2)
+
+Set `sf_relationship_depth=2` to expand a single-target parent
+relationship's own single-target parent (the grandparent) as a nested
+`STRUCT` child. For example, Contact → Account → Owner (User):
+
+```sql
+SET sf_relationships='parent';
+SET sf_relationship_depth=2;
+
+SELECT Account.Owner.Name
+FROM sf.Contact
+LIMIT 10;
+```
+
+Scope and caveats:
+
+- Depth is strictly capped at `2` (not Salesforce's full 5-level chains).
+- Single-target only at each hop: polymorphic relationships are skipped at
+  every level, and self-references or cycles are skipped.
+- Predicates on subfields stay residual — there is no pushdown on
+  `Account.Owner.Name` in `WHERE`, the same as at depth 1.
+- Over-fetch grows with depth: selecting the STRUCT fetches all scalar
+  fields at every expanded level.
 
 ## 10. Schema source
 
@@ -325,8 +351,8 @@ Know these boundaries before you build on the extension:
   streaming still stops later page downloads on a small `LIMIT`).
 - **auto cannot see `LIMIT`** when probing. For a small-`LIMIT` query on a
   huge object, force `rest`.
-- **Relationships are parent-only, depth-1**; polymorphic lookups are
-  skipped and subfield predicates are residual.
+- **Relationships are parent-only, depth 1–2** (`sf_relationship_depth`, capped
+  at 2); polymorphic lookups are skipped and subfield predicates are residual.
 - **Tooling schema source produces coarser types** and reduces pushdown.
 - **Aggregate pushdown is COUNT-only.**
 - **PK chunks have no global order**, and may be uneven or empty.
