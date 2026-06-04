@@ -5,6 +5,7 @@
 namespace duckdb {
 
 struct AttachInfo;
+class ClientContext;
 
 // Parsed, validated connection configuration for a single ATTACH.
 //
@@ -38,7 +39,9 @@ struct SalesforceConfig {
 
     // Parse + validate. Throws BinderException with a clear, secret-free
     // message on any invalid/missing field. No network, no persistence.
-    static SalesforceConfig ParseAndValidate(const string &path, AttachInfo &info);
+    // `context` is used to resolve env/sfdx_url auth sources (#v1.0 Auth UX).
+    static SalesforceConfig ParseAndValidate(const string &path, AttachInfo &info,
+                                             ClientContext &context);
 };
 
 } // namespace duckdb

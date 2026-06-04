@@ -98,6 +98,107 @@ Use `login_url 'https://test.salesforce.com'` for a sandbox. To obtain the
 in your org and complete the OAuth flow as described in
 [docs/CONNECTED_APP.md](../CONNECTED_APP.md).
 
+### Auth sources
+
+The `auth_source` `ATTACH` option chooses *where* the OAuth credentials come
+from. The OAuth refresh-token flow is unchanged — only the source differs.
+There are three modes:
+
+- **`options`** (default): credentials are read from the inline `ATTACH`
+  options `client_id`, `client_secret`, and `refresh_token` (all required),
+  plus optional `login_url` and `api_version`. This is exactly the behavior
+  shown above; you can omit `auth_source` entirely.
+- **`env`**: credentials are read from environment variables. The required
+  ones are `SF_CLIENT_ID`, `SF_CLIENT_SECRET`, and `SF_REFRESH_TOKEN`;
+  `SF_LOGIN_URL` is optional. You do not pass the credential options in SQL.
+
+  ```sql
+  ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+  ```
+
+- **`sfdx_url`**: credentials are read from a single environment variable,
+  `SF_SFDX_AUTH_URL`, in the Salesforce CLI auth-URL format
+  `force://<clientId>:<clientSecret>:<refreshToken>@<instance-host>` (the
+  `<clientSecret>` segment may be empty). You do not pass the credential
+  options in SQL.
+
+  ```sql
+  ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+  ```
+
+The `api_version` option works in all three modes. With `env` and `sfdx_url`,
+the credential options are not needed (the source wins).
+
+#### Example: terminal
+
+Export the variables in your shell, then start DuckDB and attach:
+
+```bash
+export SF_CLIENT_ID=your_consumer_key
+export SF_CLIENT_SECRET=your_consumer_secret
+export SF_REFRESH_TOKEN=your_refresh_token
+# optional: export SF_LOGIN_URL=https://test.salesforce.com
+
+duckdb
+```
+
+```sql
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+```
+
+Or, using a Salesforce CLI auth URL captured from an authorized org:
+
+```bash
+export SF_SFDX_AUTH_URL=$(sf org display --verbose --json | jq -r .result.sfdxAuthUrl)
+
+duckdb
+```
+
+```sql
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+```
+
+#### Example: web UI / backend service
+
+The application or container injects the `SF_*` environment variables (for
+example, pulled from a secret manager at startup). The backend opens DuckDB
+and attaches with `auth_source 'env'`, so no credentials ever appear in the
+SQL text:
+
+```sql
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+```
+
+#### Example: Python / pipeline
+
+```python
+import os
+import duckdb
+
+os.environ["SF_CLIENT_ID"] = "your_consumer_key"
+os.environ["SF_CLIENT_SECRET"] = "your_consumer_secret"
+os.environ["SF_REFRESH_TOKEN"] = "your_refresh_token"
+
+con = duckdb.connect()
+con.execute(
+    "ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'env')"
+)
+```
+
+#### Security note
+
+Environment values and the SFDX auth URL are never logged, and tokens or
+secrets never appear in error messages. A missing environment variable names
+only the variable; a malformed `SF_SFDX_AUTH_URL` is reported as malformed
+without echoing it; `invalid_grant` is reported as "refresh token is invalid,
+expired, or revoked"; `invalid_client` as "client_id / client_secret is
+incorrect".
+
+#### Not supported in this cut
+
+These are out of scope for this release: a browser / web OAuth flow, secret
+storage, JWT Bearer, an OS credential manager, and token persistence.
+
 ## 4. First queries
 
 Once attached, query sObjects like any other table:

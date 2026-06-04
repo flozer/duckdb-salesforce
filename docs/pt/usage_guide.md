@@ -99,6 +99,98 @@ o `client_id`, o `client_secret` e o `refresh_token`, configure um
 Connected App na sua org e conclua o fluxo OAuth conforme descrito em
 [docs/CONNECTED_APP.pt-BR.md](../CONNECTED_APP.pt-BR.md).
 
+### 3.1 Fontes de autenticação
+
+Por padrão, o `ATTACH` lê as credenciais das próprias opções do comando
+(como nos exemplos acima). A opção `auth_source` permite escolher de onde
+elas vêm, o que é útil para não deixar segredos no texto SQL. Os três modos
+são:
+
+- **`'options'`** (padrão) — credenciais nas opções do `ATTACH`:
+  `client_id`, `client_secret` e `refresh_token` (obrigatórios), mais os
+  opcionais `login_url` e `api_version`.
+- **`'env'`** — credenciais nas variáveis de ambiente `SF_CLIENT_ID`,
+  `SF_CLIENT_SECRET` e `SF_REFRESH_TOKEN` (obrigatórias), mais a opcional
+  `SF_LOGIN_URL`.
+- **`'sfdx_url'`** — credenciais na variável `SF_SFDX_AUTH_URL`, no formato
+  `force://<clientId>:<clientSecret>:<refreshToken>@<host-da-instancia>` (o
+  `clientSecret` pode ser vazio).
+
+`api_version` funciona em todos os modos. Com `'env'` ou `'sfdx_url'`, você
+**não** precisa informar as opções de credencial no `ATTACH` — a fonte
+escolhida vence.
+
+#### Contexto 1 — Terminal
+
+Exporte as variáveis no shell e então rode o DuckDB e o `ATTACH` com
+`auth_source 'env'`:
+
+```bash
+export SF_CLIENT_ID=sua_consumer_key
+export SF_CLIENT_SECRET=seu_consumer_secret
+export SF_REFRESH_TOKEN=seu_refresh_token
+duckdb
+```
+
+```sql
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+```
+
+Como alternativa, use a URL SFDX da CLI do Salesforce e `auth_source
+'sfdx_url'`:
+
+```bash
+export SF_SFDX_AUTH_URL=$(sf org display --verbose --json | jq -r .result.sfdxAuthUrl)
+duckdb
+```
+
+```sql
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+```
+
+#### Contexto 2 — Web UI / backend
+
+O app ou container injeta as variáveis `SF_*` (por exemplo, a partir de um
+secret manager). O backend abre o DuckDB e faz o `ATTACH` com `auth_source
+'env'` — assim, **nenhuma credencial aparece no texto SQL**:
+
+```sql
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+```
+
+#### Contexto 3 — Python / pipeline
+
+Defina as variáveis no ambiente do processo e faça o `ATTACH` com
+`auth_source 'env'`:
+
+```python
+import os, duckdb
+
+os.environ["SF_CLIENT_ID"] = "sua_consumer_key"
+os.environ["SF_CLIENT_SECRET"] = "seu_consumer_secret"
+os.environ["SF_REFRESH_TOKEN"] = "seu_refresh_token"
+
+con = duckdb.connect()
+con.execute(
+    "ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'env')"
+)
+```
+
+#### Nota de segurança
+
+Os valores das variáveis de ambiente e a URL SFDX nunca são logados, e
+tokens ou secrets nunca aparecem em mensagens de erro. Os erros são claros:
+uma variável de ambiente ausente é nomeada (apenas o nome, sem valor); uma
+URL SFDX malformada é sinalizada sem ser ecoada; `invalid_grant` vira
+"refresh token inválido, expirado ou revogado"; e `invalid_client` vira
+"client_id / client_secret incorreto".
+
+#### Fora de escopo (neste corte)
+
+Os seguintes recursos **não** são suportados nesta versão: fluxo OAuth via
+browser/web, secret storage, JWT Bearer, gerenciador de credenciais do
+sistema operacional e persistência de token.
+
 ## 4. Primeiras consultas
 
 Uma vez anexada, consulte sObjects como qualquer outra tabela:

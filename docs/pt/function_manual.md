@@ -75,6 +75,7 @@ Parâmetros do `ATTACH`:
 | `refresh_token` | sim | — | Refresh token OAuth do usuário de leitura |
 | `login_url` | não | `https://login.salesforce.com` | Host OAuth; use o host de My Domain / sandbox quando aplicável |
 | `api_version` | não | padrão da extensão | Versão da API do Salesforce, ex. `60.0` |
+| `auth_source` | não | `'options'` | De onde o `ATTACH` obtém as credenciais OAuth: `'options'`, `'env'` ou `'sfdx_url'` |
 
 Notas de comportamento:
 
@@ -84,6 +85,54 @@ Notas de comportamento:
   uso, então anexar uma org grande é barato.
 - Use `login_url` para apontar para um sandbox
   (`https://test.salesforce.com`) ou um host de login de My Domain.
+
+##### Fonte das credenciais: `auth_source`
+
+A opção `auth_source` decide **de onde** o `ATTACH` lê as credenciais OAuth.
+Ela aceita três valores:
+
+- **`'options'`** (padrão, inalterado) — as credenciais vêm das próprias
+  opções do `ATTACH`: `client_id`, `client_secret` e `refresh_token`
+  (obrigatórios), mais os opcionais `login_url` e `api_version`. É o
+  comportamento descrito na tabela acima.
+- **`'env'`** — as credenciais vêm de variáveis de ambiente. A extensão lê
+  `SF_CLIENT_ID`, `SF_CLIENT_SECRET` e `SF_REFRESH_TOKEN` (obrigatórias),
+  mais a opcional `SF_LOGIN_URL`. As opções de credencial do `ATTACH` não
+  são necessárias neste modo.
+- **`'sfdx_url'`** — as credenciais vêm da variável `SF_SFDX_AUTH_URL`, no
+  formato `force://<clientId>:<clientSecret>:<refreshToken>@<host-da-instancia>`
+  (o `clientSecret` pode ser vazio). As opções de credencial do `ATTACH`
+  também não são necessárias neste modo.
+
+`api_version` funciona em **todos** os modos. Com `'env'` ou `'sfdx_url'`, as
+opções de credencial do `ATTACH` não precisam ser informadas — a fonte
+escolhida vence.
+
+Exemplos com `'env'` e `'sfdx_url'`:
+
+```sql
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+```
+
+```sql
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+```
+
+Notas de segurança e de erro:
+
+- Os valores das variáveis de ambiente e a URL SFDX **nunca** são logados;
+  tokens e secrets **nunca** aparecem em mensagens de erro.
+- Variável de ambiente ausente: o erro nomeia **apenas** a variável que
+  faltou, sem revelar nenhum valor.
+- URL SFDX malformada: o erro avisa sobre o formato inválido **sem** ecoar a
+  URL.
+- `invalid_grant` na troca OAuth é traduzido como "refresh token inválido,
+  expirado ou revogado".
+- `invalid_client` é traduzido como "client_id / client_secret incorreto".
+
+Fora de escopo neste corte (não suportado): fluxo OAuth via browser/web,
+secret storage, JWT Bearer, gerenciador de credenciais do sistema
+operacional e persistência de token.
 
 #### Para que serve
 

@@ -238,6 +238,15 @@ static void LoadInternal(ExtensionLoader &loader) {
     config.AddExtensionOption("sf_mock_tooling_body",
                               "TEST ONLY. Body/pages for the mocked GET /tooling/query ('|~|').",
                               LogicalType::VARCHAR, Value(""));
+    // TEST ONLY (#v1.0 Auth UX). Overrides env-var lookup for auth_source=
+    // 'env'/'sfdx_url' so the offline suite can exercise them without touching
+    // the OS environment. Format: "NAME=value;NAME2=value2". Empty = use real env.
+    config.AddExtensionOption(
+        "sf_mock_env",
+        "TEST ONLY. Override environment-variable lookup for auth_source "
+        "env/sfdx_url ('NAME=value;...'). Empty uses the real OS environment.",
+        LogicalType::VARCHAR, Value(""));
+
     // Mocked GET /queryAll (#v0.9 §1) — distinct from /query so tests prove the
     // endpoint actually changes under sf_query_mode='queryAll'.
     config.AddExtensionOption("sf_mock_queryall_status",

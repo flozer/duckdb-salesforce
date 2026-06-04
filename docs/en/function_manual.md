@@ -76,14 +76,69 @@ Parameters:
 | Parameter | Required | Default | Meaning |
 |---|---|---|---|
 | `TYPE salesforce` | yes | — | Selects this storage extension |
-| `client_id` | yes | — | Connected App consumer key |
-| `client_secret` | yes | — | Connected App consumer secret |
-| `refresh_token` | yes | — | OAuth refresh token for the read user |
+| `auth_source` | no | `'options'` | Where credentials come from: `'options'`, `'env'`, or `'sfdx_url'` |
+| `client_id` | with `'options'` | — | Connected App consumer key |
+| `client_secret` | with `'options'` | — | Connected App consumer secret |
+| `refresh_token` | with `'options'` | — | OAuth refresh token for the read user |
 | `login_url` | no | `https://login.salesforce.com` | OAuth host; use the My Domain / sandbox host where applicable |
 | `api_version` | no | extension default | Salesforce API version, e.g. `60.0` |
 
 Use `login_url` to point at a sandbox (`https://test.salesforce.com`) or a
 My Domain login host.
+
+#### Choosing where credentials come from (`auth_source`)
+
+The `auth_source` option selects where `ATTACH` reads the OAuth credentials
+from. It does not change anything about the OAuth refresh-token flow itself —
+only the place the `client_id`, `client_secret`, and `refresh_token` are
+sourced from. The default is `'options'`, which is the inline behavior
+described above.
+
+- **`'options'`** (default): credentials are read from the inline `ATTACH`
+  options `client_id`, `client_secret`, and `refresh_token` (all required),
+  plus the optional `login_url` and `api_version`.
+
+- **`'env'`**: credentials are read from environment variables instead of the
+  SQL text. The required variables are `SF_CLIENT_ID`, `SF_CLIENT_SECRET`, and
+  `SF_REFRESH_TOKEN`; `SF_LOGIN_URL` is optional. The inline credential
+  options are not needed (the environment source wins).
+
+  ```sql
+  ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+  ```
+
+- **`'sfdx_url'`**: credentials are read from a single environment variable,
+  `SF_SFDX_AUTH_URL`, in the Salesforce CLI auth-URL format
+  `force://<clientId>:<clientSecret>:<refreshToken>@<instance-host>` (the
+  `<clientSecret>` segment may be empty). The inline credential options are
+  not needed (the source wins).
+
+  ```sql
+  ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+  ```
+
+The `api_version` option works in all three modes. With `'env'` and
+`'sfdx_url'` you do not pass the credential options at all.
+
+#### Security and error messages
+
+Environment values and the SFDX auth URL are **never** logged, and tokens or
+secrets **never** appear in error messages. The errors are written to be
+actionable without leaking anything:
+
+- A missing environment variable names **only** the variable (for example,
+  `SF_REFRESH_TOKEN`), never its value.
+- A malformed `SF_SFDX_AUTH_URL` reports that it is malformed without echoing
+  the URL.
+- `invalid_grant` from the token exchange is reported as "refresh token is
+  invalid, expired, or revoked".
+- `invalid_client` is reported as "client_id / client_secret is incorrect".
+
+#### Not supported in this cut
+
+The following are explicitly out of scope for this release: a browser / web
+OAuth flow, secret storage, JWT Bearer, an OS credential manager, and token
+persistence.
 
 #### Why use it
 

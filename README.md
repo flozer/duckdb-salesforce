@@ -29,6 +29,25 @@ ATTACH 'salesforce://production' AS sf (TYPE salesforce,
 SELECT Id, Name FROM sf.Account WHERE Name = 'Acme';
 ```
 
+### Credential sources (`auth_source`)
+
+`auth_source` chooses where the OAuth credentials come from (the refresh-token
+flow itself is unchanged). Default is `options` (inline `ATTACH` options, shown
+above). Two alternatives keep secrets out of SQL text:
+
+```sql
+-- env: read SF_CLIENT_ID, SF_CLIENT_SECRET, SF_REFRESH_TOKEN (+ optional SF_LOGIN_URL)
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+
+-- sfdx_url: read SF_SFDX_AUTH_URL (force://<clientId>:<clientSecret>:<refreshToken>@<host>)
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+```
+
+Environment values and the SFDX URL are never logged, and tokens/secrets never
+appear in error messages. See
+[docs/en/usage_guide.md](docs/en/usage_guide.md) for terminal, backend, and
+Python examples.
+
 ## Transport: REST vs Bulk (v0.3)
 
 A scan runs over one of two transports, chosen by the `sf_force_transport`

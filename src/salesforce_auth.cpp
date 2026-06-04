@@ -75,9 +75,16 @@ SalesforceTokenSet SalesforceAuth::ExchangeRefreshToken(const SalesforceConfig &
         if (err.empty()) {
             err = "unknown_error";
         }
+        // Actionable hint per error code; never includes a secret/token.
+        string hint;
+        if (err == "invalid_grant") {
+            hint = " (refresh token is invalid, expired, or revoked — re-authorize)";
+        } else if (err == "invalid_client" || err == "invalid_client_id") {
+            hint = " (client_id / client_secret is incorrect for this org)";
+        }
         throw IOException(
-            "salesforce OAuth token exchange failed (HTTP %d): %s%s%s.",
-            resp.status, err, desc.empty() ? "" : " - ", desc);
+            "salesforce OAuth token exchange failed (HTTP %d): %s%s%s%s.",
+            resp.status, err, desc.empty() ? "" : " - ", desc, hint);
     }
 
     SalesforceTokenSet ts;

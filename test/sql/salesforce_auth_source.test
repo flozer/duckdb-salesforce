@@ -1,0 +1,112 @@
+# name: test/sql/salesforce_auth_source.test
+# description: v1.0 — auth_source = options | env | sfdx_url (+ clearer errors)
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"Acme"}]}';
+
+# === options (default): unchanged behaviour =================================
+statement ok
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query I
+SELECT Name FROM sf.Account;
+----
+Acme
+
+statement ok
+DETACH sf;
+
+# === env: credentials from environment variables (mocked) ===================
+statement ok
+SET sf_mock_env = 'SF_CLIENT_ID=ci;SF_CLIENT_SECRET=cs;SF_REFRESH_TOKEN=rt';
+
+statement ok
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+
+query I
+SELECT Name FROM sf.Account;
+----
+Acme
+
+statement ok
+DETACH sf;
+
+# === sfdx_url: parse force://...@host from SF_SFDX_AUTH_URL ==================
+statement ok
+SET sf_mock_env = 'SF_SFDX_AUTH_URL=force://ci:cs:rt@mydom.my.salesforce.com';
+
+statement ok
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+
+query I
+SELECT Name FROM sf.Account;
+----
+Acme
+
+statement ok
+DETACH sf;
+
+# === env missing var -> clear error naming ONLY the variable ================
+statement ok
+SET sf_mock_env = 'SF_CLIENT_ID=ci';
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+----
+missing required environment variable 'SF_CLIENT_SECRET'
+
+# === sfdx_url malformed -> clear error, no value echoed =====================
+statement ok
+SET sf_mock_env = 'SF_SFDX_AUTH_URL=not-a-force-url';
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+----
+not a valid SFDX auth URL
+
+# === invalid auth_source -> clear error =====================================
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'nope');
+----
+must be 'options', 'env', or 'sfdx_url'
+
+# === OAuth error mapping (secret-free, actionable) ==========================
+statement ok
+SET sf_mock_env = '';
+
+statement ok
+SET sf_mock_token_status = 400;
+
+statement ok
+SET sf_mock_token_body = '{"error":"invalid_grant","error_description":"expired access/refresh token"}';
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+----
+refresh token is invalid
+
+statement ok
+SET sf_mock_token_body = '{"error":"invalid_client","error_description":"bad client"}';
+
+statement error
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+----
+client_id / client_secret is incorrect
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
