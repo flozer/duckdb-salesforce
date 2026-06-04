@@ -1,0 +1,3 @@
+# Test-only PEM key fixtures: keep byte-exact across multi-OS checkouts (no
+# CRLF/EOL normalization), so OpenSSL parses them identically everywhere.
+test/keys/*.pem -text
