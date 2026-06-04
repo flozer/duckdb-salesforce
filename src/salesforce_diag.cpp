@@ -28,6 +28,7 @@ struct ScanCost {
     bool bulk = false;
     bool count_pushdown = false;
     int64_t bulk_chunks = 1; // PK-chunk count (#v0.7 §9); 1 = no chunking
+    string query_mode = "query"; // #v0.9 §1: query | queryAll
     bool quota_consulted = false; // false -> quota_* NULL
     int64_t quota_remaining = -1;
     bool quota_allowed = false;
@@ -81,14 +82,16 @@ unique_ptr<FunctionData> QueryCostBind(ClientContext &, TableFunctionBindInput &
              "residual_filters", "where_pushed",
              "pages_fetched",   "rows_emitted",
              "bulk",            "count_pushdown",
-             "bulk_chunks",     "quota_remaining",
-             "quota_allowed",   "guidance"};
+             "bulk_chunks",     "query_mode",
+             "quota_remaining", "quota_allowed",
+             "guidance"};
     return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
                     LogicalType::BIGINT,  LogicalType::VARCHAR, LogicalType::BIGINT,
                     LogicalType::BIGINT,  LogicalType::BIGINT,  LogicalType::BIGINT,
                     LogicalType::VARCHAR, LogicalType::BIGINT,  LogicalType::BIGINT,
                     LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::BIGINT,
-                    LogicalType::BIGINT,  LogicalType::BOOLEAN, LogicalType::VARCHAR};
+                    LogicalType::VARCHAR, LogicalType::BIGINT,  LogicalType::BOOLEAN,
+                    LogicalType::VARCHAR};
     return nullptr;
 }
 
@@ -133,14 +136,15 @@ void QueryCostFunction(ClientContext &, TableFunctionInput &data, DataChunk &out
     FlatVector::GetData<bool>(output.data[12])[0] = c.bulk;
     FlatVector::GetData<bool>(output.data[13])[0] = c.count_pushdown;
     FlatVector::GetData<int64_t>(output.data[14])[0] = c.bulk_chunks;
+    Str(output, 15, c.query_mode);
     if (c.quota_consulted) {
-        IntOrNull(output, 15, c.quota_remaining);
-        FlatVector::GetData<bool>(output.data[16])[0] = c.quota_allowed;
+        IntOrNull(output, 16, c.quota_remaining);
+        FlatVector::GetData<bool>(output.data[17])[0] = c.quota_allowed;
     } else {
-        FlatVector::SetNull(output.data[15], 0, true);
         FlatVector::SetNull(output.data[16], 0, true);
+        FlatVector::SetNull(output.data[17], 0, true);
     }
-    Str(output, 17, BuildGuidance(c));
+    Str(output, 18, BuildGuidance(c));
     gstate.emitted = true;
     output.SetCardinality(1);
 }
@@ -151,7 +155,7 @@ void DiagRecordScan(const string &object, const string &soql, const string &tran
                     int64_t est_rows, const string &transport_reason, int64_t projected_fields,
                     int64_t total_fields, int64_t pushed_filters, int64_t residual_filters,
                     const string &where_pushed, bool bulk, int64_t pages_init,
-                    bool count_pushdown) {
+                    bool count_pushdown, const string &query_mode) {
     std::lock_guard<std::mutex> g(g_lock);
     g_cost = ScanCost{};
     g_cost.object = object;
@@ -167,6 +171,7 @@ void DiagRecordScan(const string &object, const string &soql, const string &tran
     g_cost.bulk = bulk;
     g_cost.pages_fetched = pages_init;
     g_cost.count_pushdown = count_pushdown;
+    g_cost.query_mode = query_mode;
 }
 
 void DiagSetPages(int64_t pages) {

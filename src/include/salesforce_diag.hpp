@@ -17,7 +17,8 @@ namespace duckdb {
 void DiagRecordScan(const string &object, const string &soql, const string &transport,
                     int64_t est_rows, const string &transport_reason, int64_t projected_fields,
                     int64_t total_fields, int64_t pushed_filters, int64_t residual_filters,
-                    const string &where_pushed, bool bulk, int64_t pages_init, bool count_pushdown);
+                    const string &where_pushed, bool bulk, int64_t pages_init, bool count_pushdown,
+                    const string &query_mode);
 
 // REST page counter mirror (kept in sync with salesforce_last_scan_pages()).
 void DiagSetPages(int64_t pages);

@@ -183,6 +183,7 @@ SELECT * FROM salesforce_query_cost();
 | `pages_fetched` | query pages fetched — REST `queryMore` pages, or (since v0.7 §8) Bulk `/results` pages streamed |
 | `rows_emitted` | rows **delivered to DuckDB** (not rows downloaded) |
 | `bulk` | Bulk transport? |
+| `query_mode` | `query` or `queryAll` (v0.9 §1 — see below) |
 | `quota_remaining` / `quota_allowed` | governor decision (NULL when quota was not consulted, e.g. REST) |
 | `guidance` | short selectivity hints (e.g. "no predicate pushed", "N filter(s) residual — over-fetch") |
 
@@ -247,6 +248,25 @@ Caveats (correctness is preserved — REST describe is always the safety net):
   otherwise predicates stay **residual** (correct, just less pushdown).
 - Compound fields are dropped, same as describe.
 - Default stays `'describe'` (authoritative) — `'tooling'` is purely opt-in.
+
+## Archived & deleted records: queryAll (v0.9 §1)
+
+`sf_query_mode` (default `'query'`) opts a scan into Salesforce **queryAll**,
+which also returns **archived** and **soft-deleted** (`IsDeleted = true`) records:
+
+```sql
+SET sf_query_mode = 'queryAll';     -- default 'query'
+SELECT Id, Name, IsDeleted FROM sf.Account LIMIT 10;
+```
+
+- Applies to **REST** (`/queryAll` endpoint), **Bulk** (job `operation:"queryAll"`),
+  and the `COUNT()` / `MIN-MAX(Id)` probes (so COUNT pushdown, `auto`, and PK
+  chunking reflect deleted/archived too). `salesforce_query_cost().query_mode`
+  reports it.
+- Default `'query'` is unchanged (live records only).
+- It exposes a Salesforce **read** capability — **not** history, CDC, or
+  replication, and not a local snapshot. The `salesforce_query()` utility stays
+  query-only.
 
 ## Aggregate pushdown: COUNT (v0.5 §5)
 

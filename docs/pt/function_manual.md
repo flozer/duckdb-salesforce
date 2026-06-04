@@ -477,6 +477,49 @@ SET sf_relationships = 'parent';
 SELECT Id, Email FROM sf.Contact;
 ```
 
+### `sf_query_mode`
+
+#### O que faz
+
+Escolhe se um scan lê apenas os registros vivos do sObject ou se também
+inclui os registros arquivados e excluídos (soft delete) que o Salesforce
+ainda mantém.
+
+#### Como funciona
+
+- Tipo: `VARCHAR`
+- Padrão: `'query'`
+- Valores aceitos: `'query'` ou `'queryAll'`
+
+Com `'query'` (padrão), o comportamento é inalterado: o scan vê só os
+registros vivos. Com `'queryAll'`, o scan passa a ler pela capacidade
+**queryAll** do Salesforce, que também devolve os registros **arquivados**
+e os **excluídos** por soft delete (`IsDeleted = true`), além dos vivos.
+
+O modo se aplica a todo o caminho do scan: ao scan REST (endpoint
+`/queryAll`), ao scan Bulk (job com `operation: "queryAll"`) e também às
+sondagens de `COUNT()` e de `MIN(Id)` / `MAX(Id)`. Por isso, o COUNT
+pushdown, a seleção de transporte `'auto'` e as faixas de PK do Bulk
+chunking passam a refletir os registros deletados e arquivados quando
+`'queryAll'` está ativo.
+
+Não é histórico, CDC nem replicação, e não é um snapshot local: apenas
+expõe a capacidade de leitura do Salesforce naquele scan. Um valor inválido
+gera um erro claro (`sf_query_mode must be 'query' or 'queryAll'`).
+
+#### Para que serve
+
+Útil quando você precisa enxergar registros que o Salesforce removeu por
+soft delete ou arquivou — por exemplo, para auditoria ou conciliação — sem
+mudar nada no comportamento dos demais scans da sessão.
+
+#### Uso no dia a dia
+
+```sql
+SET sf_query_mode = 'queryAll';
+SELECT Id, Name, IsDeleted FROM sf.Account LIMIT 10;
+```
+
 ## Nível 3 - Diagnóstico e observabilidade
 
 Estas são funções de tabela sem argumentos que reportam sobre o **último
@@ -502,6 +545,7 @@ Lê o instantâneo do último scan da sessão atual (melhor esforço, thread
 | `object` | VARCHAR | sObject consultado |
 | `soql` | VARCHAR | SOQL enviado ao Salesforce |
 | `transport` | VARCHAR | `rest` ou `bulk` |
+| `query_mode` | VARCHAR | Modo de leitura usado (`query` / `queryAll`) |
 | `est_rows` | BIGINT | Contagem estimada de linhas usada no planejamento |
 | `transport_reason` | VARCHAR | Por que este transporte foi escolhido |
 | `projected_fields` | BIGINT | Campos requisitados no SELECT |
@@ -717,6 +761,10 @@ uma string JSON, uma por linha.
 de pushdown é aplicado. Os argumentos espelham os de `salesforce_describe`,
 exceto que o primeiro argumento posicional é a string SOQL em vez do nome do
 objeto; os mesmos argumentos nomeados de credencial se aplicam.
+
+Esta utility é sempre `query` (apenas registros vivos): ela **não** honra a
+configuração `sf_query_mode`. Para incluir registros arquivados/excluídos,
+escreva a consulta diretamente contra a capacidade `queryAll` do Salesforce.
 
 #### Para que serve
 

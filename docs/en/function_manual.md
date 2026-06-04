@@ -468,6 +468,48 @@ SET sf_relationships = 'parent';
 SELECT Id, Name FROM sf.Contact;
 ```
 
+### `sf_query_mode`
+
+#### What it does
+
+Chooses the Salesforce read capability a scan uses, and so whether archived
+and soft-deleted records are returned alongside live rows.
+
+#### How it works
+
+- Type: `VARCHAR`
+- Default: `'query'`
+- Allowed values: `'query'`, `'queryAll'`
+
+With `'query'` (the default) a scan returns only live records — unchanged
+behavior. With `'queryAll'` the scan reads via Salesforce's queryAll
+capability, which **also** returns archived and soft-deleted records
+(`IsDeleted = true`) in addition to live rows. The setting flows through
+every part of a scan: the REST transport uses the `/queryAll` endpoint, the
+Bulk transport submits a job with `operation: "queryAll"`, and the
+`COUNT()`/`MIN`-`MAX(Id)` probes use it too — so `COUNT()` pushdown, `auto`
+transport selection, and PK-chunk ranges all reflect deleted and archived
+rows as well.
+
+It is **not** history, CDC, or replication, and it is not a local snapshot:
+it only exposes the Salesforce read capability for that scan. An invalid
+value raises a clear `BinderException`
+(`sf_query_mode must be 'query' or 'queryAll'`).
+
+#### Why use it
+
+Set `'queryAll'` when you need to see records that have been archived or
+soft-deleted — for example to reconcile counts or audit deletions —
+without leaving the normal table-scan path.
+
+#### Daily use
+
+```sql
+SET sf_query_mode = 'queryAll';
+
+SELECT Id, Name, IsDeleted FROM sf.Account LIMIT 10;
+```
+
 ### `sf_bulk_chunks`
 
 #### What it does
@@ -535,6 +577,7 @@ Returns one row describing the last scan. Output columns:
 | `rows_emitted` | BIGINT | Rows returned to DuckDB |
 | `bulk` | BOOLEAN | Whether Bulk transport was used |
 | `count_pushdown` | BOOLEAN | Whether a `COUNT()` pushdown was used |
+| `query_mode` | VARCHAR | The read mode used (`query` / `queryAll`) |
 | `bulk_chunks` | BIGINT | PK chunk count applied (Bulk) |
 | `quota_remaining` | BIGINT | Remaining API requests at decision time |
 | `quota_allowed` | BOOLEAN | Whether the quota governor allowed the scan |
@@ -739,7 +782,8 @@ one per row, without attaching the org.
 This is a low-level utility: no schema mapping or pushdown planning is
 applied. Arguments mirror `salesforce_describe`, except the first
 positional argument is the SOQL string instead of an object name; the same
-credential named arguments apply.
+credential named arguments apply. It is query-only and does not honor
+`sf_query_mode` (it never reads archived or soft-deleted records).
 
 #### Why use it
 

@@ -202,6 +202,16 @@ static void LoadInternal(ExtensionLoader &loader) {
         "per object on error/absent/ambiguous type; coarser types; fields default "
         "non-filterable unless Tooling marks them filterable).",
         LogicalType::VARCHAR, Value("describe"));
+    // Read mode (#v0.9 §1): 'query' (default) or 'queryAll'. queryAll also
+    // returns archived + soft-deleted (IsDeleted=true) records, via the REST
+    // /queryAll endpoint and Bulk operation "queryAll". Applies to the scan +
+    // its COUNT()/MIN-MAX probes; the salesforce_query() utility stays query-only.
+    config.AddExtensionOption(
+        "sf_query_mode",
+        "Read mode: 'query' (default) or 'queryAll' (also returns archived + "
+        "soft-deleted records). Affects the scan (REST + Bulk) and its probes.",
+        LogicalType::VARCHAR, Value("query"));
+
     // Parent relationship expansion (#v0.6 §7). 'off' (default) leaves the
     // schema flat (no behaviour change); 'parent' exposes each single-target
     // parent relationship as a STRUCT column (e.g. Account on sf.Contact ->
@@ -219,6 +229,14 @@ static void LoadInternal(ExtensionLoader &loader) {
                               LogicalType::VARCHAR, Value("200"));
     config.AddExtensionOption("sf_mock_tooling_body",
                               "TEST ONLY. Body/pages for the mocked GET /tooling/query ('|~|').",
+                              LogicalType::VARCHAR, Value(""));
+    // Mocked GET /queryAll (#v0.9 §1) — distinct from /query so tests prove the
+    // endpoint actually changes under sf_query_mode='queryAll'.
+    config.AddExtensionOption("sf_mock_queryall_status",
+                              "TEST ONLY. Statuses for the mocked GET /queryAll.",
+                              LogicalType::VARCHAR, Value("200"));
+    config.AddExtensionOption("sf_mock_queryall_body",
+                              "TEST ONLY. Body/pages for the mocked GET /queryAll ('|~|').",
                               LogicalType::VARCHAR, Value(""));
 
     // PK chunking for Bulk extraction (#v0.7 §9, cut 1 = sequential). 1 (default)

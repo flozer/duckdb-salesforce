@@ -331,8 +331,10 @@ static string JsonEscape(const string &s) {
 string SalesforceSession::BulkStartJob(const string &soql) {
     const string base = "/services/data/" + config_.api_version + "/jobs/query";
 
-    // 1) create the query job.
-    string create_body = "{\"operation\":\"query\",\"query\":\"" + JsonEscape(soql) +
+    // 1) create the query job. operation "queryAll" (#v0.9 §1) also returns
+    // archived + soft-deleted records, mirroring the REST queryAll endpoint.
+    const char *op = query_all_ ? "queryAll" : "query";
+    string create_body = "{\"operation\":\"" + string(op) + "\",\"query\":\"" + JsonEscape(soql) +
                          "\",\"contentType\":\"CSV\",\"lineEnding\":\"LF\"}";
     SetLastBulkCreateBody(create_body); // DEBUG/TEST diagnostic; no secret in body
     HttpResponse cr = AuthorizedSend(true, base, create_body);
@@ -438,7 +440,10 @@ vector<string> SalesforceSession::GlobalDescribe() {
 }
 
 string SalesforceSession::QueryPath(const string &soql) const {
-    return "/services/data/" + config_.api_version + "/query?q=" + UrlEncodeComponent(soql);
+    // queryAll (#v0.9 §1) also returns archived + soft-deleted (IsDeleted=true)
+    // records. queryMore follows the returned nextRecordsUrl either way.
+    const char *endpoint = query_all_ ? "/queryAll?q=" : "/query?q=";
+    return "/services/data/" + config_.api_version + endpoint + UrlEncodeComponent(soql);
 }
 
 SalesforceQueryPage SalesforceSession::FetchPage(const string &path) {

@@ -62,9 +62,9 @@ For platform-specific build and install steps, see
 [docs/en/guide_windows.md](./guide_windows.md) (Windows) and
 [docs/en/guide_linux.md](./guide_linux.md) (Linux).
 
-CI-validated platforms today are `linux_amd64` and `windows_amd64`. The
-extension is not yet published to community-extensions, so there is no
-`INSTALL ... FROM community` yet.
+CI-validated platforms today are `linux_amd64` + `windows_amd64` (baseline) and
+`osx_arm64` (extra). The extension is not yet published to community-extensions,
+so there is no `INSTALL ... FROM community` yet.
 
 ## 3. Connect to Salesforce
 
@@ -260,7 +260,35 @@ SET sf_schema_source='tooling';
   per-object REST fallback. It produces coarser types and reduces pushdown,
   so prefer it only when describe is too slow for your workflow.
 
-## 11. Diagnostics
+## 11. Reading archived & deleted records (queryAll)
+
+By default a scan returns only live records. Set `sf_query_mode='queryAll'`
+to read via Salesforce's queryAll capability, which also returns archived
+and soft-deleted records (`IsDeleted = true`) alongside live rows:
+
+```sql
+SET sf_query_mode='queryAll';
+
+SELECT Id, Name, IsDeleted
+FROM sf.Account
+LIMIT 10;
+```
+
+Scope and caveats:
+
+- Allowed values are `'query'` (default) and `'queryAll'`.
+- The mode applies across the whole scan: REST uses the `/queryAll`
+  endpoint, Bulk submits a job with `operation: "queryAll"`, and the
+  `COUNT()`/`MIN`-`MAX(Id)` probes use it too — so COUNT pushdown, `auto`
+  transport selection, and PK-chunk ranges all reflect deleted and archived
+  rows.
+- Use the `IsDeleted` column to tell deleted/archived rows apart from live
+  ones.
+- This is **not** history, CDC, or replication, and **not** a local
+  snapshot — it only exposes the Salesforce read capability for that scan.
+- The `salesforce_query()` utility is query-only and ignores this setting.
+
+## 12. Diagnostics
 
 The extension ships user-facing table functions that explain what the last
 scan did. The richest is `salesforce_query_cost()`:
@@ -288,7 +316,7 @@ A typical workflow is to run your query, then inspect
 `salesforce_query_cost()` to confirm the transport, the pushed vs. residual
 filters, and the `guidance` column for tuning hints.
 
-## 12. Limitations
+## 13. Limitations
 
 Know these boundaries before you build on the extension:
 
@@ -302,6 +330,7 @@ Know these boundaries before you build on the extension:
 - **Tooling schema source produces coarser types** and reduces pushdown.
 - **Aggregate pushdown is COUNT-only.**
 - **PK chunks have no global order**, and may be uneven or empty.
-- **CI-validated platforms** are `linux_amd64` and `windows_amd64`;
-  macOS, ARM, and wasm are not validated yet.
+- **CI-validated platforms** are `linux_amd64` + `windows_amd64` (baseline) and
+  `osx_arm64` (extra); `osx_amd64`, other ARM, and wasm are not validated yet.
+  Live Salesforce TLS on macOS is unverified (use `SSL_CERT_FILE`).
 - **Not yet on community-extensions**, and the project is **pre-1.0**.

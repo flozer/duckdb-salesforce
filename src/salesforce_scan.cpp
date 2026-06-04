@@ -68,6 +68,7 @@ struct ScanGlobalState : public GlobalTableFunctionState {
     // PER-THREAD local state (#v0.7 §9b parallel); the global state only holds
     // the chunk work-list, hands out chunk indices, and aggregates diagnostics.
     bool bulk = false;
+    bool query_all = false;                   // #v0.9 §1: queryAll mode (per-thread sessions read this)
     vector<string> bulk_chunk_soqls;          // full SOQL per chunk (built in InitGlobal)
     std::atomic<idx_t> next_chunk{0};         // dispenser: next chunk index to claim
     std::atomic<idx_t> total_bulk_pages{0};   // aggregate result pages (all threads)
@@ -254,9 +255,23 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
                               transport);
     }
 
+    // Read mode (#v0.9 §1): 'query' (default) or 'queryAll' (incl. archived +
+    // soft-deleted). Applied to REST, Bulk, and the COUNT()/MIN-MAX probes.
+    string query_mode = "query";
+    Value qmv;
+    if (context.TryGetCurrentSetting("sf_query_mode", qmv) && !qmv.IsNull()) {
+        query_mode = StringUtil::Lower(qmv.ToString());
+    }
+    if (query_mode != "query" && query_mode != "queryall") {
+        throw BinderException("sf_query_mode must be 'query' or 'queryAll' (got '%s').",
+                              query_mode);
+    }
+    gstate->query_all = (query_mode == "queryall");
+
     gstate->client = BuildHttpClientForContext(context);
     gstate->session = make_uniq<SalesforceSession>(bind.config, *gstate->client);
     gstate->session->SetToken(bind.token); // reuse ATTACH token (refreshes on 401)
+    gstate->session->SetQueryAll(gstate->query_all); // probes honour the mode too
     SetLastScanPages(0);
 
     // Resolve 'auto' -> 'rest'|'bulk' ONCE here (no mid-stream escalation: that
@@ -340,7 +355,8 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
                    static_cast<int64_t>(select_fields.size()),
                    static_cast<int64_t>(bind.fields.size()), bind.pushed_filter_count,
                    bind.residual_filter_count, bind.pushed_where, effective == "bulk",
-                   reported_pages, gstate->count_only);
+                   reported_pages, gstate->count_only,
+                   gstate->query_all ? "queryAll" : "query");
 
     if (gstate->count_only) {
         return std::move(gstate); // no records to fetch; ScanFunction emits the count
@@ -530,6 +546,7 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
             lstate.client = BuildHttpClientForContext(context);
             lstate.session = make_uniq<SalesforceSession>(bind.config, *lstate.client);
             lstate.session->SetToken(bind.token);
+            lstate.session->SetQueryAll(gstate.query_all); // #v0.9 §1
         }
         if (lstate.cursor >= lstate.page.size()) {
             // Need a fresh page: advance the current chunk, or claim the next.

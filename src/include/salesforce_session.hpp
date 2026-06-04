@@ -61,6 +61,14 @@ public:
     void SetToken(SalesforceTokenSet token) {
         token_ = std::move(token);
     }
+
+    // queryAll mode (#v0.9 §1): when true, REST uses the /queryAll endpoint and
+    // Bulk jobs use operation "queryAll" — both also return archived + soft-
+    // deleted (IsDeleted=true) records. Applies to the data query AND the
+    // COUNT()/MIN-MAX probes built on QueryPath, so counts/ranges match.
+    void SetQueryAll(bool query_all) {
+        query_all_ = query_all;
+    }
     const SalesforceTokenSet &Token() const {
         return token_;
     }
@@ -135,6 +143,7 @@ private:
     SalesforceConfig config_;
     SalesforceHttpClient &client_;
     SalesforceTokenSet token_;
+    bool query_all_ = false; // #v0.9 §1: /query vs /queryAll + Bulk operation
 };
 
 } // namespace duckdb

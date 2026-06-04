@@ -64,9 +64,9 @@ Para os passos de build e instalação por plataforma, veja
 [docs/en/guide_windows.md](../en/guide_windows.md) (Windows) e
 [docs/en/guide_linux.md](../en/guide_linux.md) (Linux).
 
-As plataformas validadas no CI hoje são `linux_amd64` e `windows_amd64`. A
-extensão ainda não foi publicada no catálogo community, então ainda não
-existe um `INSTALL ... FROM community`.
+As plataformas validadas no CI hoje são `linux_amd64` + `windows_amd64`
+(baseline) e `osx_arm64` (extra). A extensão ainda não foi publicada no catálogo
+community, então ainda não existe um `INSTALL ... FROM community`.
 
 ## 3. Conectar ao Salesforce
 
@@ -295,7 +295,36 @@ Um fluxo típico é executar sua consulta e então inspecionar
 `salesforce_query_cost()` para confirmar o transporte, os filtros com
 pushdown vs. residuais e a coluna `guidance` para dicas de ajuste.
 
-## 12. Limitações
+## 12. Lendo registros arquivados e excluídos (queryAll)
+
+Por padrão, um scan vê apenas os registros vivos. Para também incluir os
+registros **arquivados** e os **excluídos** por soft delete que o Salesforce
+ainda mantém, mude o modo de leitura da sessão com `sf_query_mode`:
+
+```sql
+SET sf_query_mode='queryAll';
+
+SELECT Id, Name, IsDeleted
+FROM sf.Account
+LIMIT 10;
+```
+
+- O padrão é `'query'` (só registros vivos); `'queryAll'` lê pela capacidade
+  `queryAll` do Salesforce, que devolve também arquivados e deletados.
+- Os deletados aparecem com `IsDeleted = true`, então você pode filtrar ou
+  separar esses registros com SQL normal.
+- O modo se aplica ao scan REST (endpoint `/queryAll`), ao scan Bulk (job com
+  `operation: "queryAll"`) e às sondagens de `COUNT()` e de `MIN(Id)` /
+  `MAX(Id)`. Por isso, o COUNT pushdown, o transporte `auto` e as faixas de
+  PK do Bulk chunking passam a refletir também os deletados e arquivados.
+- Um valor inválido gera um erro claro
+  (`sf_query_mode must be 'query' or 'queryAll'`).
+
+Caveat: isto **não** é histórico, CDC nem replicação, e não é um snapshot
+local — apenas expõe a capacidade de leitura do Salesforce naquele scan. A
+utility `salesforce_query()` é sempre `query` e ignora `sf_query_mode`.
+
+## 13. Limitações
 
 Conheça estes limites antes de construir sobre a extensão:
 
@@ -312,6 +341,7 @@ Conheça estes limites antes de construir sobre a extensão:
   pushdown.
 - **O pushdown de agregação é apenas para COUNT.**
 - **Os PK chunks não têm ordem global** e podem ser desiguais ou vazios.
-- **As plataformas validadas no CI** são `linux_amd64` e `windows_amd64`;
-  macOS, ARM e wasm ainda não foram validados.
+- **As plataformas validadas no CI** são `linux_amd64` + `windows_amd64`
+  (baseline) e `osx_arm64` (extra); `osx_amd64`, outros ARM e wasm ainda não
+  foram validados. TLS ao vivo no macOS não é verificado (use `SSL_CERT_FILE`).
 - **Ainda não está no catálogo community**, e o projeto é **pré-1.0**.

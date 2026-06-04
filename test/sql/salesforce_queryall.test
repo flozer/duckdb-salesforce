@@ -1,0 +1,105 @@
+# name: test/sql/salesforce_queryall.test
+# description: v0.9 §1 — sf_query_mode = 'query' | 'queryAll' (archived + deleted)
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+
+# /query returns only live rows; /queryAll returns a soft-deleted/archived row.
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"RestRow"}]}';
+
+statement ok
+SET sf_mock_queryall_body = '{"done":true,"records":[{"Id":"d1","Name":"DeletedRow"}]}';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Name
+b1,BulkRow';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- default ('query'): hits /query, not /queryAll -------------------------
+query I
+SELECT Name FROM sf.Account;
+----
+RestRow
+
+query I
+SELECT query_mode = 'query' FROM salesforce_query_cost();
+----
+true
+
+# --- queryAll (REST): hits the /queryAll endpoint --------------------------
+statement ok
+SET sf_query_mode = 'queryAll';
+
+query I
+SELECT Name FROM sf.Account;
+----
+DeletedRow
+
+query I
+SELECT query_mode = 'queryAll' FROM salesforce_query_cost();
+----
+true
+
+# --- queryAll (Bulk): job create body uses operation "queryAll" -------------
+statement ok
+SET sf_force_transport = 'bulk';
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query I
+SELECT contains(body, '"operation":"queryAll"') FROM salesforce_last_bulk_create_body();
+----
+true
+
+query I
+SELECT query_mode = 'queryAll' AND bulk = true FROM salesforce_query_cost();
+----
+true
+
+# back to query mode: Bulk create body uses operation "query"
+statement ok
+SET sf_query_mode = 'query';
+
+query I
+SELECT Name FROM sf.Account;
+----
+BulkRow
+
+query I
+SELECT contains(body, '"operation":"query"') AND NOT contains(body, 'queryAll')
+FROM salesforce_last_bulk_create_body();
+----
+true
+
+statement ok
+SET sf_force_transport = 'rest';
+
+# --- invalid mode -> clear error -------------------------------------------
+statement ok
+SET sf_query_mode = 'nope';
+
+statement error
+SELECT Id FROM sf.Account;
+----
+sf_query_mode must be 'query' or 'queryAll'
+
+statement ok
+SET sf_query_mode = 'query';
+
+statement ok
+DETACH sf;
