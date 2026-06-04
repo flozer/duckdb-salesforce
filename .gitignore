@@ -8,6 +8,11 @@
 *.env
 secrets.*
 credentials.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
 
 # Python
 __pycache__/
@@ -19,13 +24,40 @@ venv/
 # Data dumps
 *.csv
 *.parquet
+*.json
 *.json.gz
+*.ndjson
+*.xlsx
+*.zip
+*.tar.gz
 
 # Build output
 build/
 cmake-build-*/
+out/
+dist/
+packages/
+vcpkg_installed/
 *.duckdb_extension
 duckdb_unittest_tempdir/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+Testing/
+
+# Logs / temporary files
+*.log
+*.tmp
+*.bak
+*.orig
+*.swp
+*.swo
+
+# Agent memory: keep the strategic guide, ignore scratch notes
+.ai-memory/*
+!.ai-memory/
+!.ai-memory/ACTION_GUIDE.md
+.claude/
 
 # OS / editor
 .DS_Store

@@ -1,339 +1,278 @@
 # duckdb-salesforce Roadmap
 
-Status: planned roadmap. Updated after `v0.6.0`.
+Status: post-`v0.8.1` roadmap. This file records the strategic direction after
+the connector reached feature maturity, cross-platform CI, public documentation,
+and a community-submission-ready package.
 
-`v0.6.0` is the current validated release: read-only REST and Bulk, OAuth/TLS,
-schema describe, Tooling schema discovery, lazy REST scans, Bulk query jobs,
-quota governance for Bulk starts, query cost diagnostics, COUNT pushdown,
-in-memory metadata cache, global object listing, parent relationship traversal,
-projection pushdown, residual-safe predicate pushdown, and DuckDB release build
-matrix.
-
-This roadmap schedules the remaining capabilities needed before broad
-distribution. `duckdb/community-extensions` remains blocked by the C.5 human
-publication gate in `docs/ARCHITECTURE.md`.
+The core mission is to provide the best bridge between Salesforce and DuckDB for
+analytics. The extension should expose Salesforce data safely, efficiently, and
+transparently. DuckDB should continue to own materialization, joins,
+transformations, Parquet export, and analytical workflows.
 
 ## Guiding Principles
 
-- Keep correctness first: if pushdown semantics are uncertain, keep DuckDB
-  residual filtering.
-- Keep API usage visible: large scans must expose quota and performance cost.
-- Keep live Salesforce tests manual-only with maintainer-controlled credentials.
-- Keep CI offline and secret-free.
-- Build per DuckDB release; extension binaries are version-locked to the DuckDB
-  release used to build them.
+- Keep the connector focused on Salesforce data access for DuckDB.
+- Do not turn the extension into an ETL, CDC, replication, orchestration, or
+  governance product.
+- Strengthen the core before adding broad new features: correctness,
+  compatibility, observability, and predictable performance come first.
+- Push work to Salesforce only when semantics are safe and measurable.
+- Leave DuckDB-native strengths to DuckDB: `CREATE TABLE AS`, `COPY`, views,
+  joins, aggregation fallback, Parquet, and local persistence.
+- Keep live Salesforce tests maintainer-controlled. CI remains offline,
+  mock-only, and secret-free.
+- Keep `duckdb/community-extensions` blocked until the explicit C.5 human gate
+  is granted.
 
-## v0.3: Large Extraction Path
+## Delivered Baseline
 
-Goal: make large materializations and exports practical.
+The connector already provides:
 
-### 1. Bulk API 2.0 Query Path
+- OAuth refresh-token authentication over HTTPS.
+- REST `/query` and `queryMore` scans.
+- Bulk API 2.0 scans with auto/forced transport selection.
+- Lazy REST and Bulk result streaming.
+- Bulk PK chunking with parallel execution.
+- Quota governor for Bulk starts.
+- Query-cost diagnostics.
+- Global object listing and metadata cache.
+- REST Describe and Tooling API schema discovery.
+- Parent relationship traversal, opt-in.
+- Projection and predicate pushdown, including `IN`, `LIKE`, and `OR` with
+  residual-safe behavior.
+- `COUNT(*)` pushdown for safe zero-column scans.
+- Cross-platform CI on `linux_amd64`, `windows_amd64`, and `osx_arm64` for
+  DuckDB `v1.5.2` and `v1.5.3`.
+- Public bilingual documentation, contribution docs, MIT license, third-party
+  notices, and community descriptor draft.
 
-Use Bulk API 2.0 for large scans/materialization:
+## v0.9: Salesforce API Coverage
 
-```sql
-CREATE TABLE account_snapshot AS
-SELECT * FROM sf.Account;
+Goal: cover important Salesforce read surfaces that improve the bridge without
+creating a replication product.
 
-COPY (
-  SELECT * FROM sf.Account
-  WHERE LastModifiedDate >= TIMESTAMP '2025-01-01'
-) TO 'account_snapshot.parquet';
-```
+### 1. `queryAll` / Archived And Deleted Records
 
-Scope:
-
-- Create Bulk query jobs.
-- Poll job status with bounded backoff.
-- Stream/download CSV result chunks.
-- Decode into DuckDB vectors using existing schema/type mapping.
-- Keep REST path for small/interative queries.
-- Keep all secrets masked.
-
-Acceptance:
-
-- Mocked Bulk job lifecycle test: create -> poll -> result pages -> close.
-- Large mock scan uses Bulk path when selected.
-- REST path still used for small scans.
-- Bulk errors surface clearly without token/secret leaks.
-- Manual live smoke demonstrates one large read on maintainer-authorized org.
-
-### 2. Transport Selection
-
-Choose REST or Bulk by cost/shape.
+Add an opt-in read mode that uses Salesforce `queryAll` where supported.
 
 Scope:
 
-- Add configurable threshold knobs.
-- Prefer REST for small/selective/interactive queries.
-- Prefer Bulk for large full scans and materializations.
-- Document that threshold is heuristic and org-dependent.
+- Add a setting such as `sf_query_mode = 'query' | 'queryAll'`.
+- Use `queryAll` only when explicitly requested.
+- Document that this exposes archived/deleted records according to Salesforce
+  API semantics.
+- Keep default behavior unchanged.
+- Keep diagnostics clear: query mode should appear in `salesforce_query_cost()`
+  or an equivalent last-scan diagnostic.
+
+Out of scope:
+
+- Change-data-capture.
+- Replication history.
+- Managed tombstone storage.
+- Incremental snapshot orchestration.
 
 Acceptance:
 
-- Tests prove REST selected below threshold.
-- Tests prove Bulk selected above threshold.
-- User can force REST/Bulk for diagnosis.
-- Selection reason is visible in debug diagnostics.
+- Mock tests prove `queryAll` URL/path selection.
+- Default `query` behavior remains unchanged.
+- Deleted/archived behavior is documented as Salesforce-controlled.
+- No secrets or live tests in CI.
 
-## v0.4: Quota And Operational Safety
+### 2. Bulk CSV Edge-Case Hardening
 
-Goal: prevent accidental API exhaustion and make behavior predictable.
-
-### 3. Quota Governor
+Strengthen the existing Bulk CSV bridge.
 
 Scope:
 
-- Query Salesforce `/limits`.
-- Track approximate calls made by the current ATTACH/session.
-- Add reserve percentage setting.
-- Fail early when an operation would likely consume unsafe quota.
-- Distinguish `429` transient throttling from hard daily quota failures.
+- Add focused tests for multiline strings, escaped quotes, commas, CRLF/LF,
+  empty values, null handling, base64, decimals, dates, times, timestamps, and
+  timezone offsets.
+- Compare REST JSON and Bulk CSV decoding for representative values.
+- Improve error messages for malformed CSV or unsupported typed conversion.
+
+Out of scope:
+
+- New Bulk write/ingest APIs.
+- CSV export tooling.
+- ETL-level data quality rules.
 
 Acceptance:
 
-- Mocked `/limits` low-quota case blocks large scan with clear error.
-- `429` backoff remains retryable.
-- `REQUEST_LIMIT_EXCEEDED` fails without retry loop.
-- Docs explain quota reserve and override behavior.
+- Existing REST/Bulk tests stay green.
+- Edge cases have explicit regression coverage.
+- Errors remain field-named and secret-free.
 
-### 4. Query Cost Diagnostics
+## v1.0: Analytical Pushdown
+
+Goal: reduce over-fetch for common analytical queries while preserving DuckDB
+fallback correctness.
+
+### 3. `COUNT(field)` Pushdown — DEFERRED
+
+> **Status: DEFERRED (PM decision).** `COUNT(*)` already covers the main pain.
+> `COUNT(field)` cannot reuse the `COUNT(*)` zero-column trick (the scan can't
+> distinguish `COUNT(field)` from `SELECT field`), so it would require a DuckDB
+> **OptimizerExtension** (plan rewrite + rebinding) — new machinery for a
+> marginal win over the already-correct normal-scan count. Per ACTION_GUIDE
+> (strengthen simple core > add complexity), deferred until there is real pain.
+> `COUNT(field)` remains correct today via the normal scan + DuckDB aggregation.
+
+Add safe non-null count pushdown where SOQL semantics match DuckDB expectations.
 
 Scope:
 
-- Document Salesforce selectivity guidance.
-- Add diagnostics for generated SOQL, pushed filters, residual filters, pages
-  fetched, and selected transport.
-- Evaluate Query Plan support only if there is a stable API path.
+- Evaluate `COUNT(field)` for scalar fields.
+- Avoid pushdown when null or type semantics are uncertain.
+- Keep residual fallback for unsupported expressions.
 
 Acceptance:
 
-- User can inspect last SOQL, pushed/residual filter summary, pages fetched, and
-  transport selected.
-- Docs explain indexed/selective filters and custom-index implications.
+- Generated SOQL is asserted.
+- Result correctness is asserted against fallback behavior.
+- Unsupported shapes remain correct through DuckDB.
 
-## v0.5: Analytical Pushdown
+### 4. Simple Aggregate Pushdown
 
-Goal: reduce over-fetch for common analytical queries.
-
-### 5. Aggregate Pushdown
+Evaluate `MIN`, `MAX`, `SUM`, and `AVG` for simple single-object scans.
 
 Scope:
 
-- Push `COUNT(*)` / `COUNT(field)` where semantics are safe.
-- Evaluate `MIN`, `MAX`, `SUM`, `AVG`.
-- Evaluate `GROUP BY` for simple single-object queries.
-- Keep fallback to DuckDB for unsupported shapes.
+- Only scalar fields with safe type mappings.
+- No relationship aggregate pushdown in the first cut.
+- No partial or approximate results.
 
 Acceptance:
 
-- `SELECT COUNT(*) FROM sf.Account` generates aggregate SOQL and does not scan
-  all records.
-- Unsupported aggregate shapes remain correct via DuckDB fallback.
-- Tests assert generated SOQL and result correctness.
+- Pushdown only occurs for safe fields and aggregate shapes.
+- Unsupported expressions remain local in DuckDB.
+- Diagnostics show pushed aggregate versus fallback.
 
-## v0.6: Schema Depth And Relationships
+### 5. Simple `GROUP BY`
 
-Goal: improve metadata richness and relationship ergonomics.
-
-### 6. Tooling API Fast Schema Discovery
+Evaluate SOQL aggregate queries for simple grouping.
 
 Scope:
 
-- Revisit only if real usage shows REST Describe/global describe pain.
-- Use Tooling API for richer/faster schema discovery where it helps.
-- Keep REST Describe as fallback.
-- Reuse in-memory metadata cache.
+- Single object.
+- Group by scalar fields.
+- No rollups/cubes in the first cut.
+- Preserve DuckDB fallback for unsupported cases.
 
 Acceptance:
 
-- Tooling path improves a measured schema-discovery case.
-- REST fallback remains green.
-- No eager all-field describe unless explicitly requested.
+- Correct result shape and names.
+- Clear limitations in docs.
+- No silent semantic drift.
 
-### 7. Relationship Support
+## v1.1: Relationship Depth
+
+Goal: expose more of Salesforce's natural object graph without turning the
+connector into a join engine.
+
+### 6. Grandparent Traversal
+
+Extend opt-in parent traversal from one level to safe multi-level SOQL paths,
+for example `Contact.Account.Owner.Name`.
 
 Scope:
 
-- Parent field traversal where SOQL supports it.
-- Keep DuckDB local joins as the default recommended path.
-- Avoid child relationship fan-out until semantics and cardinality are clear.
+- Depth limit aligned with Salesforce SOQL rules.
+- Opt-in only.
+- Skip polymorphic or ambiguous relationships.
+- Keep child relationships out of scope.
 
 Acceptance:
 
-- Simple parent traversal query works or is documented as unsupported.
-- Local join workflow remains documented and tested.
-- Unsupported relationship predicates fall back or fail clearly.
+- Default schema remains unchanged.
+- Multi-level parent fields decode correctly.
+- Unsupported paths fail clearly or remain unavailable.
 
-## v0.7: Bulk Streaming And Chunking
+### 7. Relationship Diagnostics
 
-Goal: make large Bulk extraction memory-bounded and optionally parallel.
-
-### 8. Lazy Bulk Result Streaming
+Make relationship expansion observable.
 
 Scope:
 
-- Stream Bulk `Sforce-Locator` result pages during scan instead of eagerly
-  fetching all CSV rows in `InitGlobal`.
-- Keep typed CSV decoding and existing Bulk job lifecycle.
-- Preserve quota governor behavior before job start.
-- Keep `LIMIT` caveat honest: Bulk still does not receive server-side LIMIT.
+- Show which relationships were expanded.
+- Explain skipped polymorphic/unavailable relationships.
+- Document over-fetch and residual predicate behavior.
 
 Acceptance:
 
-- Large mock Bulk result does not materialize all pages before first output.
-- `salesforce_query_cost()` reports Bulk rows/pages consistently.
-- Existing forced/auto Bulk tests remain green.
-- Manual smoke shows lower memory pressure or equivalent behavior.
+- Diagnostics help users understand relationship behavior.
+- No behavior change for default scans.
 
-### 9. PK Chunking / Parallel Bulk Extraction
+## v1.2: Operator Experience And Auth
 
-Scope:
+Goal: make the bridge easier to operate without taking over orchestration.
 
-- Split large object reads into key/range chunks where Salesforce supports it.
-- Run chunks with bounded parallelism.
-- Preserve ordering caveats and residual correctness.
-- Keep single-thread path available as fallback.
+### 8. Auth UX Improvements
 
-Acceptance:
+Evaluate additional ways to provide credentials safely.
 
-- Chunked extraction returns the same rows as unchunked extraction in mocks.
-- Parallelism is configurable and bounded.
-- Failures in one chunk surface clearly.
-- Docs explain when PK chunking applies and when it does not.
+Options:
 
-## v0.8: Materialization And Snapshot Correctness
+- SFDX auth URL input for local developers.
+- JWT Bearer flow for headless environments.
+- Clearer credential validation and error messages.
 
-Goal: make repeatable local snapshots practical.
+Out of scope:
 
-### 10. Incremental Materialization / Vault Mode
-
-Scope:
-
-- Add documented workflows for materializing Salesforce objects into local DuckDB
-  tables or Parquet.
-- Support incremental refresh keyed by `SystemModstamp` with a configurable
-  lookback window.
-- Store checkpoint metadata locally only when the user explicitly chooses a
-  materialization workflow.
+- Secret persistence managed by the extension.
+- Browser-based OAuth flows inside DuckDB.
+- CI live Salesforce authentication.
 
 Acceptance:
 
-- Initial materialization works for a selected object.
-- Incremental refresh re-reads the lookback window and avoids missed edge rows.
-- Checkpoint state is inspectable and resettable.
-- Docs explain snapshot boundaries and operational safety.
+- Secrets are never logged.
+- Existing refresh-token flow remains supported.
+- Docs explain trade-offs.
 
-### 11. `queryAll` / Deleted Record Coverage
+### 9. macOS Live TLS Validation Or Trust Store Support
 
-Scope:
+The macOS CI proves build and offline tests. Live Salesforce TLS on macOS remains
+documented but not validated.
 
-- Add an opt-in path for deleted/archived records where Salesforce supports it.
-- Keep default query path unchanged.
-- Integrate with materialization workflows.
+Options:
 
-Acceptance:
-
-- `queryAll` smoke covers records that `/query` omits.
-- Default scans remain unchanged.
-- Docs explain deleted/archived semantics.
-
-### 12. Bulk CSV Edge-Case Hardening
-
-Scope:
-
-- Add regression tests for known Bulk CSV datetime/epoch edge cases from the
-  research log.
-- Keep JSON and CSV cast paths aligned.
+- Add a macOS trust-store path.
+- Validate the existing OpenSSL path with a maintainer-run macOS smoke.
+- Keep `SSL_CERT_FILE` as the documented workaround if no code change is needed.
 
 Acceptance:
 
-- Datetime CSV variants decode correctly or fail with clear field-level errors.
-- Existing REST and Bulk decoding tests remain green.
+- The chosen path is documented.
+- CI remains mock-only.
+- No secrets are introduced.
 
-## v0.9: Resumability And Operator UX
+## Documentation-Only: Materialization With DuckDB
 
-Goal: handle quota/rate pressure without losing progress.
+Materialization is a DuckDB workflow, not a connector feature.
 
-### 13. Rate-Limit Early-Exit And Resume
+The project should document patterns such as:
 
-Scope:
+- `CREATE TABLE local_account AS SELECT ... FROM sf.Account`.
+- `COPY (SELECT ... FROM sf.Account) TO 'account.parquet'`.
+- Incremental refresh examples using `SystemModstamp`.
+- User-managed checkpoint tables in DuckDB.
+- dbt/Airflow/Dagster examples as external orchestration patterns.
 
-- Convert quota pressure during materialization into a graceful checkpointed
-  stop when possible.
-- Resume from the checkpoint in the next run.
-- Keep ad-hoc interactive scans simple.
-
-Acceptance:
-
-- Mock low-quota run exits with checkpoint rather than partial silent failure.
-- Resume continues from the recorded state.
-- Diagnostics explain why the run stopped.
-
-### 14. Auth UX Improvements
-
-Scope:
-
-- Evaluate SFDX auth URL input for faster local setup.
-- Evaluate JWT Bearer for headless/CI-style environments.
-- Keep refresh-token flow as the default documented path.
-
-Acceptance:
-
-- New auth mode is opt-in and secret-safe.
-- Existing auth tests remain green.
-- Docs describe when each auth mode is appropriate.
-
-## v1.0: Distribution Hardening
-
-Goal: prepare for wider distribution while preserving C.5.
-
-### 15. CI Matrix: Linux + Windows (+ macOS arm64)
-
-Scope:
-
-- Add GitHub Actions only after local matrix remains stable.
-- Build/test against supported DuckDB releases.
-- Keep live Salesforce tests skipped in CI.
-
-Platform policy (delivered):
-
-- **Required baseline**: `linux_amd64` + `windows_amd64` (matches the
-  duckdb-firebird platform parity).
-- **Extra coverage**: `osx_arm64`.
-- **Excluded for now**: `osx_amd64`, `linux_arm64`/musl, `wasm`, `mingw`.
-
-Acceptance:
-
-- Linux, Windows, and macOS (arm64) builds pass the offline (mock) tests on
-  DuckDB v1.5.2 + v1.5.3.
-- CI never requires Salesforce secrets.
-- Failures by DuckDB release are visible and version-scoped.
-
-### 16. Package And Release Review
-
-Scope:
-
-- Review license/dependency packaging.
-- Validate `vcpkg`, OpenSSL, and `httplib` packaging.
-- Produce release artifacts for supported DuckDB versions.
-- Review docs for install, auth, smoke, limitations, and security.
-
-Acceptance:
-
-- Local package install works.
-- Release artifact matches DuckDB version.
-- Docs are sufficient for a new user to connect to a maintainer-authorized org.
+The connector may improve the bridge that makes these workflows possible. It
+should not own persistent checkpoints, scheduling, replication state, or
+orchestration.
 
 ## Community Publication Gate
 
-No branch, tag, release, pull request, or artifact may be pushed to
+No agent may create a branch, PR, push, fork change, or other action against
 `duckdb/community-extensions` without explicit human approval.
 
 Before any community action:
 
-- Latest tagged release is smoke-tested manually.
-- Windows/Linux build matrix is green.
+- Latest tagged release points to the intended submission ref.
+- CI matrix is green.
 - Package/release review is complete.
 - Security docs are reviewed.
-- Human maintainer gives explicit go/no-go.
+- License and notices are present.
+- Documentation is public-ready.
+- Human maintainer gives explicit C.5 go.
