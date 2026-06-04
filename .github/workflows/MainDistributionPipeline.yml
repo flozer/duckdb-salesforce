@@ -1,5 +1,9 @@
 # CI — build + offline test matrix (#v0.8 distribution hardening).
 #
+# Operational policy: this workflow is manual-only during normal development to
+# avoid spending CI minutes on every push. Run it before release/tag/community
+# submission prep, or when a platform/build risk needs validation.
+#
 # MOCK-ONLY by construction: the SQL suite under test/sql/*.test uses the
 # sf_mock_* hooks; it NEVER contacts Salesforce and needs NO secrets. The
 # *_live.test files are `require`-gated and skip when no live org is configured.
@@ -19,9 +23,6 @@
 name: Main Distribution Pipeline
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 concurrency:
