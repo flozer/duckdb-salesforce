@@ -1,0 +1,94 @@
+# name: test/sql/salesforce_bulk_csv.test
+# description: v0.9 §2 — Bulk CSV edge-case hardening + REST/Bulk type parity
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# One field per major type family.
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"Amount","type":"currency","precision":18,"scale":2},{"name":"Cnt","type":"int"},{"name":"Score","type":"double"},{"name":"Whn","type":"datetime"},{"name":"Dy","type":"date"},{"name":"Clk","type":"time"},{"name":"Flag","type":"boolean"},{"name":"Blb","type":"base64"}]}';
+
+statement ok
+SET sf_force_transport = 'bulk';
+
+# Row 001: Name has an embedded comma, escaped quotes ("") and a newline inside
+# the quoted field; typed cells across families. Row 002: every value empty.
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Name,Amount,Cnt,Score,Whn,Dy,Clk,Flag,Blb
+001,"Acme, ""Inc""
+HQ",1234.56,42,3.14,2024-01-15T10:20:30.000+0000,2024-01-15,10:20:30.000Z,true,aGVsbG8=
+002,,,,,,,,,';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- typed decode of the curated row (selected via residual LIKE) -----------
+query I
+SELECT Amount = 1234.56 AND Cnt = 42 AND Score = 3.14
+   AND Whn = TIMESTAMP '2024-01-15 10:20:30'
+   AND Dy = DATE '2024-01-15'
+   AND Clk = TIME '10:20:30'
+   AND Flag = true
+   AND Blb = 'hello'::BLOB
+FROM sf.Account WHERE Name LIKE 'Acme%';
+----
+true
+
+# CSV escaping: comma + escaped quotes + embedded newline all survive.
+query I
+SELECT contains(Name, ',') AND contains(Name, '"') AND contains(Name, chr(10))
+   AND starts_with(Name, 'Acme') AND ends_with(Name, 'HQ')
+FROM sf.Account WHERE Name LIKE 'Acme%';
+----
+true
+
+# --- empty cells -> NULL across every type ----------------------------------
+query I
+SELECT Name IS NULL AND Amount IS NULL AND Cnt IS NULL AND Score IS NULL
+   AND Whn IS NULL AND Dy IS NULL AND Clk IS NULL AND Flag IS NULL AND Blb IS NULL
+FROM sf.Account WHERE Id LIKE '%2';
+----
+true
+
+# --- REST JSON vs Bulk CSV parity: same row -> same typed values ------------
+statement ok
+SET sf_force_transport = 'rest';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"001","Amount":1234.56,"Cnt":42,"Score":3.14,"Whn":"2024-01-15T10:20:30.000+0000","Dy":"2024-01-15","Clk":"10:20:30.000Z","Flag":true,"Blb":"aGVsbG8="}]}';
+
+query I
+SELECT Amount = 1234.56 AND Cnt = 42 AND Score = 3.14
+   AND Whn = TIMESTAMP '2024-01-15 10:20:30'
+   AND Dy = DATE '2024-01-15'
+   AND Clk = TIME '10:20:30'
+   AND Flag = true
+   AND Blb = 'hello'::BLOB
+FROM sf.Account;
+----
+true
+
+# --- clear error on invalid typed conversion (Bulk CSV) ---------------------
+statement ok
+SET sf_force_transport = 'bulk';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Amount
+001,not_a_number';
+
+statement error
+SELECT Amount FROM sf.Account;
+----
+could not be decoded
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_force_transport = 'rest';
