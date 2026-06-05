@@ -3,36 +3,34 @@
 > **This is a plan, not an action.** Nothing here has been done. No fork, no
 > branch, no PR, no comment in `duckdb/community-extensions`. Execute only after
 > an explicit maintainer **C.5 GO**, and only after a final human confirm of the
-> exact PR contents. Submission ref: **`v0.9.1`**.
+> exact PR contents. Submission ref: **`v0.9.2`**.
 
 ## Preconditions
 
-- [x] `v0.9.1` tagged on `flozer`, tree self-consistent (descriptor `repo.ref`
-      `v0.9.1`, `vcpkg.json` version-string `0.9.1`).
+- [x] `v0.9.2` tagged on `flozer`, tree self-consistent (descriptor `repo.ref`
+      `v0.9.2`, `vcpkg.json` version-string `0.9.2`). v0.9.2 is an operational
+      distribution release — functionally identical to `v0.9.1` (no connector
+      code change); it only adds the release-assets workflow + packaging.
 - [x] Offline suite green at the ref (34 files / 921 assertions).
-- [x] Remote CI green at `v0.9.1` — run **27026331956**, all 6 platform×version
-      jobs (`linux_amd64`, `windows_amd64`, `osx_arm64` × DuckDB `v1.5.2`,
-      `v1.5.3`), mock-only, no `SF_LIVE_*`.
-- [x] Light live smoke validated (see `docs/RELEASE_NOTES_v0.9.1.md`).
-- [x] Release-asset workflow validated on `main`: run **27031409510** produced
-      Linux x64 and Windows x64 workflow artifacts without publishing a GitHub
-      Release.
+- [x] Remote CI green on the (functionally identical) tree — run **27026331956**
+      at `v0.9.1`, all 6 platform×version jobs (`linux_amd64`, `windows_amd64`,
+      `osx_arm64` × DuckDB `v1.5.2`, `v1.5.3`), mock-only, no `SF_LIVE_*`. Re-run
+      the manual CI at `v0.9.2` before PR if a same-ref green is required.
+- [x] Light live smoke validated at `v0.9.1` (see `docs/RELEASE_NOTES_v0.9.1.md`);
+      applies unchanged to `v0.9.2`.
+- [x] Release assets published for `v0.9.2` via `release-assets.yml` (Linux x64
+      tar.gz + Windows x64 zip) — see `docs/RELEASE_NOTES_v0.9.2.md`.
 - [ ] **Repository visibility:** `flozer/duckdb-salesforce` must be public before
       community submission. Firebird failed community CI once because the source
       repo was private and `repo.ref` could not be cloned.
 - [ ] **Public clone/tag preflight:** after making the repo public, verify:
 
       ```sh
-      git -c credential.helper= ls-remote --tags https://github.com/flozer/duckdb-salesforce.git v0.9.1
-      git clone --depth=1 --branch v0.9.1 https://github.com/flozer/duckdb-salesforce.git
+      git -c credential.helper= ls-remote --tags https://github.com/flozer/duckdb-salesforce.git v0.9.2
+      git clone --depth=1 --branch v0.9.2 https://github.com/flozer/duckdb-salesforce.git
       ```
 
 - [ ] **Maintainer C.5 GO**.
-
-Release-assets note: `v0.9.1` predates `.github/workflows/release-assets.yml`.
-If binary GitHub Release assets are required before/alongside community
-submission, cut a later tag from current `main` so the tag tree contains the
-release workflow and packaging scripts.
 
 ## What gets copied
 
@@ -41,7 +39,7 @@ Exactly one file, unchanged, into a fork of `duckdb/community-extensions`:
 - `docs/community/description.yml`  →  `extensions/salesforce/description.yml`
 
 No source, no tests, no other docs are copied. The community CI checks out
-`flozer/duckdb-salesforce` at `repo.ref: v0.9.1` and builds + signs from there.
+`flozer/duckdb-salesforce` at `repo.ref: v0.9.2` and builds + signs from there.
 
 ## Steps to execute (ONLY on GO — listed, not run)
 
@@ -52,7 +50,7 @@ No source, no tests, no other docs are copied. The community CI checks out
    maintainer's GitHub account.
 5. Branch, e.g. `add-salesforce`.
 6. Add `extensions/salesforce/description.yml` = a verbatim copy of
-   `docs/community/description.yml` from `flozer` at `v0.9.1`.
+   `docs/community/description.yml` from `flozer` at `v0.9.2`.
 7. Commit (`Add salesforce extension`), push the branch to the fork.
 8. Open a PR into `duckdb/community-extensions:main` with the body below.
 9. Respond to community-CI / reviewer feedback. Do not merge (maintainers do).
@@ -62,7 +60,7 @@ No source, no tests, no other docs are copied. The community CI checks out
 > **Extension:** `salesforce` — read-only access to Salesforce orgs as DuckDB
 > SQL tables over the official REST and Bulk APIs.
 >
-> **Repo / ref:** `flozer/duckdb-salesforce` @ `v0.9.1` (annotated tag).
+> **Repo / ref:** `flozer/duckdb-salesforce` @ `v0.9.2` (annotated tag).
 > **License:** MIT. **Dependency:** OpenSSL (via `vcpkg.json`).
 > **Platforms:** `linux_amd64`, `windows_amd64` (baseline) + `osx_arm64`
 > (extra). Excluded: `osx_amd64`, arm-linux, musl, wasm, mingw, windows_arm64.

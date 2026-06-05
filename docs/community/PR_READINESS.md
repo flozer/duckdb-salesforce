@@ -10,13 +10,13 @@ maintainer's explicit GO (C.5).**
       v0.9.1: queryAll, salesforce_aggregate + GROUP BY, grandparent relationships
       + diagnostics, refresh-token/JWT auth, options/env/SFDX sources, metadata
       helpers — refresh / picklist values / record types, Bulk blob/base64 guard).
-- [x] `version: 0.9.1` — matches the submission tag.
+- [x] `version: 0.9.2` — matches the submission tag.
 - [x] `language: C++`, `build: cmake`.
 - [x] `license: MIT` (LICENSE present at repo root).
 - [x] `maintainers: [flozer]`.
 - [x] `excluded_platforms` reflects policy (baseline linux_amd64 + windows_amd64
       + extra osx_arm64; osx_amd64/arm-linux/musl/wasm/mingw excluded).
-- [x] `repo.github: flozer/duckdb-salesforce`, `repo.ref: v0.9.1`.
+- [x] `repo.github: flozer/duckdb-salesforce`, `repo.ref: v0.9.2`.
 - [x] `docs.hello_world` uses the signed path (`INSTALL ... FROM community`).
 - [x] YAML parses; required keys present (validated locally).
 
@@ -26,10 +26,11 @@ maintainer's explicit GO (C.5).**
       Firebird-parity preflight, `flozer/duckdb-salesforce` is still private.
       Before any community PR, make it public and verify:
       `git -c credential.helper= ls-remote --tags
-      https://github.com/flozer/duckdb-salesforce.git v0.9.1`.
-- [x] `v0.9.1` tag exists and is the intended submission commit (validated by a
-      light live smoke — see docs/RELEASE_NOTES_v0.9.1.md). `v0.9.0` was the prior
-      candidate (docs/RELEASE_NOTES_v0.9.md).
+      https://github.com/flozer/duckdb-salesforce.git v0.9.2`.
+- [x] `v0.9.2` tag exists and is the intended submission commit — an operational
+      distribution release, functionally identical to `v0.9.1` (no connector code
+      change; adds the release-assets workflow + packaging). `v0.9.1` carried the
+      light live smoke (docs/RELEASE_NOTES_v0.9.1.md), which applies unchanged.
 - [x] Offline suite green at the ref: 34 files / 921 assertions (local).
 - [x] Remote CI green at `v0.9.1`: run **27026331956** passed all 6
       platform/version jobs (`linux_amd64`, `windows_amd64`, `osx_arm64` ×
@@ -69,7 +70,7 @@ maintainer's explicit GO (C.5).**
       covered (real RS256 over a test key + mock token), but no live run against
       a pre-authorized Connected App has been done.
 - [x] `osx_amd64`, arm-linux, musl, wasm, mingw out of scope (excluded).
-- [x] `vcpkg.json` `version-string` is `0.9.1` (matches the tag / descriptor).
+- [x] `vcpkg.json` `version-string` is `0.9.2` (matches the tag / descriptor).
 
 ## Final gate
 
