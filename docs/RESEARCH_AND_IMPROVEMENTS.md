@@ -13,30 +13,60 @@ Guiding filter for everything below: **correctness first, read-only only, keep
 CI offline/secret-free.** An idea earns a place here only if it improves
 performance, materialization, correctness, or UX without violating those.
 
-## Current-state audit (2026-06-04)
+## Current-state audit (re-verified 2026-06-05)
 
-Honest baseline: **none of the ideas below are implemented yet** — they are
-captured here for follow-up. Verified against the source on
-`claude/apex-mdapi-analysis-EUteR` (latest feature commit: v0.6 §7 parent
-traversal):
+**Major update:** since the first audit the maintainer shipped v0.7→v1.x and
+implemented **most** of the actionable ideas below. Re-verified against
+`origin/main` (tags v0.7.0…v0.9.0 + `feat(meta) salesforce_refresh_metadata`).
+The connector also **re-scoped to "bridge-first"** (see ROADMAP): it is
+deliberately *not* an ETL/CDC/replication product — DuckDB owns materialization,
+joins, Parquet, and persistence. That intentionally de-scopes several ideas
+below (marked ⛔ out of scope).
 
-| Suggested improvement | Status in code | Evidence |
+### Delivered since first audit ✅
+
+| Idea (this doc) | Status | Evidence on `origin/main` |
 | --- | --- | --- |
-| Parallel scan | ❌ single-threaded by design | `salesforce_scan.cpp` `MaxThreads()` returns `1` |
-| PK chunking (Bulk) | ❌ absent | no chunk logic; Bulk path is one job |
-| Streaming Bulk | ❌ eager | `ScanGlobalState.bulk_result` fully materialized before first row |
-| SFDX auth URL / JWT | ❌ absent | `salesforce_config.cpp` accepts only `client_id`/`client_secret`/`refresh_token`/`login_url`/`api_version` |
-| Incremental (`SystemModstamp`) | ❌ absent | no replication-key/cursor code |
-| `queryAll` / deleted records | ❌ absent | scan uses `/query` only |
-| Manual metadata-cache refresh | ❌ absent | cache is in-memory per-ATTACH, dropped on DETACH; no refresh function (ARCHITECTURE §10 planned `salesforce_refresh_metadata`) |
+| PK chunking on Bulk (A1) | ✅ v0.7 §9 | `salesforce_scan.cpp`: `sf_bulk_chunks`, Id-range chunks, MIN/MAX probe |
+| Parallel scan | ✅ v0.7 §9b | per-thread `LocalState` claims chunk indices; `MaxThreads>1` on Bulk path |
+| Streaming Bulk (A2) | ✅ | ROADMAP "Lazy REST and Bulk result streaming" |
+| SFDX auth URL (E10) | ✅ v1.0 | `auth_source = options \| env \| sfdx_url` |
+| JWT bearer flow (E11) | ✅ v1.0 | `auth_source='jwt'`, RS256-signed assertion (`salesforce_auth.cpp`) |
+| `queryAll` / deleted (C7) | ✅ v0.9 §1 | `sf_query_mode = 'query' \| 'queryAll'` |
+| Bulk CSV type parity (C8) | ✅ v0.9 §2 | "Bulk CSV edge-case hardening + REST/Bulk type parity" tests |
+| Manual cache refresh (G14) | ✅ v1.3 | `salesforce_refresh_metadata(catalog [, object])` |
+| Aggregate pushdown beyond COUNT | ✅ | `salesforce_aggregate()` — SUM/AVG/MIN/MAX + `GROUP BY` (explicit opt-in) |
+| Grandparent traversal | ✅ v1.0 | `sf_relationship_depth` (depth 2) + `salesforce_relationships()` diag |
 
-What **is** solid today: OAuth refresh-token auth + TLS, describe/Tooling schema,
-lazy REST paging (`queryMore` loop-guarded), eager Bulk 2.0 with
-`Sforce-Locator` paging, `'auto'` transport (row-count probe), quota governor
-on Bulk starts, COUNT pushdown, projection + residual-safe predicate pushdown,
-parent STRUCT traversal. The connector is well-built for interactive + medium
-extraction; the gaps above are the **large-extraction / materialization /
-headless-auth** frontier.
+That covers **9 of my actionable recommendations**, including the #1 perf item
+(PK chunking) and the headline UX item (SFDX auth URL). The first audit's "none
+implemented yet" is now obsolete.
+
+### Intentionally out of scope ⛔ (bridge-first re-scope)
+
+The new ROADMAP explicitly excludes CDC/replication/orchestration. These doc
+ideas are therefore **not** to be pursued as connector features — DuckDB does
+them:
+
+- **Vault Mode / Parquet materialization (B4)** → use DuckDB `CREATE TABLE AS` /
+  `COPY ... TO 'x.parquet'`.
+- **Incremental `SystemModstamp` + lookback (B5/C6)** → CDC; ROADMAP v0.9 §1
+  lists "Change-data-capture / Incremental snapshot orchestration" as out of
+  scope.
+- **`getUpdated()`/`getDeleted()` Replication API (C8b)** → replication; out of
+  scope. (A user can still `WHERE SystemModstamp > …` themselves — the connector
+  just won't orchestrate it.)
+- **Rate-limit early-exit + resume (D9)** → replication orchestration; out of
+  scope. The quota governor (block-only) stays the connector's role.
+
+### Still open & in-scope (opportunistic)
+
+- **REST-vs-Bulk object/type deny-list (A3)** — correctness/reliability guard so
+  `'auto'`/`'bulk'` never picks Bulk for a Bulk-incompatible object/type.
+  *Unverified on `origin/main` — check before proposing.*
+- **SOAP picklist/record-type enrichment (F12)** — narrow schema enrichment.
+- **Confirm `__mdt` / Custom Settings (F13)** + document.
+- **GraphQL (low fit)** — unchanged verdict below.
 
 ## How to read this
 
@@ -247,22 +277,20 @@ Surveyed to find performance + materialization patterns with actual code:
 
 ---
 
-## Suggested priority
+## Suggested priority (revised 2026-06-05)
 
-1. **PK chunking on Bulk** (A1) — parallelism + memory; biggest performance win.
-2. **Incremental by `SystemModstamp` + lookback** (B5/C6) — enables reliable
-   materialization.
-3. **`queryAll`/deleted + Bulk datetime decode** (C7/C8) — snapshot correctness.
-4. **SFDX auth URL** (E10) — fast UX win.
-5. **Rate-limit early-exit/resume** (D9) — on top of the quota governor.
+The original top-5 are **done** (A1, C7/C8, E10) or **de-scoped** (B5/C6, D9 —
+CDC/replication). What remains worth doing, in scope:
 
-Lower / opportunistic: streaming Bulk (A2), REST-vs-Bulk deny-list (A3), Vault
-Mode (B4), JWT (E11), SOAP picklist enrichment (F12), `__mdt` confirmation (F13),
-manual cache refresh (G14, cheap — easy early win).
+1. **REST-vs-Bulk object/type deny-list** (A3) — small correctness/reliability
+   guard; verify whether v0.7's transport selection already covers it.
+2. **Confirm + document `__mdt` / Custom Settings** (F13) — likely already works;
+   cheap to validate and document.
+3. **SOAP picklist/record-type enrichment** (F12) — only if real schema gaps
+   surface; lazy + cached.
 
-Refinement to #2/#3: a *correct* incremental snapshot is `SystemModstamp`
-(updates, C6) **plus** `getDeleted()` (tombstones, C8b) — neither alone is
-sufficient.
+Everything materialization/incremental/replication-shaped is now a
+**DuckDB-side** workflow (CTAS/COPY/Parquet) by design, not a connector feature.
 
 ---
 
