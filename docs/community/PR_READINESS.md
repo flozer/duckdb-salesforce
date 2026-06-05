@@ -34,6 +34,11 @@ maintainer's explicit GO (C.5).**
 - [x] `vcpkg.json` declares the only dependency (OpenSSL); community CI resolves it.
 - [x] `Makefile` + `extension_config.cmake` drive the standard build.
 - [x] Submodules (`duckdb`, `extension-ci-tools`) pinned.
+- [x] Local builds validated: **MSVC** (VS BuildTools — cmake/ninja, vcpkg
+      `x64-windows-static` OpenSSL) is the primary maintainer build; **RTOOLS /
+      MinGW** (`x64-mingw-static` OpenSSL 3) via `scripts/build_rtools_local.ps1`
+      also builds. Linux/Windows/macOS-arm64 are covered by the canonical CI
+      matrix; community CI builds from `vcpkg.json` regardless.
 
 ## Legal / security / docs
 

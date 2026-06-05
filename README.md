@@ -58,7 +58,7 @@ materialization, files, and downstream analytics stay in DuckDB.
 | Auth | OAuth refresh-token, SFDX auth URL, environment-based credentials, and JWT bearer. |
 | REST scans | Lazy pagination, projection pushdown, predicate pushdown, `LIMIT` fetch reduction, `queryAll`. |
 | Bulk scans | Bulk API 2.0 query, lazy result streaming, sequential/parallel PK chunking, quota guard. |
-| Transport selection | `sf_force_transport = 'rest' | 'bulk' | 'auto'` with diagnostics explaining choices. |
+| Transport selection | `sf_force_transport = 'rest' \| 'bulk' \| 'auto'` with diagnostics explaining choices. |
 | Relationships | Parent and grandparent traversal as nested `STRUCT`, with skip/expand diagnostics. |
 | Metadata helpers | Refresh schema cache, inspect picklist values, record types, relationship expansion, query cost. |
 | Aggregates | Transparent `COUNT(*)` pushdown and explicit `salesforce_aggregate()` with optional `GROUP BY`. |
