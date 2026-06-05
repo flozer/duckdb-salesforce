@@ -333,6 +333,18 @@ Bulk rejects them (guard above) and REST returns a non-decodable URL
 reference. Fetch them out-of-band via the Salesforce API using the record
 `Id`.
 
+Datetime decoding behaves the same across transports. The connector expects
+Salesforce `datetime`, `date`, and `time` values as **ISO 8601 strings** (for
+example `2024-01-15T10:20:30.000+0000`), which decode to `TIMESTAMP`, `DATE`,
+and `TIME` — REST in JSON and Bulk in CSV use the same typed decode, and
+timestamps are normalized to their UTC wall-clock value (offset stripped, not
+shifted). A numeric/epoch value in such a field (for example `1705314030000`)
+is **not interpreted**: rather than guess seconds-versus-milliseconds, the
+connector raises a clear, field-named error like `field 'Whn' (Salesforce type
+'datetime') could not be decoded as TIMESTAMP` (the offending value is never
+echoed). To use an epoch value, transform it outside the scanner — for example
+with DuckDB's `to_timestamp`.
+
 ### `sf_auto_bulk_threshold`
 
 #### What it does

@@ -338,6 +338,21 @@ usando o `Id` do registro. A limitação é específica dos campos **BODY** blob
 retornados como URL reference; campos `base64` pequenos/inline que o REST
 devolve embutidos no JSON continuam decodificando para `BLOB` normalmente.
 
+#### Decode de datetime/date/time (ISO 8601) nos dois transportes
+
+Os campos `datetime`, `date` e `time` do Salesforce são esperados como
+**strings ISO 8601** (ex. `2024-01-15T10:20:30.000+0000`, `2024-01-15`,
+`10:20:30.000Z`) e decodificam para `TIMESTAMP` / `DATE` / `TIME` do DuckDB —
+o **mesmo decode tipado** vale no REST (JSON) e no Bulk (CSV). Os timestamps
+são normalizados para o valor **UTC wall-clock** (o offset de timezone é
+removido, não deslocado). Um valor **numérico / epoch** (ex. `1705314030000`)
+num campo de tempo **não** é interpretado: o conector não adivinha
+segundos-vs-milissegundos e levanta um erro claro, nomeando o campo e o tipo
+(`field 'Whn' (Salesforce type 'datetime') could not be decoded as
+TIMESTAMP`), sem ecoar o valor ofensor. Para tratar um valor de tempo
+numérico, transforme-o **fora do scanner** (por exemplo, `to_timestamp` do
+DuckDB sobre o número bruto).
+
 ### `sf_auto_bulk_threshold`
 
 #### O que faz

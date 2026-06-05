@@ -1,0 +1,100 @@
+# name: test/sql/salesforce_datetime_epoch.test
+# description: v1.3 §13 — datetime is ISO 8601 on both transports; epoch/integer values fail clearly (no silent misparse)
+# group: [salesforce]
+#
+# Contract test only (no behavior change). Salesforce returns datetime/date/time
+# as ISO 8601 strings; the decoder expects that. A numeric/epoch value is NOT
+# interpreted (ambiguous seconds vs milliseconds, unconfirmed) — it raises a
+# clear, field-named, secret-free error rather than a bogus timestamp.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id"},{"name":"Whn","type":"datetime"},{"name":"Dy","type":"date"},{"name":"Clk","type":"time"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === Bulk: ISO 8601 datetime/date/time decode correctly =====================
+statement ok
+SET sf_force_transport = 'bulk';
+
+statement ok
+SET sf_mock_bulk_create_body = '{"id":"J","state":"UploadComplete"}';
+
+statement ok
+SET sf_mock_bulk_status_body = '{"state":"JobComplete"}';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Whn,Dy,Clk
+001,2024-01-15T10:20:30.000+0000,2024-01-15,10:20:30.000Z';
+
+query I
+SELECT Whn = TIMESTAMP '2024-01-15 10:20:30'
+   AND Dy = DATE '2024-01-15'
+   AND Clk = TIME '10:20:30'
+FROM sf.Account;
+----
+1
+
+# === Bulk: epoch-ms datetime is NOT interpreted -> clear field-named error ===
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Whn
+001,1705314030000';
+
+statement error
+SELECT Whn FROM sf.Account;
+----
+field 'Whn' (Salesforce type 'datetime') could not be decoded as TIMESTAMP
+
+# === Bulk: numeric value in a DATE field -> clear error =====================
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Dy
+001,1705314030000';
+
+statement error
+SELECT Dy FROM sf.Account;
+----
+field 'Dy' (Salesforce type 'date') could not be decoded as DATE
+
+# === Bulk: numeric value in a TIME field -> clear error =====================
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Clk
+001,99999';
+
+statement error
+SELECT Clk FROM sf.Account;
+----
+field 'Clk' (Salesforce type 'time') could not be decoded as TIME
+
+# === REST: ISO decodes; epoch fails the same way (transport parity) =========
+statement ok
+SET sf_force_transport = 'rest';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Whn":"2024-01-15T10:20:30.000+0000"}]}';
+
+query I
+SELECT Whn = TIMESTAMP '2024-01-15 10:20:30' FROM sf.Account;
+----
+1
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Whn":"1705314030000"}]}';
+
+statement error
+SELECT Whn FROM sf.Account;
+----
+field 'Whn' (Salesforce type 'datetime') could not be decoded as TIMESTAMP
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_force_transport = 'rest';

@@ -363,7 +363,20 @@ Acceptance:
   sObjects.
 - Any limitation is visible and not left as tribal knowledge.
 
-### 13. Bulk Datetime Epoch Hardening
+### 13. Bulk Datetime Epoch Hardening — DONE (contract test + docs, no code change)
+
+> **Status: DONE.** No authoritative evidence that Bulk API 2.0 query CSV ever
+> emits epoch/integer datetimes (Salesforce docs inaccessible to bots; no live
+> repro). Per "don't guess units, don't change the decoder without proven pain":
+> behavior is UNCHANGED. The current contract is already safe — datetime/date/
+> time arrive as ISO 8601 and decode to TIMESTAMP/DATE/TIME (UTC wall-clock,
+> REST + Bulk parity); a numeric/epoch value is NOT interpreted (ambiguous
+> seconds vs milliseconds) and raises a clear, field-named, secret-free error
+> ("field 'NAME' (Salesforce type 'datetime') could not be decoded as
+> TIMESTAMP") — the value is never echoed. Locked by
+> test/sql/salesforce_datetime_epoch.test (ISO decodes; epoch datetime, numeric
+> DATE, numeric TIME each fail clearly; REST/Bulk parity). Docs EN/PT. If a real
+> org ever returns epoch datetimes, open an issue with a structural example.
 
 Salesforce Bulk CSV implementations and client libraries have historically
 reported datetime edge cases, including epoch/integer-like values. Strengthen

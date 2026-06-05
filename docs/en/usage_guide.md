@@ -495,6 +495,38 @@ connector on either transport. Practical guidance: select the non-blob
 fields you need (so the scan succeeds), and fetch the blob out-of-band via
 the Salesforce API using the record `Id`.
 
+### Datetime, date, and time decoding (#v1.3 §13)
+
+The connector expects Salesforce `datetime`, `date`, and `time` values as
+**ISO 8601 strings** — for example the datetime `2024-01-15T10:20:30.000+0000`,
+the date `2024-01-15`, and the time `10:20:30.000Z`. These decode to the
+DuckDB `TIMESTAMP`, `DATE`, and `TIME` types respectively. The typed decode is
+the **same on both transports**: REST returns the value in JSON and Bulk
+returns it in CSV, and either way it goes through one decode path.
+
+Timestamps are normalized to the **UTC wall-clock value**: the timezone offset
+is stripped, not shifted. So `2024-01-15T10:20:30.000+0000` and a value with a
+non-zero offset both surface their UTC wall-clock reading as the `TIMESTAMP`.
+
+A **numeric / epoch value** in a datetime/date/time field — for example
+`1705314030000` — is **not interpreted**. The connector does not guess
+seconds-versus-milliseconds; instead it raises a clear, field-named error such
+as:
+
+```text
+field 'Whn' (Salesforce type 'datetime') could not be decoded as TIMESTAMP
+```
+
+The offending value is never echoed in the message. This is intentional: the
+connector fails clearly rather than produce a bogus timestamp. There is no
+confirmed case of Bulk API 2.0 query returning epoch datetimes; if a real org
+ever does, that is a bug to report with a (structural) example, not something
+the connector guesses at.
+
+Practical guidance: if you must handle a numeric/epoch time value, transform it
+**outside the scanner** — for example fetch the raw number some other way and
+apply DuckDB's `to_timestamp` to it.
+
 ## 7. Large extractions: Bulk + PK chunking
 
 For very large objects, Bulk API 2.0 plus PK chunking parallelizes the

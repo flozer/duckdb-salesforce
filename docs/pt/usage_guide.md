@@ -485,6 +485,44 @@ Resumo: campos blob body **não são lidos diretamente como bytes** por este
 conector em **nenhum** transporte. Busque-os **fora do scanner**, pela API
 do Salesforce, usando o `Id` do registro.
 
+### Campos datetime, date e time (ISO 8601 e a limitação de epoch)
+
+O conector espera que os campos `datetime`, `date` e `time` do Salesforce
+cheguem como **strings ISO 8601** e os decodifica para os tipos `TIMESTAMP`,
+`DATE` e `TIME` do DuckDB. Exemplos do formato esperado:
+
+```text
+datetime  ->  2024-01-15T10:20:30.000+0000   (TIMESTAMP)
+date      ->  2024-01-15                      (DATE)
+time      ->  10:20:30.000Z                   (TIME)
+```
+
+Pontos a conhecer:
+
+- **Paridade entre transportes.** O mesmo decode tipado vale nos **dois**
+  transportes — tanto no REST (JSON) quanto no Bulk (CSV). Você obtém o mesmo
+  `TIMESTAMP` / `DATE` / `TIME` independentemente de como as linhas foram
+  buscadas.
+- **Normalização para UTC wall-clock.** Os timestamps são normalizados para
+  o valor UTC wall-clock: o offset de timezone é **removido**, não deslocado.
+  O instante `2024-01-15T10:20:30.000+0000` vira o `TIMESTAMP`
+  `2024-01-15 10:20:30`.
+- **Valores numéricos / epoch não são interpretados.** Um valor numérico (por
+  exemplo `1705314030000`, um epoch em milissegundos) num campo
+  `datetime`/`date`/`time` **não** é adivinhado. O conector não tenta decidir
+  entre segundos e milissegundos, então prefere **falhar claro** a produzir um
+  timestamp incorreto: ele levanta um erro nomeando o campo e o tipo, como
+  `field 'Whn' (Salesforce type 'datetime') could not be decoded as
+  TIMESTAMP`. O valor ofensor **nunca** é ecoado na mensagem. Isto é
+  intencional.
+
+Na prática, uma Bulk API 2.0 query devolvendo datetimes em epoch não é um caso
+confirmado; se uma org real fizer isso, trate como um **bug a reportar com
+exemplo**, não como algo que o conector deva adivinhar. Se você precisar
+trabalhar com um valor de tempo numérico/epoch, faça a transformação **fora do
+scanner** — por exemplo, aplique `to_timestamp` do DuckDB sobre o número bruto
+obtido por outro caminho.
+
 ## 7. Extrações grandes: Bulk + PK chunking
 
 Para objetos muito grandes, a Bulk API 2.0 mais PK chunking paraleliza a
