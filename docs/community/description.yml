@@ -6,12 +6,12 @@
 # extension for every supported platform from the pinned repo ref below.
 #
 # STAGED in flozer/duckdb-salesforce only. Submitting it is HUMAN-GATED (gate
-# C.5) and has NOT been done. Submission ref: v0.9.0.
+# C.5) and has NOT been done. Submission ref: v0.9.1.
 
 extension:
   name: salesforce
-  description: Read-only access to Salesforce orgs as DuckDB SQL tables over the official REST and Bulk APIs — OAuth refresh-token or JWT-bearer auth (credentials from inline options, environment variables, or an SFDX auth URL), native ATTACH, projection + predicate pushdown, COUNT pushdown, explicit server-side aggregates with GROUP BY, lazy/auto/Bulk transports with PK chunking, a per-job API quota governor, parent + grandparent relationship STRUCT columns with diagnostics, queryAll (archived + deleted), and Tooling-API fast schema.
-  version: 0.9.0
+  description: Read-only access to Salesforce orgs as DuckDB SQL tables over the official REST and Bulk APIs — OAuth refresh-token or JWT-bearer auth (credentials from inline options, environment variables, or an SFDX auth URL), native ATTACH, projection + predicate pushdown, COUNT pushdown, explicit server-side aggregates with GROUP BY, lazy/auto/Bulk transports with PK chunking (Bulk blob/base64 compatibility guard), a per-job API quota governor, parent + grandparent relationship STRUCT columns with diagnostics, queryAll (archived + deleted), Tooling-API fast schema, and metadata helpers (manual cache refresh, picklist values, record types).
+  version: 0.9.1
   language: C++
   build: cmake
   license: MIT
@@ -27,7 +27,7 @@ extension:
 repo:
   github: flozer/duckdb-salesforce
   # community-extensions CI checks out exactly this ref to build + sign.
-  ref: v0.9.0
+  ref: v0.9.1
 
 docs:
   hello_world: |
@@ -44,9 +44,14 @@ docs:
     predicate pushdown and COUNT pushdown. salesforce_aggregate() runs explicit
     server-side SOQL aggregates (MIN/MAX/SUM/AVG/COUNT, optional filter and
     GROUP BY) without dragging rows down, and salesforce_relationships() reports
-    parent/grandparent expansion. Opt-in parent- and grandparent-relationship
-    STRUCT columns, a per-job API quota governor, and Tooling-API fast schema
-    discovery round it out. Authentication is OAuth 2.0 refresh-token or JWT
+    parent/grandparent expansion. Read-only metadata helpers are available too:
+    salesforce_refresh_metadata() (manual per-ATTACH cache refresh),
+    salesforce_picklist_values(), and salesforce_record_types(). A Bulk
+    blob/base64 compatibility guard keeps incompatible scans off Bulk, and
+    blob bodies / epoch datetimes have clear documented limitations. Opt-in
+    parent- and grandparent-relationship STRUCT columns, a per-job API quota
+    governor, and Tooling-API fast schema discovery round it out. Authentication
+    is OAuth 2.0 refresh-token or JWT
     bearer, with credentials from inline options, environment variables, or an
     SFDX auth URL; credentials stay in memory and are never logged; TLS
     server-certificate verification is always on. Read-only: all mutating

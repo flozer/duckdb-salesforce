@@ -6,33 +6,33 @@ maintainer's explicit GO (C.5).**
 ## Descriptor (`description.yml`)
 
 - [x] `extension.name: salesforce` (unique; not taken in community-extensions).
-- [x] `description` — concise, accurate, read-only scope stated (covers v0.9.0:
-      queryAll, salesforce_aggregate + GROUP BY, grandparent relationships +
-      diagnostics, refresh-token/JWT auth, options/env/SFDX sources).
-- [x] `version: 0.9.0` — matches the submission tag.
+- [x] `description` — concise, accurate, read-only scope stated (covers through
+      v0.9.1: queryAll, salesforce_aggregate + GROUP BY, grandparent relationships
+      + diagnostics, refresh-token/JWT auth, options/env/SFDX sources, metadata
+      helpers — refresh / picklist values / record types, Bulk blob/base64 guard).
+- [x] `version: 0.9.1` — matches the submission tag.
 - [x] `language: C++`, `build: cmake`.
 - [x] `license: MIT` (LICENSE present at repo root).
 - [x] `maintainers: [flozer]`.
 - [x] `excluded_platforms` reflects policy (baseline linux_amd64 + windows_amd64
       + extra osx_arm64; osx_amd64/arm-linux/musl/wasm/mingw excluded).
-- [x] `repo.github: flozer/duckdb-salesforce`, `repo.ref: v0.9.0`.
+- [x] `repo.github: flozer/duckdb-salesforce`, `repo.ref: v0.9.1`.
 - [x] `docs.hello_world` uses the signed path (`INSTALL ... FROM community`).
 - [x] YAML parses; required keys present (validated locally).
 
 ## Repo / build
 
 - [x] Public repo, `main` clean.
-- [x] `v0.9.0` tag exists and is the intended commit (validated by the live
-      smoke — see docs/RELEASE_NOTES_v0.9.md).
-- [x] Offline suite green at the ref: 28 files / 777 assertions (local).
-- [x] Remote CI green at `v0.9.0`: linux_amd64 + windows_amd64 + osx_arm64 ×
-      DuckDB v1.5.2/v1.5.3 (offline mock suite, no `SF_LIVE_*`). Remote CI is
-      manual-only (`workflow_dispatch`); a one-time run at the submission ref was
-      triggered for the package. Evidence: run **26972597225**, conclusion
-      **success**, all 6 platform×version jobs green
-      ([run 26972597225](https://github.com/flozer/duckdb-salesforce/actions/runs/26972597225)).
-      Note: runner emitted Node.js 20 action-deprecation warnings (non-blocking;
-      bump action versions at a future maintenance pass).
+- [x] `v0.9.1` tag exists and is the intended submission commit (validated by a
+      light live smoke — see docs/RELEASE_NOTES_v0.9.1.md). `v0.9.0` was the prior
+      candidate (docs/RELEASE_NOTES_v0.9.md).
+- [x] Offline suite green at the ref: 34 files / 921 assertions (local).
+- [ ] Remote CI green at `v0.9.1`: NOT YET RUN. Remote CI is manual-only
+      (`workflow_dispatch`) and is run only when going to C.5 / a PR. The prior
+      ref `v0.9.0` had a green run (run **26972597225**, all 6 platform×version
+      jobs); a fresh one-time run at `v0.9.1` must be triggered before any
+      community submission. (v0.9.1 added no build-system change beyond the
+      vcpkg version-string, so the build surface is unchanged.)
 - [x] `vcpkg.json` declares the only dependency (OpenSSL); community CI resolves it.
 - [x] `Makefile` + `extension_config.cmake` drive the standard build.
 - [x] Submodules (`duckdb`, `extension-ci-tools`) pinned.
@@ -57,8 +57,7 @@ maintainer's explicit GO (C.5).**
       covered (real RS256 over a test key + mock token), but no live run against
       a pre-authorized Connected App has been done.
 - [x] `osx_amd64`, arm-linux, musl, wasm, mingw out of scope (excluded).
-- [x] `vcpkg.json` `version-string` bumped to `0.9.0` (matches the tag /
-      descriptor). The earlier `0.8.0` cosmetic gap is closed.
+- [x] `vcpkg.json` `version-string` is `0.9.1` (matches the tag / descriptor).
 
 ## Final gate
 
