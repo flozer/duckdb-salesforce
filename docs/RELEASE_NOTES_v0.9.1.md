@@ -61,8 +61,10 @@ datetime — all bridge-first, read-only, **no Metadata API**.
 
 ## Release prep carried in this range
 
-- Community submission package refreshed to the `v0.9.0` ref + green CI evidence
-  recorded (`1316518`, `c9eb1b1`). Roadmap re-aligned bridge-first (`da9c52e`).
+- Community submission package refreshed to the `v0.9.1` ref. Manual remote CI
+  run **27026331956** passed all 6 jobs (`linux_amd64`, `windows_amd64`,
+  `osx_arm64` x DuckDB `v1.5.2`, `v1.5.3`), mock-only and secret-free.
+  Roadmap re-aligned bridge-first (`da9c52e`).
   Still **blocked by C.5** — nothing submitted.
 
 ## Test evidence (offline)
@@ -73,7 +75,7 @@ datetime — all bridge-first, read-only, **no Metadata API**.
   (picklist + record types), `salesforce_bulk_guard`, `salesforce_blob_limitation`,
   `salesforce_custom_metadata`, `salesforce_datetime_epoch` (+ migrated
   `salesforce_bulk` / `salesforce_bulk_csv`, extended `salesforce_auth_source`).
-- Remote CI is manual-only and was **not** run for this draft.
+- Remote CI is manual-only; run **27026331956** passed at the `v0.9.1` ref.
 
 ## Light smoke (VALIDATED)
 

@@ -27,12 +27,10 @@ maintainer's explicit GO (C.5).**
       light live smoke — see docs/RELEASE_NOTES_v0.9.1.md). `v0.9.0` was the prior
       candidate (docs/RELEASE_NOTES_v0.9.md).
 - [x] Offline suite green at the ref: 34 files / 921 assertions (local).
-- [ ] Remote CI green at `v0.9.1`: NOT YET RUN. Remote CI is manual-only
-      (`workflow_dispatch`) and is run only when going to C.5 / a PR. The prior
-      ref `v0.9.0` had a green run (run **26972597225**, all 6 platform×version
-      jobs); a fresh one-time run at `v0.9.1` must be triggered before any
-      community submission. (v0.9.1 added no build-system change beyond the
-      vcpkg version-string, so the build surface is unchanged.)
+- [x] Remote CI green at `v0.9.1`: run **27026331956** passed all 6
+      platform/version jobs (`linux_amd64`, `windows_amd64`, `osx_arm64` ×
+      DuckDB `v1.5.2`, `v1.5.3`). Mock-only; no `SF_LIVE_*`; no Salesforce
+      contact.
 - [x] `vcpkg.json` declares the only dependency (OpenSSL); community CI resolves it.
 - [x] `Makefile` + `extension_config.cmake` drive the standard build.
 - [x] Submodules (`duckdb`, `extension-ci-tools`) pinned.

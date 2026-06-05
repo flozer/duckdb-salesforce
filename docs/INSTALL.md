@@ -65,6 +65,16 @@ the vcpkg toolchain:
 ```
 then `cmake --build <build dir> --config Release`.
 
+For a local MinGW/RTOOLS validation on Windows, use the dedicated script:
+
+```powershell
+pwsh -File scripts/build_rtools_local.ps1
+```
+
+This path uses RTOOLS compilers plus vcpkg `x64-mingw-static` for OpenSSL 3.
+Do not rely on the OpenSSL bundled with RTOOLS itself; older RTOOLS installs can
+provide OpenSSL 1.1.x, which is too old for the vendored `httplib`.
+
 The build produces:
 
 - `build/release/extension/salesforce/salesforce.duckdb_extension` — the

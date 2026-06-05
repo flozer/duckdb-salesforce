@@ -26,6 +26,10 @@ $cmake = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7
 $ninja = 'C:\Users\fernando.souza\AppData\Local\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe\ninja.exe'
 $toolchain = 'C:/Users/fernando.souza/vcpkg/scripts/buildsystems/vcpkg.cmake'
 
+$Tags = @(
+    $Tags | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+)
+
 # Make absolutely sure no live credentials are present (CI/offline guarantee).
 Get-ChildItem Env:SF_LIVE_* -ErrorAction SilentlyContinue | ForEach-Object {
     Remove-Item "Env:$($_.Name)" -ErrorAction SilentlyContinue
