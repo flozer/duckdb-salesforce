@@ -303,6 +303,29 @@ decisão e o motivo ficam visíveis em `salesforce_last_transport()` e
 apenas campos `base64`; outros objetos não suportados pelo Bulk não são
 pré-listados e, se forçados, aparecem como erro claro do job Bulk.
 
+#### Limitação REST para campos BODY blob/base64 (URL reference)
+
+O Bulk não é o único transporte com restrição em campos blob. Para campos
+**BODY** blob/base64 de objetos como `Attachment.Body` e
+`ContentVersion.VersionData`, uma query REST do Salesforce devolve uma **URL
+reference** (não o base64 inline). O scanner **não baixa blobs**: não há
+download automático ao seguir essa URL. Selecionar um desses campos via REST
+levanta o erro:
+
+```text
+Salesforce returned a URL reference for blob/base64 field 'NAME'; inline
+BLOB decoding is not supported by REST query. Select non-blob fields or
+fetch the blob URL outside the scanner.
+```
+
+Quadro combinado por transporte para campos BODY blob/base64: o Bulk não é
+suportado (guard acima) e o REST devolve uma URL reference não decodificável
+inline. Em **nenhum** transporte este conector lê esses campos diretamente
+como bytes — busque o conteúdo **fora do scanner**, pela API do Salesforce,
+usando o `Id` do registro. A limitação é específica dos campos **BODY** blob
+retornados como URL reference; campos `base64` pequenos/inline que o REST
+devolve embutidos no JSON continuam decodificando para `BLOB` normalmente.
+
 ### `sf_auto_bulk_threshold`
 
 #### O que faz

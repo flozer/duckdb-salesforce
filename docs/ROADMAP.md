@@ -319,15 +319,21 @@ Acceptance (met):
 - Diagnostics explain the decision.
 - Forced Bulk behavior is explicit and documented.
 
-### 11a. Follow-up (SEPARATE): REST BLOB decode for blob bodies
+### 11a. REST BLOB decode for blob bodies — DONE (documented limitation)
 
-> **Status: OPEN follow-up — do NOT bundle with §11.** During the §11 live
-> check, a REST read of `Attachment.Body` failed to decode ("field 'Body' …
-> could not be decoded as BLOB"). REST returns the blob body in a form our
-> base64→BLOB decoder rejected for that field. Investigate the actual returned
-> format (URL to the blob vs inline base64; size limits) and decide whether to
-> decode, expose a URL, or document the field as not directly selectable.
-> Independent of the §11 transport guard.
+> **Status: DONE.** Live-confirmed: a REST query returns blob BODY fields
+> (`Attachment.Body`, `ContentVersion.VersionData`) as a **URL reference**, not
+> inline base64. Maintainer decision: keep the field typed BLOB, do NOT switch
+> base64→VARCHAR (would break inline-base64 semantics/tests), and do NOT auto-
+> fetch the URL (a per-row/field call — expensive and surprising). Instead the
+> scanner raises a clear, documented limitation when it sees a URL-reference
+> value: "Salesforce returned a URL reference for blob/base64 field 'NAME';
+> inline BLOB decoding is not supported by REST query. Select non-blob fields or
+> fetch the blob URL outside the scanner." Other undecodable values get a
+> secret-free generic error (field + length, never content). Inline base64 that
+> REST returns inline still decodes normally. Combined with §11 (Bulk rejects
+> blobs), blob BODY fields are not directly readable as bytes on either
+> transport — fetch out-of-band by record Id. Docs updated EN/PT.
 
 ### 12. Custom Metadata And Custom Settings Confirmation
 

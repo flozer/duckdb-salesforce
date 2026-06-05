@@ -119,26 +119,23 @@ void AppendJsonValue(Vector &vec, idx_t row, const SalesforceField &field,
     AppendTypedCell(vec, row, field, raw);
 }
 
-// #v1.3 §11a probe (TEMPORARY, diagnostic): when a base64/BLOB value fails to
-// decode, describe its FORMAT without ever printing blob content. If it looks
-// like a URL reference (starts with '/' or 'http'), echo a short structural
-// prefix — that is non-secret (a Salesforce blob endpoint path). Otherwise emit
-// only the length. Never echoes real blob bytes, secrets, or tokens.
-static string Base64FormatHint(const string &raw) {
-    bool url = (!raw.empty() && raw[0] == '/');
-    if (!url && raw.size() >= 4) {
+// #v1.3 §11a: a REST query returns blob bodies (Attachment.Body,
+// ContentVersion.VersionData, ...) as a URL REFERENCE, not inline base64.
+// Detect that shape (starts with '/' or 'http') so the BLOB decode failure
+// becomes a clear, documented limitation rather than a generic error. Never
+// inspects or echoes blob content.
+static bool IsBlobUrlReference(const string &raw) {
+    if (!raw.empty() && raw[0] == '/') {
+        return true;
+    }
+    if (raw.size() >= 4) {
         string p = raw.substr(0, 4);
         for (auto &c : p) {
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         }
-        url = (p == "http");
+        return p == "http";
     }
-    if (url) {
-        string prefix = raw.substr(0, raw.size() < 60 ? raw.size() : 60);
-        return StringUtil::Format("value looks like a URL reference (length=%llu, prefix='%s')",
-                                  (unsigned long long)raw.size(), prefix);
-    }
-    return StringUtil::Format("value is not a URL (length=%llu)", (unsigned long long)raw.size());
+    return false;
 }
 
 void AppendTypedCell(Vector &vec, idx_t row, const SalesforceField &field, const string &raw) {
@@ -158,11 +155,21 @@ void AppendTypedCell(Vector &vec, idx_t row, const SalesforceField &field, const
                 StringVector::AddStringOrBlob(vec, bytes.data(), bytes.size());
             return;
         } catch (const std::exception &) {
+            // A blob body comes back as a URL reference (#v1.3 §11a): clear,
+            // documented limitation. The scanner does NOT follow the URL.
+            if (IsBlobUrlReference(raw)) {
+                throw InvalidInputException(
+                    "salesforce: Salesforce returned a URL reference for blob/base64 "
+                    "field '%s'; inline BLOB decoding is not supported by REST query. "
+                    "Select non-blob fields or fetch the blob URL outside the scanner.",
+                    field.name);
+            }
+            // Any other undecodable value: secret-free (field + length, never
+            // the content).
             throw InvalidInputException(
-                "salesforce: field '%s' (Salesforce type '%s') is not decodable as "
-                "BLOB — %s. [#v1.3 §11a probe: REST may return a URL reference for "
-                "blob bodies rather than inline base64.]",
-                field.name, field.sf_type, Base64FormatHint(raw));
+                "salesforce: field '%s' (Salesforce type '%s') could not be decoded "
+                "as BLOB (length=%llu).",
+                field.name, field.sf_type, (unsigned long long)raw.size());
         }
     }
 

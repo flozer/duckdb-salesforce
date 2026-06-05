@@ -426,6 +426,40 @@ This guard is metadata-driven and covers base64 fields only. Other
 Bulk-unsupported objects are not pre-listed; if forced to Bulk, they surface
 as a clear Salesforce Bulk-job error instead.
 
+### REST and blob/base64 body fields (#v1.3 §11a)
+
+The §11 guard above is about the Bulk transport. REST behaves differently
+for **blob/base64 BODY fields** — for example `Attachment.Body` or
+`ContentVersion.VersionData`. A REST query returns those fields not as inline
+base64, but as a **URL reference** that points to the binary payload. The
+scanner **does not follow that URL**: there is no automatic attachment/blob
+download.
+
+Selecting such a field over REST therefore raises a clear, documented error
+instead of silently returning the reference:
+
+```text
+Salesforce returned a URL reference for blob/base64 field 'NAME'; inline
+BLOB decoding is not supported by REST query. Select non-blob fields or
+fetch the blob URL outside the scanner.
+```
+
+This limitation applies specifically to blob **body** fields returned as URL
+references. Small/inline base64 fields that REST returns inline still decode
+to `BLOB` normally.
+
+Putting both transports together for blob/base64 body fields:
+
+- **Bulk (§11)**: not supported at all — the guard errors, and `auto` stays
+  on REST.
+- **REST (§11a)**: returns a URL reference, which is not decodable inline —
+  the scanner raises the clear error above.
+
+Net: blob body fields are not directly readable as bytes through this
+connector on either transport. Practical guidance: select the non-blob
+fields you need (so the scan succeeds), and fetch the blob out-of-band via
+the Salesforce API using the record `Id`.
+
 ## 7. Large extractions: Bulk + PK chunking
 
 For very large objects, Bulk API 2.0 plus PK chunking parallelizes the

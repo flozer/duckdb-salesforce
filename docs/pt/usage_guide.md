@@ -409,6 +409,45 @@ Nota de escopo: este guard é guiado por metadados e cobre apenas campos
 `base64`. Outros objetos não suportados pelo Bulk não são pré-listados; se
 forçados, vão aparecer como um erro claro do próprio job Bulk do Salesforce.
 
+### REST e campos BODY blob/base64 (URL reference)
+
+A subseção anterior (Bulk) é só metade do quadro. O REST também tem uma
+limitação específica para campos **BODY** blob/base64 de objetos como
+`Attachment.Body` e `ContentVersion.VersionData`: nessas colunas, uma query
+REST do Salesforce não devolve o conteúdo em base64 inline — devolve uma
+**URL reference** que aponta para o blob.
+
+O scanner **não** segue essa URL: **não há download automático** de
+anexo/blob. Selecionar um desses campos via REST levanta um erro claro e
+documentado:
+
+```text
+Salesforce returned a URL reference for blob/base64 field 'NAME'; inline
+BLOB decoding is not supported by REST query. Select non-blob fields or
+fetch the blob URL outside the scanner.
+```
+
+Orientação prática: selecione apenas os campos **não-blob** do objeto no
+scan, e busque o conteúdo do blob **fora do scanner**, diretamente pela API
+do Salesforce, usando o `Id` do registro.
+
+Importante: esta limitação é específica dos campos **BODY** blob retornados
+como URL reference. Campos `base64` pequenos/inline que o REST realmente
+devolve embutidos no JSON continuam decodificando para `BLOB` normalmente.
+
+### Quadro combinado por transporte (campos BODY blob/base64)
+
+Juntando os dois lados acima, para campos BODY blob/base64:
+
+- **Bulk** (subseção anterior) — não suportado: o guard falha com erro claro
+  ou, em `'auto'`, mantém o scan em REST.
+- **REST** (esta subseção) — retorna uma URL reference, não decodificável
+  inline; erro claro.
+
+Resumo: campos blob body **não são lidos diretamente como bytes** por este
+conector em **nenhum** transporte. Busque-os **fora do scanner**, pela API
+do Salesforce, usando o `Id` do registro.
+
 ## 7. Extrações grandes: Bulk + PK chunking
 
 Para objetos muito grandes, a Bulk API 2.0 mais PK chunking paraleliza a

@@ -303,6 +303,25 @@ transport and the reason appear in `salesforce_last_transport()` and
 only; other Bulk-unsupported objects are not pre-listed and surface as a
 clear Salesforce Bulk-job error if forced.
 
+The guard above concerns Bulk. REST has its own limitation for blob/base64
+**body** fields (for example `Attachment.Body` or `ContentVersion.VersionData`):
+a REST query returns these as a **URL reference** rather than inline base64,
+and **the scanner does not download blobs** — it does not follow that URL.
+Selecting such a field over REST raises a clear error:
+
+```text
+Salesforce returned a URL reference for blob/base64 field 'NAME'; inline
+BLOB decoding is not supported by REST query. Select non-blob fields or
+fetch the blob URL outside the scanner.
+```
+
+This applies to blob body fields returned as URL references; small/inline
+base64 fields that REST returns inline still decode to `BLOB` normally.
+Across transports, blob body fields are not directly readable as bytes:
+Bulk rejects them (guard above) and REST returns a non-decodable URL
+reference. Fetch them out-of-band via the Salesforce API using the record
+`Id`.
+
 ### `sf_auto_bulk_threshold`
 
 #### What it does
