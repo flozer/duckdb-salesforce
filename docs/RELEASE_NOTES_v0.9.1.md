@@ -1,10 +1,10 @@
-# Release notes — v0.9.1 (DRAFT — NOT TAGGED)
+# Release notes — v0.9.1 (VALIDATED — tagged on flozer)
 
-> **Status: DRAFT.** Not tagged, not published. No remote CI run, no GitHub
-> release, nothing submitted to `duckdb/community-extensions`. v1.0.0 is reserved
-> for the post-C.5 / "stable public API" milestone — this cycle is hardening plus
-> useful metadata-driven functions, so it lands as **v0.9.1**. Tag only after a
-> maintainer smoke/validation (see *Light smoke*).
+> **Status: VALIDATED.** Offline suite green and a light live smoke against a
+> real org passed (see *Light smoke*). Tagged `v0.9.1` on the `flozer` remote
+> only. **Not published**: no GitHub release, nothing submitted to
+> `duckdb/community-extensions` (still blocked by C.5). v1.0.0 remains reserved
+> for the post-C.5 / "stable public API" milestone.
 
 Range: `v0.9.0..HEAD`.
 
@@ -75,17 +75,22 @@ datetime — all bridge-first, read-only, **no Metadata API**.
   `salesforce_bulk` / `salesforce_bulk_csv`, extended `salesforce_auth_source`).
 - Remote CI is manual-only and was **not** run for this draft.
 
-## Light smoke (optional, pre-tag)
+## Light smoke (VALIDATED)
 
-Run against a real org before tagging. Harness:
-`scripts/run_smoke_v0.9.1.ps1` + `scripts/smoke_v0.9.1.sql` (env auth, secret-free).
+Run on 2026-06-05 against a real org via `scripts/run_smoke_v0.9.1.ps1`
+(env auth), exit code 0. Evidence is configuration metadata + row counts only —
+no token or secret in the output.
 
-- [ ] `salesforce_picklist_values()` on a real picklist field (e.g. `Account.Industry`).
-- [ ] `salesforce_record_types()` on an object that has record types.
-- [ ] `salesforce_refresh_metadata()` (object + global) returns its row.
-- [ ] a normal REST `SELECT` still works.
-- [ ] a normal Bulk `SELECT` (non-blob fields) still works.
-- [ ] no token / secret in any output.
+- [x] `salesforce_picklist_values('sf','Account','Industry')` — 32 active values
+      (25 shown in the snippet); full catalog (active + inactive) returned.
+- [x] `salesforce_record_types('sf','Account')` — 10 record types.
+- [x] `salesforce_refresh_metadata('sf','Account')` and
+      `salesforce_refresh_metadata('sf')` — both returned their row.
+- [x] normal REST `SELECT count(*) FROM sf.Account` — 54715.
+- [x] normal Bulk `SELECT count(*) FROM sf.Account` — 54715 (matches REST — the
+      core scan is consistent across transports).
+- [x] picklist re-read after refresh — 32 (cache repopulated).
+- [x] output scanned: no token / secret present.
 
 ## Community status
 
