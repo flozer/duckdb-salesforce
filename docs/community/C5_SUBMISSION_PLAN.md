@@ -14,6 +14,9 @@
       jobs (`linux_amd64`, `windows_amd64`, `osx_arm64` × DuckDB `v1.5.2`,
       `v1.5.3`), mock-only, no `SF_LIVE_*`.
 - [x] Light live smoke validated (see `docs/RELEASE_NOTES_v0.9.1.md`).
+- [x] Release-asset workflow validated on `main`: run **27031409510** produced
+      Linux x64 and Windows x64 workflow artifacts without publishing a GitHub
+      Release.
 - [ ] **Repository visibility:** `flozer/duckdb-salesforce` must be public before
       community submission. Firebird failed community CI once because the source
       repo was private and `repo.ref` could not be cloned.
@@ -25,6 +28,11 @@
       ```
 
 - [ ] **Maintainer C.5 GO**.
+
+Release-assets note: `v0.9.1` predates `.github/workflows/release-assets.yml`.
+If binary GitHub Release assets are required before/alongside community
+submission, cut a later tag from current `main` so the tag tree contains the
+release workflow and packaging scripts.
 
 ## What gets copied
 

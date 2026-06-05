@@ -43,6 +43,11 @@ maintainer's explicit GO (C.5).**
       MinGW** (`x64-mingw-static` OpenSSL 3) via `scripts/build_rtools_local.ps1`
       also builds. Linux/Windows/macOS-arm64 are covered by the canonical CI
       matrix; community CI builds from `vcpkg.json` regardless.
+- [x] Release-asset workflow green on `main`: run **27031409510** produced
+      Linux x64 and Windows x64 workflow artifacts. No GitHub Release was created
+      because the run was manual without a release tag input. Note: the existing
+      `v0.9.1` tag predates this workflow; tagged binary releases should use a
+      later tag that contains `.github/workflows/release-assets.yml`.
 
 ## Legal / security / docs
 
