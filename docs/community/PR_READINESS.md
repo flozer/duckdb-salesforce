@@ -22,7 +22,11 @@ maintainer's explicit GO (C.5).**
 
 ## Repo / build
 
-- [x] Public repo, `main` clean.
+- [ ] Public repo + public tag clone validated. **Current blocker:** as of the
+      Firebird-parity preflight, `flozer/duckdb-salesforce` is still private.
+      Before any community PR, make it public and verify:
+      `git -c credential.helper= ls-remote --tags
+      https://github.com/flozer/duckdb-salesforce.git v0.9.1`.
 - [x] `v0.9.1` tag exists and is the intended submission commit (validated by a
       light live smoke — see docs/RELEASE_NOTES_v0.9.1.md). `v0.9.0` was the prior
       candidate (docs/RELEASE_NOTES_v0.9.md).
@@ -65,5 +69,9 @@ maintainer's explicit GO (C.5).**
 ## Final gate
 
 - [ ] **Maintainer explicit GO** to open the community-extensions PR (C.5).
+
+Before opening the PR, repeat the public-clone check above. This is not a formality:
+the Firebird community PR initially failed because the source repository was
+private, so community CI could not clone the pinned `repo.ref`.
 
 Until that box is checked by a human, the extension stays local / `flozer`-only.

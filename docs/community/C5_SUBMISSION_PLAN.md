@@ -5,7 +5,7 @@
 > an explicit maintainer **C.5 GO**, and only after a final human confirm of the
 > exact PR contents. Submission ref: **`v0.9.1`**.
 
-## Preconditions (all currently met)
+## Preconditions
 
 - [x] `v0.9.1` tagged on `flozer`, tree self-consistent (descriptor `repo.ref`
       `v0.9.1`, `vcpkg.json` version-string `0.9.1`).
@@ -14,7 +14,17 @@
       jobs (`linux_amd64`, `windows_amd64`, `osx_arm64` × DuckDB `v1.5.2`,
       `v1.5.3`), mock-only, no `SF_LIVE_*`.
 - [x] Light live smoke validated (see `docs/RELEASE_NOTES_v0.9.1.md`).
-- [ ] **Maintainer C.5 GO** — the only open gate.
+- [ ] **Repository visibility:** `flozer/duckdb-salesforce` must be public before
+      community submission. Firebird failed community CI once because the source
+      repo was private and `repo.ref` could not be cloned.
+- [ ] **Public clone/tag preflight:** after making the repo public, verify:
+
+      ```sh
+      git -c credential.helper= ls-remote --tags https://github.com/flozer/duckdb-salesforce.git v0.9.1
+      git clone --depth=1 --branch v0.9.1 https://github.com/flozer/duckdb-salesforce.git
+      ```
+
+- [ ] **Maintainer C.5 GO**.
 
 ## What gets copied
 
@@ -27,14 +37,17 @@ No source, no tests, no other docs are copied. The community CI checks out
 
 ## Steps to execute (ONLY on GO — listed, not run)
 
-1. Fork `duckdb/community-extensions` (or use an existing fork) under the
+1. Make `flozer/duckdb-salesforce` public.
+2. Run the public clone/tag preflight above with credentials disabled.
+3. Final-review `docs/community/description.yml` exactly as it will be copied.
+4. Fork `duckdb/community-extensions` (or use an existing fork) under the
    maintainer's GitHub account.
-2. Branch, e.g. `add-salesforce`.
-3. Add `extensions/salesforce/description.yml` = a verbatim copy of
+5. Branch, e.g. `add-salesforce`.
+6. Add `extensions/salesforce/description.yml` = a verbatim copy of
    `docs/community/description.yml` from `flozer` at `v0.9.1`.
-4. Commit (`Add salesforce extension`), push the branch to the fork.
-5. Open a PR into `duckdb/community-extensions:main` with the body below.
-6. Respond to community-CI / reviewer feedback. Do not merge (maintainers do).
+7. Commit (`Add salesforce extension`), push the branch to the fork.
+8. Open a PR into `duckdb/community-extensions:main` with the body below.
+9. Respond to community-CI / reviewer feedback. Do not merge (maintainers do).
 
 ## PR body (draft)
 
@@ -57,7 +70,8 @@ No source, no tests, no other docs are copied. The community CI checks out
 >
 > **Evidence:** offline mock suite 34 files / 921 assertions green; CI run
 > 27026331956 green on all 6 platform×version jobs; a light live smoke against a
-> real org validated the metadata functions + REST/Bulk scan consistency.
+> real org validated the metadata functions + REST/Bulk scan consistency. The
+> source repo/tag is public-clone validated before PR open.
 >
 > **Known caveats (declared):**
 > - macOS live TLS not validated in CI (OpenSSL-via-vcpkg does not read the

@@ -32,9 +32,9 @@ repo:
 docs:
   hello_world: |
     -- Published build is signed: INSTALL salesforce FROM community; LOAD salesforce;
-    -- Connect with an OAuth refresh-token Connected App:
-    ATTACH 'salesforce://myorg' AS sf (TYPE salesforce,
-        client_id 'xxx', client_secret 'xxx', refresh_token 'xxx');
+    -- Connect with an OAuth refresh-token Connected App.
+    -- Set SF_CLIENT_ID, SF_CLIENT_SECRET, SF_REFRESH_TOKEN, and optionally SF_LOGIN_URL.
+    ATTACH 'salesforce://myorg' AS sf (TYPE salesforce, auth_source 'env');
     SELECT Id, Name FROM sf.Account WHERE Name = 'Acme' LIMIT 10;
   extended_description: |
     duckdb-salesforce attaches a Salesforce org as a read-only DuckDB catalog.
