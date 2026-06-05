@@ -245,6 +245,17 @@ FROM information_schema.tables
 WHERE table_catalog = 'sf';
 ```
 
+The listing also includes Custom Metadata Types (API names ending in `__mdt`)
+and queryable Custom Settings (API names ending in `__c`, both List and
+Hierarchy types) when the org exposes them: they are ordinary read-only
+sObjects, so `DESCRIBE` and `SELECT` work the same way and writes throw. This
+is data access, not the Salesforce Metadata API — the extension reads them as
+rows and never deploys or modifies metadata. Visibility follows the
+authenticated user's and org's permissions (protected entries may not appear or
+be readable, per Salesforce). After a new `__mdt` type or field is added
+mid-session, call `salesforce_refresh_metadata()` so the next reference
+re-describes it.
+
 ## Level 2 - Session settings (`SET ...`)
 
 These settings tune scan transport selection, the API-quota governor,

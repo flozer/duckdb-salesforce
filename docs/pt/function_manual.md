@@ -246,6 +246,18 @@ FROM information_schema.tables
 WHERE table_catalog = 'sf';
 ```
 
+#### Nota: Custom Metadata e Custom Settings
+
+Custom Metadata Types (`__mdt`) e Custom Settings consultáveis (`__c`, tipos
+List e Hierarchy) aparecem na listagem como **sObjects comuns, somente-leitura**
+— sem sintaxe nem tratamento especial; `DESCRIBE` e `SELECT` funcionam como em
+qualquer objeto. Isto é **acesso a dados, não a Metadata API**: o conector só
+**lê** registros, não faz deploy nem altera metadados. A visibilidade segue as
+**permissões** do usuário/org (metadados/settings protegidos podem não aparecer
+ou não ser legíveis). Após adicionar um tipo `__mdt` ou um campo durante a
+sessão, use `salesforce_refresh_metadata()` para que a próxima referência
+re-descreva o schema.
+
 ## Nível 2 - Configurações de sessão (`SET ...`)
 
 Estas configurações ajustam a seleção de transporte do scan, o governador

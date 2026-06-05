@@ -337,6 +337,41 @@ SHOW TABLES;
 SELECT * FROM duckdb_tables();
 ```
 
+### Custom Metadata and Custom Settings
+
+Custom Metadata Types (objects whose API name ends in `__mdt`) and queryable
+Custom Settings (objects whose API name ends in `__c`, both List and Hierarchy
+types) need **no special syntax**: they appear as ordinary read-only sObject
+tables in the attached catalog. When they are queryable they show up in the
+global object listing (`SHOW TABLES` / `duckdb_tables()`), and `DESCRIBE` plus
+`SELECT` work exactly like any other object — projection and predicate pushdown
+apply just the same:
+
+```sql
+-- a Custom Metadata Type
+SELECT DeveloperName, Label
+FROM sf.Shipping_Rate__mdt
+WHERE Label = 'Domestic';
+
+-- a Custom Setting
+SELECT Name, SetupOwnerId
+FROM sf.Feature_Flag__c
+LIMIT 10;
+```
+
+Keep these limitations in mind:
+
+- This is **data access**, not the Salesforce Metadata API. The connector reads
+  these objects as rows; it does not deploy, create, or modify metadata.
+- Visibility follows the authenticated user's and org's permissions. Protected
+  Custom Metadata and protected Custom Settings may not appear or may not be
+  readable, per Salesforce.
+- All writes throw, the same as for any sObject (the catalog is read-only).
+- If you add a new `__mdt` type or a new field mid-session, call
+  `salesforce_refresh_metadata('<catalog>')` (or
+  `salesforce_refresh_metadata('<catalog>', '<Object>')`) so the next reference
+  re-describes it.
+
 ## 5. Materialize results locally
 
 To keep a local, queryable snapshot (and to escape read-only limits), copy

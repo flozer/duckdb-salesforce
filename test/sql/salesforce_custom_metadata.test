@@ -1,0 +1,69 @@
+# name: test/sql/salesforce_custom_metadata.test
+# description: v1.3 §12 — Custom Metadata Types (__mdt) and Custom Settings (__c) as read-only sObjects
+# group: [salesforce]
+#
+# Confirmation only: __mdt and queryable Custom Settings flow through the normal
+# listing / describe / scan path with no special handling. No production code.
+# NOTE: each object resolution builds its own mock client (describe index resets
+# per resolve), so the describe body is set per object rather than via a |~|
+# sequence.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Listing: two queryable (a __mdt + a Custom Setting __c) + one non-queryable.
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Something__mdt","queryable":true},{"name":"SomeSetting__c","queryable":true},{"name":"Secret__mdt","queryable":false}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === Custom Metadata Type (__mdt): describe + projection + predicate ========
+statement ok
+SET sf_mock_describe_body = '{"name":"Something__mdt","fields":[{"name":"Id","type":"id"},{"name":"DeveloperName","type":"string","filterable":true},{"name":"Threshold__c","type":"double"}]}';
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM sf.Something__mdt) WHERE column_name = 'Threshold__c';
+----
+1
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"DeveloperName":"Acme_Config","Threshold__c":12.5}]}';
+
+query TR
+SELECT DeveloperName, Threshold__c FROM sf.Something__mdt WHERE DeveloperName LIKE 'Acme%';
+----
+Acme_Config	12.5
+
+# === Custom Setting (__c): describe + scan ==================================
+statement ok
+SET sf_mock_describe_body = '{"name":"SomeSetting__c","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string","filterable":true},{"name":"MaxValue__c","type":"double"}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Name":"Default","MaxValue__c":99.0}]}';
+
+query TR
+SELECT Name, MaxValue__c FROM sf.SomeSetting__c;
+----
+Default	99.0
+
+# === global listing: both queryable objects appear, non-queryable excluded ==
+query T
+SELECT table_name FROM duckdb_tables() WHERE database_name = 'sf' ORDER BY table_name;
+----
+SomeSetting__c
+Something__mdt
+
+# === read-only: writes throw (same as any sObject) ==========================
+statement error
+INSERT INTO sf.Something__mdt (DeveloperName) VALUES ('x');
+----
+INSERT not supported on Salesforce catalog
+
+statement ok
+DETACH sf;

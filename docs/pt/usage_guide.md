@@ -315,6 +315,43 @@ SHOW TABLES;
 SELECT * FROM duckdb_tables();
 ```
 
+### Custom Metadata e Custom Settings
+
+Custom Metadata Types (objetos cujo nome de API termina em `__mdt`) e Custom
+Settings consultáveis (objetos terminados em `__c`, dos tipos List e
+Hierarchy) aparecem como **tabelas sObject comuns, somente-leitura**, no
+catálogo anexado. Não há sintaxe especial nem tratamento especial: quando são
+consultáveis, eles aparecem na listagem global de objetos (`SHOW TABLES` /
+`duckdb_tables()`), e `DESCRIBE` + `SELECT` funcionam exatamente como em
+qualquer outro objeto — inclusive projection e predicate pushdown.
+
+```sql
+-- um Custom Metadata Type
+SELECT DeveloperName, Label
+FROM sf.Something__mdt
+LIMIT 10;
+
+-- uma Custom Setting consultável
+SELECT Id, Name
+FROM sf.SomeSetting__c
+LIMIT 10;
+```
+
+Pontos a conhecer:
+
+- **Isto é acesso a dados, não a Metadata API.** O conector apenas **lê** os
+  registros como linhas; ele **não** faz deploy, não cria nem modifica
+  metadados.
+- **A visibilidade segue as permissões** do usuário/org autenticado. Custom
+  Metadata protegido ou Custom Settings protegidos podem não aparecer ou não
+  ser legíveis, conforme as regras do próprio Salesforce.
+- **Tudo é somente-leitura.** Como em qualquer sObject, toda escrita lança erro
+  (o catálogo é somente-leitura).
+- Se você adicionar um novo tipo `__mdt` ou um novo campo **durante a sessão**,
+  chame `salesforce_refresh_metadata('<catalog>')` (ou
+  `salesforce_refresh_metadata('<catalog>', '<Object>')`) para que a próxima
+  referência re-descreva o schema.
+
 ## 5. Materializar resultados localmente
 
 Para manter um snapshot local e consultável (e fugir das limitações de

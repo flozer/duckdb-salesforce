@@ -335,7 +335,18 @@ Acceptance (met):
 > blobs), blob BODY fields are not directly readable as bytes on either
 > transport — fetch out-of-band by record Id. Docs updated EN/PT.
 
-### 12. Custom Metadata And Custom Settings Confirmation
+### 12. Custom Metadata And Custom Settings Confirmation — DONE
+
+> **Status: DONE (confirmation, no production code).** Custom Metadata Types
+> (`__mdt`) and queryable Custom Settings (`__c`, List + Hierarchy) flow through
+> the existing path with no special handling: `GlobalDescribe` lists them
+> (queryable filter), REST describe resolves their fields, and SELECT scans them
+> like any sObject (projection + predicate pushdown apply); writes throw
+> (read-only). It is data access, not the Metadata API. Visibility follows
+> user/org permissions (protected components may not appear). Covered by
+> test/sql/salesforce_custom_metadata.test (listing + describe + scan + read-only)
+> and documented EN/PT. Mid-session schema changes: refresh via
+> salesforce_refresh_metadata().
 
 Confirm and document how Salesforce Custom Metadata Types (`__mdt`) and Custom
 Settings behave through the existing scanner.
