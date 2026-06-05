@@ -1,0 +1,59 @@
+# name: test/sql/salesforce_blob_probe.test
+# description: v1.3 §11a — TEMPORARY secret-free format probe for undecodable base64/BLOB
+# group: [salesforce]
+#
+# When a base64/BLOB field value is not decodable as base64, the error describes
+# the value's FORMAT (URL-gated prefix, else length only) — never blob content.
+# This is the diagnostic that confirms what REST returns for Attachment.Body.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id"},{"name":"Body","type":"base64"}]}';
+
+statement ok
+SET sf_force_transport = 'rest';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- value looks like a URL reference -> structural prefix echoed -----------
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"a","Body":"/services/data/v60.0/sobjects/Attachment/00P000000000001/Body"}]}';
+
+statement error
+SELECT Body FROM sf.Account;
+----
+value looks like a URL reference
+
+statement error
+SELECT Body FROM sf.Account;
+----
+#v1.3 §11a probe
+
+# --- value is not a URL and not base64 -> length only, no content -----------
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"a","Body":"!!!"}]}';
+
+statement error
+SELECT Body FROM sf.Account;
+----
+value is not a URL (length=3)
+
+# --- valid inline base64 still decodes (no regression) ----------------------
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"a","Body":"aGVsbG8="}]}';
+
+query I
+SELECT Body = 'hello'::BLOB FROM sf.Account;
+----
+1
+
+statement ok
+DETACH sf;

@@ -13,6 +13,8 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 
+#include <cctype>
+
 namespace duckdb {
 
 // Standard base64 decode. Throws on invalid input.
@@ -117,22 +119,54 @@ void AppendJsonValue(Vector &vec, idx_t row, const SalesforceField &field,
     AppendTypedCell(vec, row, field, raw);
 }
 
+// #v1.3 §11a probe (TEMPORARY, diagnostic): when a base64/BLOB value fails to
+// decode, describe its FORMAT without ever printing blob content. If it looks
+// like a URL reference (starts with '/' or 'http'), echo a short structural
+// prefix — that is non-secret (a Salesforce blob endpoint path). Otherwise emit
+// only the length. Never echoes real blob bytes, secrets, or tokens.
+static string Base64FormatHint(const string &raw) {
+    bool url = (!raw.empty() && raw[0] == '/');
+    if (!url && raw.size() >= 4) {
+        string p = raw.substr(0, 4);
+        for (auto &c : p) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        url = (p == "http");
+    }
+    if (url) {
+        string prefix = raw.substr(0, raw.size() < 60 ? raw.size() : 60);
+        return StringUtil::Format("value looks like a URL reference (length=%llu, prefix='%s')",
+                                  (unsigned long long)raw.size(), prefix);
+    }
+    return StringUtil::Format("value is not a URL (length=%llu)", (unsigned long long)raw.size());
+}
+
 void AppendTypedCell(Vector &vec, idx_t row, const SalesforceField &field, const string &raw) {
     const auto &type = field.duckdb_type;
-    try {
-        // String/blob go through the vector's own string heap (the correct
-        // vectorized path — SetValue would build a malformed string_t here).
-        if (type.id() == LogicalTypeId::VARCHAR) {
-            FlatVector::GetData<string_t>(vec)[row] = StringVector::AddString(vec, raw);
-            return;
-        }
-        if (type.id() == LogicalTypeId::BLOB) {
+    // String/blob go through the vector's own string heap (the correct
+    // vectorized path — SetValue would build a malformed string_t here).
+    if (type.id() == LogicalTypeId::VARCHAR) {
+        FlatVector::GetData<string_t>(vec)[row] = StringVector::AddString(vec, raw);
+        return;
+    }
+    if (type.id() == LogicalTypeId::BLOB) {
+        // Handled outside the generic try so the secret-free format hint below
+        // is not swallowed/replaced by the generic decode error.
+        try {
             string bytes = DecodeBase64(raw);
             FlatVector::GetData<string_t>(vec)[row] =
                 StringVector::AddStringOrBlob(vec, bytes.data(), bytes.size());
             return;
+        } catch (const std::exception &) {
+            throw InvalidInputException(
+                "salesforce: field '%s' (Salesforce type '%s') is not decodable as "
+                "BLOB — %s. [#v1.3 §11a probe: REST may return a URL reference for "
+                "blob bodies rather than inline base64.]",
+                field.name, field.sf_type, Base64FormatHint(raw));
         }
+    }
 
+    try {
         // Fixed-width types store inline — SetValue(cast) is correct.
         Value v;
         switch (type.id()) {
