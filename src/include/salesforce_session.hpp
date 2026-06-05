@@ -76,6 +76,10 @@ public:
     // GET /services/data/<api_version>/sobjects/<object>/describe -> schema.
     SalesforceDescribe Describe(const string &object);
 
+    // Raw describe JSON body for <object> (#v1.3 §14). Used by the picklist /
+    // record-type metadata functions, which parse fields the scan schema drops.
+    string DescribeJson(const string &object);
+
     // Tooling API fast schema discovery (#v0.6 §6). One (chunked, paginated)
     // Tooling SOQL over FieldDefinition fetches the fields of MANY objects at
     // once, mapping the coarse DataType display strings. Compound fields are

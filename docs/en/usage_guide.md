@@ -775,6 +775,41 @@ must be an attached Salesforce catalog — otherwise you get a clear,
 secret-free error (`no attached catalog named '<x>'` or `catalog '<x>' is not a
 Salesforce catalog`).
 
+### Picklist values and record types
+
+Two read-only metadata table functions expose a field's picklist values and an
+object's record types as rows. Both read from the object's standard REST
+describe — no Metadata API, no SOAP, no Tooling — so they never deploy or change
+anything. Both reuse an org you have already attached (the first argument is the
+`ATTACH` alias), and the describe is cached **per `ATTACH`** and shared by both;
+clear it with `salesforce_refresh_metadata()` to pick up a new value or record
+type mid-session.
+
+`salesforce_picklist_values(catalog, object, field)` returns one row per
+picklist value of a field — `value`, `label`, `active`, and `is_default`. It is
+the field's **full catalog**: active **and** inactive values, not filtered by
+record type and without resolving dependent picklists. Add `WHERE active` for
+the active subset:
+
+```sql
+-- all Industry picklist values (active + inactive)
+SELECT value, label FROM salesforce_picklist_values('sf', 'Account', 'Industry');
+-- active only
+SELECT value FROM salesforce_picklist_values('sf', 'Account', 'Industry') WHERE active;
+```
+
+A field that exists but is **not** a picklist returns **0 rows** (not an error).
+An unknown catalog alias, an alias that is not a Salesforce catalog, or a field
+not found on the object gives a clear, secret-free error.
+
+`salesforce_record_types(catalog, object)` returns one row per record type —
+`developer_name`, `label`, `record_type_id`, `active`, and `is_default`:
+
+```sql
+-- record types
+SELECT developer_name, label, is_default FROM salesforce_record_types('sf', 'Account');
+```
+
 ## 13. Server-side aggregates (opt-in)
 
 Transparent `MIN`/`MAX`/`SUM`/`AVG` pushdown is not available yet (aggregate

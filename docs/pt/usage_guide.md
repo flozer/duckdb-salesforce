@@ -739,6 +739,51 @@ A função devolve uma linha com `catalog`, `scope` (`global` ou `object`) e
 Salesforce anexado, senão você recebe um erro claro de alias inexistente ou de
 catálogo que não é Salesforce.
 
+### Valores de picklist e record types
+
+Duas table functions de metadados **somente leitura** expõem, direto no SQL,
+o catálogo de valores de um campo picklist e os record types de um objeto.
+Ambas reutilizam a sessão autenticada de um catálogo já anexado por `ATTACH`
+(o primeiro argumento é o alias, ex. `'sf'`) e leem a partir do **REST
+describe** do objeto — não é a Metadata API (sem SOAP, sem Tooling) e não há
+deploy/retrieve/CRUD.
+
+`salesforce_picklist_values(catalog, object, field)` devolve **uma linha por
+valor** do campo picklist, com as colunas `value`, `label`, `active` e
+`is_default`. O escopo é o catálogo **completo** do campo: traz os valores
+**ativos e inativos**, e `is_default` marca o default. Ela **não** filtra por
+record type e **não** resolve dependent picklists. Para ver só os ativos,
+filtre com `WHERE active`:
+
+```sql
+-- todos os valores de picklist de Industry (ativos + inativos)
+SELECT value, label FROM salesforce_picklist_values('sf', 'Account', 'Industry');
+-- só ativos
+SELECT value FROM salesforce_picklist_values('sf', 'Account', 'Industry') WHERE active;
+```
+
+`salesforce_record_types(catalog, object)` devolve **uma linha por record
+type**, com as colunas `developer_name`, `label`, `record_type_id`, `active`
+e `is_default`:
+
+```sql
+-- record types
+SELECT developer_name, label, is_default FROM salesforce_record_types('sf', 'Account');
+```
+
+Pontos a conhecer:
+
+- **Cache por `ATTACH`.** O describe raw do objeto é buscado **uma vez por
+  objeto** e reutilizado pelas duas funções e por chamadas repetidas (cache em
+  memória). Use `salesforce_refresh_metadata('<catalog>')` ou
+  `salesforce_refresh_metadata('<catalog>', '<Object>')` para limpá-lo e forçar
+  a próxima chamada a re-descrever o objeto.
+- **Erros claros (sem segredos).** Alias de catálogo desconhecido, ou um alias
+  que não é catálogo Salesforce, ou (no caso do picklist) um campo inexistente
+  no objeto → erro claro.
+- **Campo não-picklist → 0 linhas.** Um campo que existe mas não é picklist
+  devolve zero linhas em `salesforce_picklist_values()` — não é erro.
+
 ### Agregados server-side explícitos (`salesforce_aggregate`)
 
 Quando você só quer o agregado — um total, uma média, um mínimo/máximo ou uma

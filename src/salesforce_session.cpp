@@ -187,10 +187,14 @@ bool SalesforceSession::TryEstimateCount(const string &count_soql, int64_t &out_
     }
 }
 
-SalesforceDescribe SalesforceSession::Describe(const string &object) {
+string SalesforceSession::DescribeJson(const string &object) {
     string path =
         "/services/data/" + config_.api_version + "/sobjects/" + object + "/describe";
-    string body = AuthorizedGet(path);
+    return AuthorizedGet(path);
+}
+
+SalesforceDescribe SalesforceSession::Describe(const string &object) {
+    string body = DescribeJson(object);
     SalesforceDescribe d = ParseDescribe(body, object);
     // Authoritative: we described /sobjects/<object>/describe, so the object
     // name IS `object`. Do not trust a name scraped from the JSON — a naive

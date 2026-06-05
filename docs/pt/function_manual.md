@@ -1096,6 +1096,131 @@ SELECT * FROM salesforce_refresh_metadata('sf', 'Account');  -- re-descreve Acco
 SELECT * FROM salesforce_refresh_metadata('sf');
 ```
 
+### `salesforce_picklist_values(catalog, object, field)`
+
+#### O que faz
+
+Retorna o catálogo de valores de um campo **picklist** de um sObject, uma
+linha por valor — incluindo valores **ativos e inativos**.
+
+#### Como funciona
+
+A função reutiliza a sessão autenticada de um catálogo já anexado por
+`ATTACH` (o primeiro argumento é o alias desse catálogo) e lê os valores a
+partir do **REST describe** do objeto — o mesmo describe que carrega
+`picklistValues` por campo. Não é a Metadata API: **sem SOAP, sem Tooling**.
+É **somente leitura**; não faz deploy, retrieve nem CRUD.
+
+Argumentos (todos posicionais):
+
+| Argumento | Obrigatório | Significado |
+|---|---|---|
+| `catalog` | sim | Alias do `ATTACH` de uma org Salesforce anexada; a auth desse catálogo é reutilizada |
+| `object` | sim | Nome de API do sObject (ex. `Account`) |
+| `field` | sim | Nome de API do campo picklist (ex. `Industry`) |
+
+Colunas de saída — uma linha por valor de picklist:
+
+| Coluna | Tipo | Notas |
+|---|---|---|
+| `value` | VARCHAR | O valor de API da entrada de picklist |
+| `label` | VARCHAR | O rótulo exibido da entrada |
+| `active` | BOOLEAN | Se o valor está ativo |
+| `is_default` | BOOLEAN | Se o valor é o default do campo |
+
+#### Cache por `ATTACH` e refresh
+
+O describe raw do objeto é buscado **uma vez por objeto** e reutilizado por
+esta função, por `salesforce_record_types()` e por chamadas repetidas — é um
+cache **em memória**, por `ATTACH`. Para forçar um rebusca depois de uma
+mudança de metadados na org, use `salesforce_refresh_metadata(catalog[,
+object])`, que limpa o cache; a próxima chamada re-descreve o objeto.
+
+#### Escopo do picklist
+
+O escopo é o catálogo **completo** do campo: a função devolve os valores
+**ativos e inativos**, e `is_default` marca o default. Ela **não** filtra por
+record type e **não** resolve dependent picklists (limitação documentada).
+Para ver só os valores ativos, filtre com `WHERE active`.
+
+#### Erros e casos de borda
+
+- Alias de catálogo desconhecido, ou um alias que não é um catálogo
+  Salesforce, ou um campo que não existe no objeto → **erro claro** (sem
+  expor segredos).
+- Um campo que **existe mas não é picklist** → **0 linhas** (não é erro).
+
+#### Para que serve
+
+Permite inspecionar, direto no SQL, quais valores um campo picklist aceita —
+útil para validar dados, montar filtros ou documentar o domínio de um campo —
+sem abrir o Setup do Salesforce.
+
+#### Uso no dia a dia
+
+```sql
+-- todos os valores de picklist de Industry (ativos + inativos)
+SELECT value, label FROM salesforce_picklist_values('sf', 'Account', 'Industry');
+-- só ativos
+SELECT value FROM salesforce_picklist_values('sf', 'Account', 'Industry') WHERE active;
+```
+
+### `salesforce_record_types(catalog, object)`
+
+#### O que faz
+
+Retorna os **record types** de um sObject, uma linha por record type.
+
+#### Como funciona
+
+Como `salesforce_picklist_values()`, reutiliza a sessão autenticada de um
+catálogo anexado por `ATTACH` (primeiro argumento) e lê a partir do **REST
+describe** do objeto — o mesmo describe que carrega `recordTypeInfos` por
+objeto. Não é a Metadata API: **sem SOAP, sem Tooling**. É **somente
+leitura**.
+
+Argumentos (todos posicionais):
+
+| Argumento | Obrigatório | Significado |
+|---|---|---|
+| `catalog` | sim | Alias do `ATTACH` de uma org Salesforce anexada; a auth desse catálogo é reutilizada |
+| `object` | sim | Nome de API do sObject (ex. `Account`) |
+
+Colunas de saída — uma linha por record type:
+
+| Coluna | Tipo | Notas |
+|---|---|---|
+| `developer_name` | VARCHAR | O Developer Name do record type |
+| `label` | VARCHAR | O rótulo exibido do record type |
+| `record_type_id` | VARCHAR | O Id do record type |
+| `active` | BOOLEAN | Se o record type está ativo |
+| `is_default` | BOOLEAN | Se é o record type default |
+
+#### Cache por `ATTACH` e refresh
+
+O describe raw do objeto é buscado **uma vez por objeto** e compartilhado com
+`salesforce_picklist_values()` e com chamadas repetidas — cache **em
+memória**, por `ATTACH`. Use `salesforce_refresh_metadata(catalog[, object])`
+para limpar o cache e forçar a próxima chamada a re-descrever o objeto.
+
+#### Erros
+
+Alias de catálogo desconhecido, ou um alias que não é um catálogo Salesforce
+→ **erro claro** (sem expor segredos).
+
+#### Para que serve
+
+Permite descobrir, no SQL, quais record types um objeto tem e qual é o
+default — útil para mapear dados por record type ou documentar a configuração
+do objeto.
+
+#### Uso no dia a dia
+
+```sql
+-- record types
+SELECT developer_name, label, is_default FROM salesforce_record_types('sf', 'Account');
+```
+
 ## Nível 4 - Funções utilitárias / autônomas
 
 Estas funções recebem as credenciais como argumentos nomeados e **não**

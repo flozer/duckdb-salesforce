@@ -10,6 +10,7 @@
 #include "salesforce_diag.hpp"
 #include "salesforce_reldiag.hpp"
 #include "salesforce_aggregate.hpp"
+#include "salesforce_metadata.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
@@ -96,6 +97,12 @@ static void LoadInternal(ExtensionLoader &loader) {
     // object-listing cache so the next reference re-describes. Empty object =
     // global; a named object clears only that object. No data/disk cache.
     loader.RegisterFunction(GetSalesforceRefreshMetadataFunction());
+
+    // salesforce_picklist_values(catalog, object, field) +
+    // salesforce_record_types(catalog, object) — read-only metadata enrichment
+    // (#v1.3 §14) parsed from the cached REST describe. Not the Metadata API.
+    loader.RegisterFunction(GetSalesforcePicklistValuesFunction());
+    loader.RegisterFunction(GetSalesforceRecordTypesFunction());
 
     // salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the
     // attached catalog issued since ATTACH (proves the metadata cache, #12).

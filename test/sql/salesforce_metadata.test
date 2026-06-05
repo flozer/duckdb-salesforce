@@ -1,0 +1,94 @@
+# name: test/sql/salesforce_metadata.test
+# description: v1.3 §14 — salesforce_picklist_values() + salesforce_record_types() (read-only, cached per ATTACH)
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Describe for Account: a picklist field (Industry, with active + inactive
+# values), a non-picklist field (Name), and two record types.
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id"},{"name":"Name","type":"string"},{"name":"Industry","type":"picklist","picklistValues":[{"value":"Tech","label":"Technology","active":true,"defaultValue":true},{"value":"Fin","label":"Finance","active":true,"defaultValue":false},{"value":"Old","label":"Legacy","active":false,"defaultValue":false}]}],"recordTypeInfos":[{"name":"Business","developerName":"Business","recordTypeId":"012000000000001","active":true,"defaultRecordTypeMapping":true},{"name":"Person","developerName":"PersonAccount","recordTypeId":"012000000000002","active":true,"defaultRecordTypeMapping":false}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === picklist values: full catalog (active + inactive), default flagged =====
+query TTII
+SELECT value, label, active::INT, is_default::INT
+FROM salesforce_picklist_values('sf', 'Account', 'Industry') ORDER BY value;
+----
+Fin	Finance	1	0
+Old	Legacy	0	0
+Tech	Technology	1	1
+
+# active-only filter (the documented day-to-day pattern)
+query I
+SELECT count(*) FROM salesforce_picklist_values('sf', 'Account', 'Industry') WHERE active;
+----
+2
+
+# === record types ==========================================================
+query TTTII
+SELECT developer_name, label, record_type_id, active::INT, is_default::INT
+FROM salesforce_record_types('sf', 'Account') ORDER BY developer_name;
+----
+Business	Business	012000000000001	1	1
+PersonAccount	Person	012000000000002	1	0
+
+# === cached per ATTACH: both functions + repeats = ONE describe =============
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# field not found -> clear error
+statement error
+SELECT * FROM salesforce_picklist_values('sf', 'Account', 'Nope');
+----
+field 'Nope' not found on object 'Account'
+
+# non-picklist field -> 0 rows (not an error)
+query I
+SELECT count(*) FROM salesforce_picklist_values('sf', 'Account', 'Name');
+----
+0
+
+# still one describe (all served from cache)
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# === refresh clears the cache -> next call re-describes =====================
+statement ok
+SELECT * FROM salesforce_refresh_metadata('sf', 'Account');
+
+query I
+SELECT count(*) FROM salesforce_picklist_values('sf', 'Account', 'Industry');
+----
+3
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
+
+# === errors: unknown catalog / not a salesforce catalog =====================
+statement error
+SELECT * FROM salesforce_record_types('nope', 'Account');
+----
+no attached catalog named 'nope'
+
+statement error
+SELECT * FROM salesforce_record_types('memory', 'Account');
+----
+is not a Salesforce catalog
+
+statement ok
+DETACH sf;

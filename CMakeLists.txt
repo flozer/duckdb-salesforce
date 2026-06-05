@@ -35,6 +35,7 @@ set(EXTENSION_SOURCES
     src/salesforce_diag.cpp
     src/salesforce_reldiag.cpp
     src/salesforce_aggregate.cpp
+    src/salesforce_metadata.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

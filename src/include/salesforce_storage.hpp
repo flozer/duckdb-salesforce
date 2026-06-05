@@ -19,6 +19,12 @@ void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias
 // catalog's in-memory metadata cache (#v1.3 §10). Empty object = global.
 TableFunction GetSalesforceRefreshMetadataFunction();
 
+// Raw describe JSON for `object` on an attached salesforce catalog, cached per
+// ATTACH (#v1.3 §14). Throws if `alias` is not a Salesforce catalog. Used by the
+// picklist / record-type metadata functions.
+string GetSalesforceObjectDescribeJson(ClientContext &context, const string &alias,
+                                       const string &object);
+
 // Returns the StorageExtension registered under the name "salesforce" so that
 //
 //     ATTACH 'salesforce://production' AS sf (TYPE salesforce);

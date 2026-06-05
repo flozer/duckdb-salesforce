@@ -1208,6 +1208,118 @@ SELECT * FROM salesforce_refresh_metadata('sf', 'Account');  -- re-describe Acco
 SELECT * FROM salesforce_refresh_metadata('sf');
 ```
 
+## Level 4b - Picklist values and record types
+
+Two read-only metadata table functions expose, as rows, the picklist
+catalogs and record types of an sObject. Both read from the standard REST
+**describe** of the object — the same describe response that carries
+`picklistValues` per field and `recordTypeInfos` per object. Neither uses
+the Salesforce Metadata API, SOAP, or the Tooling API, and neither deploys,
+retrieves, or changes anything: they are strictly read-only.
+
+Both reuse an org you have already attached — the first argument is the
+`ATTACH` alias, and the function reuses that catalog's authenticated session
+(no re-auth, no credentials in the call).
+
+The describe is **cached per `ATTACH`**: the connector fetches the raw
+describe for an object once and reuses it across both functions and repeat
+calls. It is an in-memory cache only — there is no on-disk cache. To pick up
+a schema change (a new picklist value, a new record type) within a
+long-lived session, clear it with
+`salesforce_refresh_metadata(catalog [, object])`; the next call re-fetches.
+
+### `salesforce_picklist_values(catalog, object, field)`
+
+#### What it does
+
+Returns **one row per picklist value** of a field — the field's full value
+catalog, exactly as the describe reports it.
+
+#### How it works
+
+All arguments are `VARCHAR` string literals:
+
+| Argument | Required | Meaning |
+|---|---|---|
+| `catalog` | yes | The `ATTACH` alias of an already-attached Salesforce org (for example `'sf'`). Reuses that catalog's authenticated session. |
+| `object` | yes | The sObject that owns the field (for example `'Account'`). |
+| `field` | yes | The API name of the field (for example `'Industry'`). |
+
+It returns one row per value:
+
+| Column | Type | Notes |
+|---|---|---|
+| `value` | VARCHAR | The stored API value of the picklist entry |
+| `label` | VARCHAR | The display label for that value |
+| `active` | BOOLEAN | `true` for an active value, `false` for an inactive one |
+| `is_default` | BOOLEAN | `true` for the field's default value |
+
+#### Scope
+
+The result is the field's **full catalog** — **both active and inactive**
+values — and `is_default` flags the default. The set is **not** filtered by
+record type, and dependent picklists are **not** resolved (a documented
+limitation): you get the field's complete value list, not the subset a given
+record type or controlling field would allow. To see only active values, add
+`WHERE active`.
+
+#### Errors
+
+The errors are clear and secret-free:
+
+- If no catalog with that alias is attached, or the alias names a catalog
+  that is not a Salesforce catalog: a clear error.
+- If the field is not found on the object: a clear error.
+- A field that **exists but is not a picklist** is **not** an error — the
+  function simply returns **0 rows**.
+
+#### Daily use
+
+```sql
+-- all Industry picklist values (active + inactive)
+SELECT value, label FROM salesforce_picklist_values('sf', 'Account', 'Industry');
+-- active only
+SELECT value FROM salesforce_picklist_values('sf', 'Account', 'Industry') WHERE active;
+```
+
+### `salesforce_record_types(catalog, object)`
+
+#### What it does
+
+Returns **one row per record type** defined on an sObject, read from the
+`recordTypeInfos` of the object's describe.
+
+#### How it works
+
+Both arguments are `VARCHAR` string literals:
+
+| Argument | Required | Meaning |
+|---|---|---|
+| `catalog` | yes | The `ATTACH` alias of an already-attached Salesforce org (for example `'sf'`). Reuses that catalog's authenticated session. |
+| `object` | yes | The sObject whose record types you want (for example `'Account'`). |
+
+It returns one row per record type:
+
+| Column | Type | Notes |
+|---|---|---|
+| `developer_name` | VARCHAR | The record type's developer (API) name |
+| `label` | VARCHAR | The record type's display label |
+| `record_type_id` | VARCHAR | The 18- or 15-character record type Id |
+| `active` | BOOLEAN | `true` if the record type is active |
+| `is_default` | BOOLEAN | `true` for the object's default record type |
+
+#### Errors
+
+The errors are clear and secret-free: an unknown catalog alias, or an alias
+that is not a Salesforce catalog, produces a clear error.
+
+#### Daily use
+
+```sql
+-- record types
+SELECT developer_name, label, is_default FROM salesforce_record_types('sf', 'Account');
+```
+
 ## Level 5 - Server-side aggregates
 
 This is a single table function that runs a SOQL aggregate query for you and

@@ -439,12 +439,36 @@ public:
             tables_.clear();
             listing_.clear();
             parent_describe_cache_.clear();
+            describe_json_cache_.clear();
             object_list_loaded_ = false;
             return;
         }
         const string key = StringUtil::Lower(object);
         tables_.erase(key);
         parent_describe_cache_.erase(key);
+        describe_json_cache_.erase(key);
+    }
+
+    // Raw describe JSON for `object`, cached per ATTACH (#v1.3 §14). Reused by
+    // the picklist / record-type metadata functions; one describe per object,
+    // cleared by RefreshMetadata. No data cache — metadata only.
+    string DescribeJsonCached(ClientContext &context, const string &object) {
+        const string key = StringUtil::Lower(object);
+        {
+            std::lock_guard<std::mutex> g(lock_);
+            auto it = describe_json_cache_.find(key);
+            if (it != describe_json_cache_.end()) {
+                return it->second;
+            }
+        }
+        auto client = BuildHttpClientForContext(context);
+        SalesforceSession session(config_, *client);
+        session.SetToken(token_);
+        IncDescribeCalls(); // DEBUG/TEST counter
+        string body = session.DescribeJson(object);
+        std::lock_guard<std::mutex> g(lock_);
+        describe_json_cache_[key] = body;
+        return body;
     }
 
 private:
@@ -470,6 +494,9 @@ private:
     // catalog so a parent is described once regardless of how many child fields
     // (or child objects) reference it.
     std::unordered_map<string, SalesforceDescribe> parent_describe_cache_;
+    // Raw describe JSON per object (#v1.3 §14), for the picklist / record-type
+    // metadata functions. In-memory only; cleared by RefreshMetadata.
+    std::unordered_map<string, string> describe_json_cache_;
 };
 
 // ---------------------------------------------------------------------------
@@ -493,6 +520,14 @@ public:
         if (main_schema_) {
             main_schema_->RefreshMetadata(object);
         }
+    }
+
+    // Raw describe JSON for an object, cached per ATTACH (#v1.3 §14).
+    string DescribeJsonForObject(ClientContext &context, const string &object) {
+        if (!main_schema_) {
+            Initialize(false);
+        }
+        return main_schema_->DescribeJsonCached(context, object);
     }
 
     void Initialize(bool) override {
@@ -681,6 +716,30 @@ void RefreshSalesforceCatalogMetadata(ClientContext &context, const string &alia
             alias);
     }
     catalog->Cast<SalesforceCatalog>().RefreshMetadata(object);
+}
+
+// Raw describe JSON for `object` on an attached salesforce catalog, cached per
+// ATTACH (#v1.3 §14). Throws a clear, secret-free error if the alias is not a
+// Salesforce catalog. Used by salesforce_picklist_values / salesforce_record_types.
+string GetSalesforceObjectDescribeJson(ClientContext &context, const string &alias,
+                                       const string &object) {
+    Catalog *catalog = nullptr;
+    try {
+        catalog = &Catalog::GetCatalog(context, alias);
+    } catch (...) {
+        catalog = nullptr;
+    }
+    if (!catalog) {
+        throw BinderException(
+            "salesforce metadata: no attached catalog named '%s' — ATTACH a "
+            "Salesforce org first, then pass its alias.",
+            alias);
+    }
+    if (catalog->GetCatalogType() != "salesforce") {
+        throw BinderException(
+            "salesforce metadata: catalog '%s' is not a Salesforce catalog.", alias);
+    }
+    return catalog->Cast<SalesforceCatalog>().DescribeJsonForObject(context, object);
 }
 
 namespace {

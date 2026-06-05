@@ -396,7 +396,21 @@ Acceptance:
   a documented reason.
 - REST JSON and Bulk CSV parity remains tested.
 
-### 14. Narrow Metadata Fallback For Picklists And Record Types
+### 14. Narrow Metadata Fallback For Picklists And Record Types — DONE
+
+> **Status: DONE.** Two explicit, read-only table functions, parsed from the
+> REST describe (which already carries picklistValues + recordTypeInfos) — no
+> Metadata API, no SOAP, no Tooling, no writes:
+> - `salesforce_picklist_values(catalog, object, field)` -> value, label,
+>   active, is_default (the field's FULL catalog: active + inactive; NOT
+>   record-type-filtered, NO dependent-picklist resolution).
+> - `salesforce_record_types(catalog, object)` -> developer_name, label,
+>   record_type_id, active, is_default.
+> Lazy + cached per ATTACH (raw describe cached per object, reused by both
+> functions, cleared by salesforce_refresh_metadata()). Default schema/scan
+> untouched. Clear errors (unknown/non-SF catalog, field-not-found);
+> non-picklist field -> 0 rows. Covered by test/sql/salesforce_metadata.test;
+> docs EN/PT.
 
 Evaluate a narrow, lazy metadata enrichment path for cases where Describe or
 Tooling does not expose enough detail for analytical users.
