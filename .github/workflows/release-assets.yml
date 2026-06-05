@@ -1,0 +1,144 @@
+name: Build Release Assets
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to upload assets to (defaults to current ref/tag)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  DUCKDB_VERSION: v1.5.3
+
+jobs:
+  linux-x64:
+    name: linux-x64 release asset
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build g++ pkg-config python3 ccache
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=1G
+          echo "PATH=/usr/lib/ccache:$PATH" >> $GITHUB_ENV
+
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/.ccache
+          key: ccache-release-linux-salesforce-${{ env.DUCKDB_VERSION }}-${{ github.sha }}
+          restore-keys: ccache-release-linux-salesforce-${{ env.DUCKDB_VERSION }}-
+
+      - name: Pin DuckDB version
+        run: DUCKDB_GIT_VERSION=${DUCKDB_VERSION} make set_duckdb_version
+
+      - name: Build
+        env:
+          GEN: ninja
+        run: make release
+
+      - name: Package
+        run: bash scripts/package_dist_linux.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: duckdb-salesforce-linux-x64
+          path: dist/duckdb-salesforce-*-linux-x64.tar.gz
+          if-no-files-found: error
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+        run: |
+          notes_file="docs/RELEASE_NOTES_${RELEASE_TAG}.md"
+          notes_args=(--notes "Automated release assets for ${RELEASE_TAG}.")
+          if [ -f "$notes_file" ]; then
+            notes_args=(--notes-file "$notes_file")
+          fi
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" "${notes_args[@]}" \
+              || gh release view "$RELEASE_TAG" >/dev/null
+          fi
+          gh release upload "$RELEASE_TAG" dist/duckdb-salesforce-*-linux-x64.tar.gz --clobber
+
+  windows-x64:
+    name: windows-x64 release asset
+    runs-on: windows-latest
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja
+        shell: pwsh
+        run: choco install ninja -y --no-progress
+
+      - name: Build
+        shell: pwsh
+        env:
+          DUCKDB_VERSION: ${{ env.DUCKDB_VERSION }}
+        run: scripts/build_windows_release.ps1
+
+      - name: Package
+        shell: pwsh
+        run: scripts/package_dist_windows.ps1
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: duckdb-salesforce-windows-x64
+          path: dist/duckdb-salesforce-*-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+        run: |
+          $notesFile = "docs/RELEASE_NOTES_$env:RELEASE_TAG.md"
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path $notesFile) {
+              gh release create $env:RELEASE_TAG --title $env:RELEASE_TAG --notes-file $notesFile
+            } else {
+              gh release create $env:RELEASE_TAG --title $env:RELEASE_TAG --notes "Automated release assets for $env:RELEASE_TAG."
+            }
+            if ($LASTEXITCODE -ne 0) {
+              gh release view $env:RELEASE_TAG *> $null
+              if ($LASTEXITCODE -ne 0) { throw "Release $env:RELEASE_TAG does not exist and could not be created." }
+            }
+          }
+          gh release upload $env:RELEASE_TAG dist/duckdb-salesforce-*-windows-x64.zip --clobber
