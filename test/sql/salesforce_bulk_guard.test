@@ -1,0 +1,98 @@
+# name: test/sql/salesforce_bulk_guard.test
+# description: v1.3 §11 — Bulk compatibility guard: projected base64/blob field forbidden on Bulk
+# group: [salesforce]
+#
+# Live-confirmed: Bulk API 2.0 query CSV rejects blob fields
+# ("Blob field not supported in Bulk V2 Query with CSV content type"). The guard
+# keeps 'auto' off Bulk and rejects a forced 'bulk' before any job is created.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"Blob","type":"base64"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === forced bulk + projected base64 -> hard error (no job created) ===========
+statement ok
+SET sf_force_transport = 'bulk';
+
+statement ok
+SET sf_mock_bulk_create_body = '{"id":"J","state":"UploadComplete"}';
+
+statement ok
+SET sf_mock_bulk_status_body = '{"state":"JobComplete"}';
+
+statement error
+SELECT Id, Blob FROM sf.Account;
+----
+projected base64 field 'Blob' is not supported by Bulk API 2.0 CSV
+
+# === forced bulk, base64 NOT projected -> Bulk allowed ======================
+statement ok
+SET sf_mock_bulk_results_body = 'Id
+001';
+
+query I
+SELECT COUNT(*) FROM sf.Account;
+----
+1
+
+query T
+SELECT transport FROM salesforce_last_transport();
+----
+bulk
+
+# === forced bulk, only a non-base64 field projected -> Bulk allowed =========
+statement ok
+SET sf_mock_bulk_results_body = 'Name
+Acme';
+
+query T
+SELECT Name FROM sf.Account WHERE Name LIKE 'Ac%';
+----
+Acme
+
+# === auto + projected base64 -> falls back to REST, reason recorded =========
+# Force the would-be-Bulk decision (threshold 0, non-empty count), then the
+# guard flips it to REST.
+statement ok
+SET sf_force_transport = 'auto';
+
+statement ok
+SET sf_auto_bulk_threshold = 0;
+
+statement ok
+SET sf_mock_count_body = '{"totalSize":100,"done":true,"records":[]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Blob":"aGVsbG8="}]}';
+
+query T
+SELECT Blob = 'hello'::BLOB FROM sf.Account;
+----
+true
+
+query T
+SELECT transport FROM salesforce_last_transport();
+----
+rest
+
+query T
+SELECT reason LIKE '%bulk-incompatible (projected base64 field ''Blob'')%'
+FROM salesforce_last_transport();
+----
+true
+
+statement ok
+SET sf_force_transport = 'rest';
+
+statement ok
+DETACH sf;

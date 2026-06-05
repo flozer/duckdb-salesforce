@@ -209,6 +209,26 @@ static unique_ptr<FunctionData> ScanBind(ClientContext &, TableFunctionBindInput
         "salesforce_scan is catalog-internal and cannot be called directly");
 }
 
+// First projected base64/blob field (dotted path for a nested parent field),
+// or "" if none. Live-confirmed: Bulk API 2.0 query CSV rejects blob fields
+// ("Blob field not supported in Bulk V2 Query with CSV content type"), so a
+// projected base64 field makes the Bulk transport incompatible (#v1.3 §11).
+static string FindProjectedBase64(const SalesforceField &f, const string &prefix) {
+    if (f.is_relationship) {
+        for (auto &c : f.children) {
+            string r = FindProjectedBase64(c, prefix + f.relationship_name + ".");
+            if (!r.empty()) {
+                return r;
+            }
+        }
+        return "";
+    }
+    if (StringUtil::Lower(f.sf_type) == "base64") {
+        return prefix + f.name;
+    }
+    return "";
+}
+
 static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &context,
                                                            TableFunctionInitInput &input) {
     auto &bind = input.bind_data->Cast<SalesforceScanBindData>();
@@ -233,6 +253,21 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     }
     if (select_fields.empty() && !bind.fields.empty()) {
         select_fields.push_back(bind.fields[0].name);
+    }
+
+    // Bulk compatibility guard (#v1.3 §11): a projected base64/blob field is not
+    // returned by Bulk API 2.0 query CSV (live-confirmed). Detected from
+    // metadata; used below to keep 'auto' off Bulk and to reject a forced
+    // 'bulk' with a clear error before any job is created.
+    string base64_field;
+    for (auto col : input.column_ids) {
+        if (col >= bind.fields.size()) {
+            continue;
+        }
+        base64_field = FindProjectedBase64(bind.fields[col], "");
+        if (!base64_field.empty()) {
+            break;
+        }
     }
 
     // Aggregate-only scan: DuckDB asked for ZERO real columns (COUNT(*),
@@ -333,6 +368,24 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
                     reason = "auto: probe failed -> rest";
                 }
             }
+        }
+    }
+
+    // Apply the Bulk compatibility guard (#v1.3 §11). A forced 'bulk' on a
+    // projected blob field is a hard error (no silent fallback, no job created);
+    // 'auto' that landed on Bulk falls back to REST with a recorded reason.
+    if (!base64_field.empty()) {
+        if (transport == "bulk") {
+            throw BinderException(
+                "projected base64 field '%s' is not supported by Bulk API 2.0 CSV; "
+                "use 'rest' or 'auto'.",
+                base64_field);
+        }
+        if (effective == "bulk") {
+            effective = "rest";
+            reason = StringUtil::Format(
+                "auto: bulk-incompatible (projected base64 field '%s') -> rest",
+                base64_field);
         }
     }
     SetLastTransport(effective, est_rows, reason);

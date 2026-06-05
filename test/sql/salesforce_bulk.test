@@ -25,7 +25,11 @@ SELECT Id FROM sf.Account;
 ----
 sf_force_transport must be 'rest', 'bulk' or 'auto'
 
-# --- Bulk decode: CSV edge cases (comma, escaped quotes, newline, empty, base64)
+# --- Bulk decode: CSV edge cases (comma, escaped quotes, newline, empty) ------
+# NOTE: the base64 `Blob` column is NOT projected here — Bulk API 2.0 query CSV
+# does not return blob fields, so the #v1.3 §11 guard rejects projecting it (see
+# the dedicated guard assertion below). The CSV still carries a Blob column;
+# these queries exercise the string edge cases on Name only.
 statement ok
 SET sf_force_transport = 'bulk';
 
@@ -50,25 +54,31 @@ SELECT COUNT(*) FROM sf.Account;
 # Rows are selected via LIKE (kept residual, so DuckDB applies it) — an exact
 # Id = '...' would be pushed to SOQL and erased, and the mock ignores the SOQL.
 
-# comma-in-field + base64 -> bytes
+# comma-in-field
 query I
-SELECT Name = 'Acme, Inc' AND Blob = 'hello'::BLOB FROM sf.Account WHERE Name LIKE 'Acme%';
+SELECT Name = 'Acme, Inc' FROM sf.Account WHERE Name LIKE 'Acme%';
 ----
 true
 
-# escaped quotes + empty cell -> NULL blob
+# escaped quotes
 query I
-SELECT Name = 'He said "hi"' AND Blob IS NULL FROM sf.Account WHERE Name LIKE 'He said%';
+SELECT Name = 'He said "hi"' FROM sf.Account WHERE Name LIKE 'He said%';
 ----
 true
 
 # newline inside quoted field (CRLF-agnostic: the source line ending may be \r\n)
 query I
 SELECT starts_with(Name, 'multi') AND ends_with(Name, 'line') AND contains(Name, chr(10))
-   AND Blob = 'A'::BLOB
 FROM sf.Account WHERE Name LIKE 'multi%';
 ----
 true
+
+# §v1.3 §11: projecting a base64/blob field over Bulk is rejected up front
+# (Bulk API 2.0 query CSV does not return blobs — live-confirmed).
+statement error
+SELECT Id, Blob FROM sf.Account;
+----
+projected base64 field 'Blob' is not supported by Bulk API 2.0 CSV
 
 # --- the Bulk job carries the same projection + predicate SOQL as REST -------
 # Inspect the exact /jobs/query create POST body. SELECT Id, Name ... WHERE

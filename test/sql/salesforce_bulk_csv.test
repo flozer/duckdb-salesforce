@@ -29,13 +29,14 @@ statement ok
 ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
 
 # --- typed decode of the curated row (selected via residual LIKE) -----------
+# Blb (base64) is NOT projected over Bulk — the #v1.3 §11 guard forbids it
+# (Bulk API 2.0 query CSV has no blobs). Blb parity is covered on the REST side.
 query I
 SELECT Amount = 1234.56 AND Cnt = 42 AND Score = 3.14
    AND Whn = TIMESTAMP '2024-01-15 10:20:30'
    AND Dy = DATE '2024-01-15'
    AND Clk = TIME '10:20:30'
    AND Flag = true
-   AND Blb = 'hello'::BLOB
 FROM sf.Account WHERE Name LIKE 'Acme%';
 ----
 true
@@ -48,13 +49,19 @@ FROM sf.Account WHERE Name LIKE 'Acme%';
 ----
 true
 
-# --- empty cells -> NULL across every type ----------------------------------
+# --- empty cells -> NULL across every type (Blb not projected over Bulk) -----
 query I
 SELECT Name IS NULL AND Amount IS NULL AND Cnt IS NULL AND Score IS NULL
-   AND Whn IS NULL AND Dy IS NULL AND Clk IS NULL AND Flag IS NULL AND Blb IS NULL
+   AND Whn IS NULL AND Dy IS NULL AND Clk IS NULL AND Flag IS NULL
 FROM sf.Account WHERE Id LIKE '%2';
 ----
 true
+
+# §v1.3 §11: projecting the base64 field over Bulk is rejected up front.
+statement error
+SELECT Id, Blb FROM sf.Account;
+----
+projected base64 field 'Blb' is not supported by Bulk API 2.0 CSV
 
 # --- REST JSON vs Bulk CSV parity: same row -> same typed values ------------
 statement ok

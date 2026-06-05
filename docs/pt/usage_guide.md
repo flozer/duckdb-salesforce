@@ -376,6 +376,39 @@ forçado para bulk:
 SELECT COUNT(*) FROM sf.Contact;
 ```
 
+### Bulk e campos blob/base64
+
+A Bulk API 2.0 query do Salesforce, no formato CSV, **não** retorna campos
+blob/base64. Forçar um desses campos faz o próprio Salesforce devolver o
+erro `Blob field not supported in Bulk V2 Query with CSV content type`. No
+DuckDB, os campos `base64` do Salesforce mapeiam para o tipo `BLOB`.
+
+Para evitar essa falha, a extensão tem um guard guiado por metadados: se um
+campo cujo tipo é `base64` estiver projetado no scan — em qualquer
+profundidade, inclusive dentro de um `STRUCT` de relacionamento pai — o
+transporte Bulk é tratado como incompatível. O comportamento depende de
+`sf_force_transport`:
+
+- **`auto`** — ao detectar um campo `base64` projetado, o scan permanece em
+  REST e **nunca** escolhe Bulk. O motivo registrado é
+  `auto: bulk-incompatible (projected base64 field 'NAME') -> rest`.
+- **`bulk`** (forçado) — a extensão falha com um erro claro **antes** de
+  criar qualquer job: `projected base64 field 'NAME' is not supported by
+  Bulk API 2.0 CSV; use 'rest' or 'auto'`.
+- **`rest`** — inalterado. O REST retorna os campos blob como `base64` no
+  JSON.
+
+Se o campo `base64` **não** for projetado, o Bulk é permitido normalmente.
+
+Orientação prática: para ler uma coluna blob/base64, use REST (o padrão) ou
+simplesmente não a projete num scan Bulk. A decisão e o motivo aparecem em
+`salesforce_last_transport()` e `salesforce_query_cost()` (colunas
+`transport` e `reason`).
+
+Nota de escopo: este guard é guiado por metadados e cobre apenas campos
+`base64`. Outros objetos não suportados pelo Bulk não são pré-listados; se
+forçados, vão aparecer como um erro claro do próprio job Bulk do Salesforce.
+
 ## 7. Extrações grandes: Bulk + PK chunking
 
 Para objetos muito grandes, a Bulk API 2.0 mais PK chunking paraleliza a

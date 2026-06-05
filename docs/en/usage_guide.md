@@ -396,6 +396,36 @@ when there is no residual filter and the scan is not forced to bulk:
 SELECT COUNT(*) FROM sf.Contact;
 ```
 
+### Bulk and blob/base64 fields
+
+Salesforce Bulk API 2.0 query results are delivered as CSV, and that CSV
+**does not return blob/base64 fields**. Forcing such a field through Bulk
+yields the Salesforce error *"Blob field not supported in Bulk V2 Query with
+CSV content type"*. In DuckDB, base64 Salesforce fields map to the `BLOB`
+type.
+
+The extension guards against this from metadata alone: if a projected field
+is of the base64 type — at any depth, including a base64 field inside a
+parent-relationship `STRUCT` — the three transports behave as follows:
+
+- **auto**: the scan stays on REST and never picks Bulk. The recorded reason
+  is `auto: bulk-incompatible (projected base64 field 'NAME') -> rest`.
+- **bulk** (forced): the scan fails with a clear error **before** any Bulk
+  job is created — `projected base64 field 'NAME' is not supported by Bulk
+  API 2.0 CSV; use 'rest' or 'auto'`.
+- **rest** (default): unchanged — REST returns blob fields as base64 in JSON.
+
+If the base64 field is **not** projected, Bulk is allowed as usual. The
+decision and its reason are visible in `salesforce_last_transport()` and
+`salesforce_query_cost()` (both report the transport and the reason).
+
+Practical guidance: to read a blob/base64 column, use REST (the default), or
+simply don't project that column in a Bulk scan.
+
+This guard is metadata-driven and covers base64 fields only. Other
+Bulk-unsupported objects are not pre-listed; if forced to Bulk, they surface
+as a clear Salesforce Bulk-job error instead.
+
 ## 7. Large extractions: Bulk + PK chunking
 
 For very large objects, Bulk API 2.0 plus PK chunking parallelizes the

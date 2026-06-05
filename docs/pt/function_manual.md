@@ -281,6 +281,28 @@ SET sf_force_transport = 'auto';
 SELECT Id, Name FROM sf.Account;
 ```
 
+#### Guard de compatibilidade Bulk para campos blob/base64
+
+A Bulk API 2.0 query CSV do Salesforce não retorna campos blob/base64 — os
+campos `base64` do Salesforce mapeiam para `BLOB` no DuckDB. Há um guard
+guiado por metadados que detecta um campo `base64` projetado em qualquer
+profundidade (inclusive dentro de um `STRUCT` de relacionamento pai) e
+ajusta o transporte:
+
+- Com `'auto'`, o scan permanece em REST e nunca escolhe Bulk; o motivo é
+  `auto: bulk-incompatible (projected base64 field 'NAME') -> rest`.
+- Com `'bulk'` (forçado), a extensão falha **antes** de criar o job com
+  `projected base64 field 'NAME' is not supported by Bulk API 2.0 CSV; use
+  'rest' or 'auto'` (caso contrário, o Salesforce devolveria `Blob field
+  not supported in Bulk V2 Query with CSV content type`).
+- Com `'rest'`, o comportamento é inalterado.
+
+Se o campo `base64` não for projetado, o Bulk é permitido normalmente. A
+decisão e o motivo ficam visíveis em `salesforce_last_transport()` e
+`salesforce_query_cost()` (colunas `transport` e `reason`). O guard cobre
+apenas campos `base64`; outros objetos não suportados pelo Bulk não são
+pré-listados e, se forçados, aparecem como erro claro do job Bulk.
+
 ### `sf_auto_bulk_threshold`
 
 #### O que faz

@@ -290,12 +290,21 @@ Acceptance:
 - Object-specific refresh does not clear unrelated objects.
 - Offline mock tests prove describe counters before/after refresh.
 
-### 11. REST-vs-Bulk Compatibility Guard
+### 11. REST-vs-Bulk Compatibility Guard — DONE (base64/blob, metadata-driven)
 
-Add conservative guards so Bulk is not selected for objects or field shapes known
-to be unreliable through Bulk API 2.0.
+> **Status: DONE.** Cut 1 is a metadata-driven base64/blob guard (no hardcoded
+> object deny-list — that drifts). **Live-confirmed premise**: Bulk API 2.0
+> query CSV rejects blob fields ("Blob field not supported in Bulk V2 Query with
+> CSV content type"). Implemented: a projected `base64` field (any depth,
+> including a nested parent STRUCT field) makes Bulk incompatible.
+> `sf_force_transport='auto'` falls back to REST with a recorded reason;
+> forced `sf_force_transport='bulk'` errors clearly **before** creating a job
+> (`projected base64 field 'NAME' is not supported by Bulk API 2.0 CSV`); `rest`
+> is unchanged. Reason surfaced in `salesforce_last_transport()` /
+> `salesforce_query_cost()`. Other Bulk-unsupported objects still surface
+> reactively as a clear Bulk-job error (no deny-list, by design).
 
-Scope:
+Original scope (kept for reference):
 
 - Maintain a small documented deny-list or compatibility rule set.
 - Consider field/type signals from Describe where available, for example fields
@@ -304,16 +313,21 @@ Scope:
 - Decide whether forced `sf_force_transport='bulk'` should error clearly or
   warn and proceed; default should favor correctness.
 
-Out of scope:
+Acceptance (met):
 
-- Broad object-specific behavior copied blindly from ETL tools.
-- Hidden fallback that surprises the user.
-
-Acceptance:
-
-- Auto transport avoids denied objects/types.
+- Auto transport avoids the base64/blob case.
 - Diagnostics explain the decision.
 - Forced Bulk behavior is explicit and documented.
+
+### 11a. Follow-up (SEPARATE): REST BLOB decode for blob bodies
+
+> **Status: OPEN follow-up — do NOT bundle with §11.** During the §11 live
+> check, a REST read of `Attachment.Body` failed to decode ("field 'Body' …
+> could not be decoded as BLOB"). REST returns the blob body in a form our
+> base64→BLOB decoder rejected for that field. Investigate the actual returned
+> format (URL to the blob vs inline base64; size limits) and decide whether to
+> decode, expose a URL, or document the field as not directly selectable.
+> Independent of the §11 transport guard.
 
 ### 12. Custom Metadata And Custom Settings Confirmation
 

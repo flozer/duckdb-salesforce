@@ -282,6 +282,27 @@ SET sf_force_transport = 'bulk';
 SELECT Id, Name FROM sf.Account;
 ```
 
+#### Blob/base64 guard
+
+Bulk API 2.0 query results are CSV, which **cannot carry blob/base64
+fields** (base64 Salesforce fields map to DuckDB `BLOB`). The extension
+detects a projected base64 field from metadata alone — at any depth,
+including inside a parent-relationship `STRUCT`:
+
+- With `'auto'`, a projected base64 field keeps the scan on REST (it never
+  picks Bulk); the reason is recorded as `auto: bulk-incompatible (projected
+  base64 field 'NAME') -> rest`.
+- With `'bulk'` (forced), the scan fails **before** any job is created:
+  `projected base64 field 'NAME' is not supported by Bulk API 2.0 CSV; use
+  'rest' or 'auto'`.
+- With `'rest'`, behavior is unchanged (REST returns the field as base64).
+
+If the base64 field is not projected, Bulk is allowed as usual. The chosen
+transport and the reason appear in `salesforce_last_transport()` and
+`salesforce_query_cost()`. The guard is metadata-driven and covers base64
+only; other Bulk-unsupported objects are not pre-listed and surface as a
+clear Salesforce Bulk-job error if forced.
+
 ### `sf_auto_bulk_threshold`
 
 #### What it does
