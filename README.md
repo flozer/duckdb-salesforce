@@ -30,7 +30,8 @@ exports, lakehouse-style snapshots, and cross-source joins.
 
 The extension is currently submitted to the DuckDB Community Extensions catalog
 in [PR #2037](https://github.com/duckdb/community-extensions/pull/2037). Once
-merged, it will be the first official Salesforce extension for DuckDB.
+merged, it will be the first Salesforce extension published in the DuckDB
+Community Extensions registry.
 
 The extension is a bridge, not an ETL platform: Salesforce access, transport,
 authentication, metadata, and safe pushdown live here; joins, aggregations,
