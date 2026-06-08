@@ -12,23 +12,26 @@
       distribution release — functionally identical to `v0.9.1` (no connector
       code change); it only adds the release-assets workflow + packaging.
 - [x] Offline suite green at the ref (34 files / 921 assertions).
-- [x] Remote CI green on the (functionally identical) tree — run **27026331956**
-      at `v0.9.1`, all 6 platform×version jobs (`linux_amd64`, `windows_amd64`,
-      `osx_arm64` × DuckDB `v1.5.2`, `v1.5.3`), mock-only, no `SF_LIVE_*`. Re-run
-      the manual CI at `v0.9.2` before PR if a same-ref green is required.
+- [x] Remote CI green at the submission ref — run **27136017797** at `v0.9.2`,
+      all 6 platform×version jobs (`linux_amd64`, `windows_amd64`,
+      `osx_arm64` × DuckDB `v1.5.2`, `v1.5.3`), mock-only, no `SF_LIVE_*`.
+      Earlier same-matrix run **27026331956** also passed before the operational
+      `v0.9.2` packaging tag.
 - [x] Light live smoke validated at `v0.9.1` (see `docs/RELEASE_NOTES_v0.9.1.md`);
       applies unchanged to `v0.9.2`.
 - [x] Release assets published for `v0.9.2` via `release-assets.yml` (Linux x64
       tar.gz + Windows x64 zip) — see `docs/RELEASE_NOTES_v0.9.2.md`.
-- [ ] **Repository visibility:** `flozer/duckdb-salesforce` must be public before
-      community submission. Firebird failed community CI once because the source
-      repo was private and `repo.ref` could not be cloned.
-- [ ] **Public clone/tag preflight:** after making the repo public, verify:
+- [x] **Repository visibility:** `flozer/duckdb-salesforce` is public. Firebird
+      failed community CI once because the source repo was private and `repo.ref`
+      could not be cloned; this preflight is now closed here.
+- [x] **Public clone/tag preflight:** verified:
 
       ```sh
       git -c credential.helper= ls-remote --tags https://github.com/flozer/duckdb-salesforce.git v0.9.2
       git clone --depth=1 --branch v0.9.2 https://github.com/flozer/duckdb-salesforce.git
       ```
+
+      The anonymous shallow clone resolves to commit `9c58fb1` at tag `v0.9.2`.
 
 - [ ] **Maintainer C.5 GO**.
 
@@ -43,17 +46,15 @@ No source, no tests, no other docs are copied. The community CI checks out
 
 ## Steps to execute (ONLY on GO — listed, not run)
 
-1. Make `flozer/duckdb-salesforce` public.
-2. Run the public clone/tag preflight above with credentials disabled.
-3. Final-review `docs/community/description.yml` exactly as it will be copied.
-4. Fork `duckdb/community-extensions` (or use an existing fork) under the
+1. Final-review `docs/community/description.yml` exactly as it will be copied.
+2. Fork `duckdb/community-extensions` (or use an existing fork) under the
    maintainer's GitHub account.
-5. Branch, e.g. `add-salesforce`.
-6. Add `extensions/salesforce/description.yml` = a verbatim copy of
+3. Branch, e.g. `add-salesforce`.
+4. Add `extensions/salesforce/description.yml` = a verbatim copy of
    `docs/community/description.yml` from `flozer` at `v0.9.2`.
-7. Commit (`Add salesforce extension`), push the branch to the fork.
-8. Open a PR into `duckdb/community-extensions:main` with the body below.
-9. Respond to community-CI / reviewer feedback. Do not merge (maintainers do).
+5. Commit (`Add salesforce extension`), push the branch to the fork.
+6. Open a PR into `duckdb/community-extensions:main` with the body below.
+7. Respond to community-CI / reviewer feedback. Do not merge (maintainers do).
 
 ## PR body (draft)
 
@@ -75,9 +76,9 @@ No source, no tests, no other docs are copied. The community CI checks out
 > read-only (all writes throw); TLS verification always on.
 >
 > **Evidence:** offline mock suite 34 files / 921 assertions green; CI run
-> 27026331956 green on all 6 platform×version jobs; a light live smoke against a
+> 27136017797 green on all 6 platform×version jobs at `v0.9.2`; a light live smoke against a
 > real org validated the metadata functions + REST/Bulk scan consistency. The
-> source repo/tag is public-clone validated before PR open.
+> source repo/tag is public-clone validated.
 >
 > **Known caveats (declared):**
 > - macOS live TLS not validated in CI (OpenSSL-via-vcpkg does not read the

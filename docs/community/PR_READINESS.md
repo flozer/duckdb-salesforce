@@ -22,20 +22,21 @@ maintainer's explicit GO (C.5).**
 
 ## Repo / build
 
-- [ ] Public repo + public tag clone validated. **Current blocker:** as of the
-      Firebird-parity preflight, `flozer/duckdb-salesforce` is still private.
-      Before any community PR, make it public and verify:
-      `git -c credential.helper= ls-remote --tags
-      https://github.com/flozer/duckdb-salesforce.git v0.9.2`.
+- [x] Public repo + public tag clone validated. `flozer/duckdb-salesforce` is
+      public; `git -c credential.helper= ls-remote --tags
+      https://github.com/flozer/duckdb-salesforce.git v0.9.2` resolves the
+      annotated tag, and an anonymous shallow clone of `v0.9.2` resolves to
+      `9c58fb1`.
 - [x] `v0.9.2` tag exists and is the intended submission commit — an operational
       distribution release, functionally identical to `v0.9.1` (no connector code
       change; adds the release-assets workflow + packaging). `v0.9.1` carried the
       light live smoke (docs/RELEASE_NOTES_v0.9.1.md), which applies unchanged.
 - [x] Offline suite green at the ref: 34 files / 921 assertions (local).
-- [x] Remote CI green at `v0.9.1`: run **27026331956** passed all 6
+- [x] Remote CI green at `v0.9.2`: run **27136017797** passed all 6
       platform/version jobs (`linux_amd64`, `windows_amd64`, `osx_arm64` ×
       DuckDB `v1.5.2`, `v1.5.3`). Mock-only; no `SF_LIVE_*`; no Salesforce
-      contact.
+      contact. Earlier same-matrix run **27026331956** also passed before the
+      operational `v0.9.2` packaging tag.
 - [x] `vcpkg.json` declares the only dependency (OpenSSL); community CI resolves it.
 - [x] `Makefile` + `extension_config.cmake` drive the standard build.
 - [x] Submodules (`duckdb`, `extension-ci-tools`) pinned.
@@ -82,8 +83,7 @@ maintainer's explicit GO (C.5).**
 
 - [ ] **Maintainer explicit GO** to open the community-extensions PR (C.5).
 
-Before opening the PR, repeat the public-clone check above. This is not a formality:
-the Firebird community PR initially failed because the source repository was
-private, so community CI could not clone the pinned `repo.ref`.
+Public visibility, public tag lookup, anonymous shallow clone, and same-ref CI
+are now validated. The only remaining gate is the explicit C.5 maintainer GO.
 
 Until that box is checked by a human, the extension stays local / `flozer`-only.
