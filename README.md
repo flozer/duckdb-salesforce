@@ -8,9 +8,9 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.9.1"><img alt="release v0.9.1" src="https://img.shields.io/badge/release-v0.9.1-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.9.2"><img alt="release v0.9.2" src="https://img.shields.io/badge/release-v0.9.2-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
-    <img alt="DuckDB community ready" src="https://img.shields.io/badge/DuckDB%20community-ready-orange.svg">
+    <a href="https://github.com/duckdb/community-extensions/pull/2037"><img alt="DuckDB community PR open" src="https://img.shields.io/badge/DuckDB%20community-PR%20open-orange.svg"></a>
   </p>
   <p>
     <a href="docs/en/usage_guide.md">Usage guide</a> |
@@ -27,6 +27,10 @@
 data. It lets analysts keep Salesforce as the operational source of truth while
 using DuckDB as the local OLAP engine for ad hoc analysis, BI staging, Parquet
 exports, lakehouse-style snapshots, and cross-source joins.
+
+The extension is currently submitted to the DuckDB Community Extensions catalog
+in [PR #2037](https://github.com/duckdb/community-extensions/pull/2037). Once
+merged, it will be the first official Salesforce extension for DuckDB.
 
 The extension is a bridge, not an ETL platform: Salesforce access, transport,
 authentication, metadata, and safe pushdown live here; joins, aggregations,
@@ -46,9 +50,9 @@ materialization, files, and downstream analytics stay in DuckDB.
   modes are surfaced explicitly.
 - **Secret-safe by default** - credentials come from options, environment, SFDX
   auth URL, or JWT key files; tokens, keys, JWTs, and org data are never logged.
-- **Community-ready, human-gated** - docs, CI, license, security policy, and
-  submission metadata are prepared; publication to `duckdb/community-extensions`
-  requires explicit maintainer approval.
+- **Community submission in progress** - the descriptor is open in
+  [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037);
+  the pinned `v0.9.2` source ref is public-clone validated and CI green.
 
 ## Features
 
