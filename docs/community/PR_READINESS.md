@@ -44,11 +44,17 @@ maintainer's explicit GO (C.5).**
       MinGW** (`x64-mingw-static` OpenSSL 3) via `scripts/build_rtools_local.ps1`
       also builds. Linux/Windows/macOS-arm64 are covered by the canonical CI
       matrix; community CI builds from `vcpkg.json` regardless.
-- [x] Release-asset workflow green on `main`: run **27031409510** produced
-      Linux x64 and Windows x64 workflow artifacts. No GitHub Release was created
-      because the run was manual without a release tag input. Note: the existing
-      `v0.9.1` tag predates this workflow; tagged binary releases should use a
-      later tag that contains `.github/workflows/release-assets.yml`.
+- [x] **Release assets published for `v0.9.2`** — the `v0.9.2` tag push triggered
+      `release-assets.yml` run **27035482676** (Linux + Windows jobs green), which
+      created the GitHub Release and uploaded both binaries. Release:
+      <https://github.com/flozer/duckdb-salesforce/releases/tag/v0.9.2>. Assets,
+      verified downloadable and coherent (each archive holds
+      `salesforce.duckdb_extension` + a `README.txt` stamped `0.9.2`, requiring
+      DuckDB v1.5.3):
+      - `duckdb-salesforce-0.9.2-linux-x64.tar.gz` (~11.6 MB)
+      - `duckdb-salesforce-0.9.2-windows-x64.zip` (~10.1 MB)
+      The Release changelog is sourced from `docs/RELEASE_NOTES_v0.9.2.md`.
+      (Prior manual validation run on `main` was **27031409510**.)
 
 ## Legal / security / docs
 
