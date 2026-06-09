@@ -10,7 +10,7 @@
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.9.2"><img alt="release v0.9.2" src="https://img.shields.io/badge/release-v0.9.2-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
-    <a href="https://github.com/duckdb/community-extensions/pull/2037"><img alt="DuckDB community PR open" src="https://img.shields.io/badge/DuckDB%20community-PR%20open-orange.svg"></a>
+    <a href="https://github.com/duckdb/community-extensions/pull/2037"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-merged-brightgreen.svg"></a>
   </p>
   <p>
     <a href="docs/en/usage_guide.md">Usage guide</a> |
@@ -28,10 +28,9 @@ data. It lets analysts keep Salesforce as the operational source of truth while
 using DuckDB as the local OLAP engine for ad hoc analysis, BI staging, Parquet
 exports, lakehouse-style snapshots, and cross-source joins.
 
-The extension is currently submitted to the DuckDB Community Extensions catalog
-in [PR #2037](https://github.com/duckdb/community-extensions/pull/2037). Once
-merged, it will be the first Salesforce extension published in the DuckDB
-Community Extensions registry.
+`duckdb-salesforce` is the first Salesforce extension published in the DuckDB
+Community Extensions registry, merged via
+[duckdb/community-extensions#2037](https://github.com/duckdb/community-extensions/pull/2037).
 
 The extension is a bridge, not an ETL platform: Salesforce access, transport,
 authentication, metadata, and safe pushdown live here; joins, aggregations,
@@ -51,7 +50,7 @@ materialization, files, and downstream analytics stay in DuckDB.
   modes are surfaced explicitly.
 - **Secret-safe by default** - credentials come from options, environment, SFDX
   auth URL, or JWT key files; tokens, keys, JWTs, and org data are never logged.
-- **Community submission in progress** - the descriptor is open in
+- **Published in DuckDB Community Extensions** - merged through
   [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037);
   the pinned `v0.9.2` source ref is public-clone validated and CI green.
 
@@ -72,7 +71,13 @@ materialization, files, and downstream analytics stay in DuckDB.
 
 ## Quick Start
 
-Build locally or install the signed community artifact when it becomes available.
+Install the signed community artifact:
+
+```sql
+INSTALL salesforce FROM community;
+LOAD salesforce;
+```
+
 For local builds, see [docs/INSTALL.md](docs/INSTALL.md).
 
 ```sql
