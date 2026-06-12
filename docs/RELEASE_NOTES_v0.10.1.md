@@ -1,10 +1,9 @@
-# duckdb-salesforce v0.10.1 — DRAFT
+# duckdb-salesforce v0.10.1
 
-> **DRAFT — not tagged/released.** Patch release on top of `v0.10.0`
-> (`a703447`). Scope: Report Bridge robustness + safety for the candidate-SOQL
-> path, plus smoke-tooling fixes. No new SQL surface; existing behavior unchanged.
-> The approved `duckdb/community-extensions` baseline remains `v0.9.2` — this is
-> an own-repo release only; community is **not** updated.
+Patch release on top of `v0.10.0` (`a703447`). Scope: Report Bridge robustness +
+safety for the candidate-SOQL path, plus smoke-tooling fixes. No new SQL surface;
+existing behavior unchanged. The approved `duckdb/community-extensions` baseline
+remains `v0.9.2` — this is an own-repo release only; community is **not** updated.
 
 ## Highlights
 
@@ -57,6 +56,6 @@
 
 ## Gates
 
-- Tag/GitHub Release/assets handled by the release-assets workflow on the
-  `v0.10.1` tag **when explicitly cut** — not done in this draft.
+- Tag/GitHub Release and Linux/Windows assets are produced by the release-assets
+  workflow on the `v0.10.1` tag.
 - No community update; `docs/community/description.yml` stays `0.9.2`.
