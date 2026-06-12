@@ -451,6 +451,24 @@ The connector may improve the bridge that makes these workflows possible. It
 should not own persistent checkpoints, scheduling, replication state, or
 orchestration.
 
+Operational quota notes for large datalake seeds:
+
+- A recent `Produto_Oferta__c` seed check showed comfortable Salesforce quota
+  headroom: `DailyApiRequests` 75,812 remaining of 141,800, Bulk API batches
+  15,000 remaining of 15,000, Bulk V2 Query Jobs 9,948 remaining of 10,000, and
+  Bulk file storage 965,252 MB remaining of 976,562 MB.
+- A REST seed of roughly 4M rows is expected to use about 2,000 REST calls when
+  paged at 2,000 rows per request, which fits comfortably inside that observed
+  daily REST headroom. Treat this as a point-in-time quota check, not a static
+  guarantee.
+- The documented seed recipe should include a small `/limits` preflight before
+  large loads. Salesforce's `GET /limits` endpoint can be used to inspect
+  remaining daily REST and Bulk quotas; the check itself is not counted against
+  `DailyApiRequests`.
+- A reusable helper such as `scripts/salesforce/check_quota.sh` is acceptable as
+  developer/operator tooling, but quota checking remains an operator preflight,
+  not connector-owned scheduling or orchestration.
+
 ## Community Publication Gate
 
 No agent may create a branch, PR, push, fork change, or other action against
