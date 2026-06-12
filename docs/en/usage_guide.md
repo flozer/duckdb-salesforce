@@ -547,6 +547,86 @@ FROM sf.Opportunity;
 Caveats: there is **no global row order across chunks**, and chunks may be
 uneven or even empty depending on how `Id` values distribute.
 
+### Datalake seed and backfill recipe
+
+A first full load of a large object is the failure mode that motivated the
+range-pushdown work: a single ~millions-of-rows Bulk read can exhaust the
+poll budget, and a `CreatedDate >= X AND CreatedDate < Y` window only helps
+if that range actually pushes to SOQL. Follow this sequence instead of
+pointing Bulk at the whole object.
+
+**1. Prove the predicate pushes before you extract.** A selective-looking
+`WHERE` is worthless if DuckDB is filtering *after* a full remote scan. Run
+the window through `salesforce_query_cost()` and confirm the range is server-
+side:
+
+```sql
+SELECT Id FROM sf.Produto_Oferta__c
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00'
+  AND CreatedDate <  TIMESTAMP '2024-02-01 00:00:00'
+LIMIT 0;
+
+SELECT where_pushed, pushed_filters, residual_filters, guidance
+FROM salesforce_query_cost();
+-- want: where_pushed contains the CreatedDate range, residual_filters = 0,
+-- guidance = "Salesforce is filtering server-side". If guidance instead says
+-- "DuckDB is filtering after a full remote scan", the range did NOT push —
+-- fix the predicate before extracting (see §14 for what stays residual).
+```
+
+`COUNT(*)` over the same window pushes to a single `SELECT COUNT()` and
+returns the per-window row count for free (zero record egress), so you can
+size each window:
+
+```sql
+SELECT COUNT(*) FROM sf.Produto_Oferta__c
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00'
+  AND CreatedDate <  TIMESTAMP '2024-02-01 00:00:00';
+```
+
+> `salesforce_aggregate()` (§13) can also validate server-side selectivity,
+> but it proves only that *Salesforce* can filter the range — a normal
+> extraction still has to prove the **scan** pushes the same predicate
+> through `salesforce_query_cost()`. They are different code paths.
+
+**2. Split the seed into pushed `CreatedDate` (or `SystemModstamp`) windows**
+and write each through DuckDB to Parquet or a lake table. Each window is its
+own bounded Bulk read:
+
+```sql
+SET sf_force_transport='bulk';
+SET sf_bulk_require_predicate=true;   -- refuse an accidental full-object read
+SET sf_bulk_poll_budget=2000;         -- a large window may need > 600 polls
+
+COPY (
+  SELECT Id, Name, Amount, CreatedDate, SystemModstamp
+  FROM sf.Produto_Oferta__c
+  WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00'
+    AND CreatedDate <  TIMESTAMP '2024-02-01 00:00:00'
+) TO 'lake/produto_oferta/2024-01.parquet' (FORMAT parquet);
+```
+
+With `sf_bulk_require_predicate=true`, a Bulk read whose predicate did not
+push fails fast *before* a job is created — so a mistake surfaces as an error,
+not a multi-million-row over-fetch. After each window, check
+`salesforce_query_cost().bulk_polls` to see how close the job ran to the
+budget and raise `sf_bulk_poll_budget` if needed.
+
+**3. Maintain incrementally on `SystemModstamp`.** Once seeded, refresh only
+the changed rows with a half-open window from the last watermark, re-reading
+a short lookback to absorb clock skew:
+
+```sql
+COPY (
+  SELECT Id, Name, Amount, CreatedDate, SystemModstamp
+  FROM sf.Produto_Oferta__c
+  WHERE SystemModstamp >= TIMESTAMP '2024-06-01 00:00:00'  -- last watermark - lookback
+) TO 'lake/produto_oferta/incr-2024-06.parquet' (FORMAT parquet);
+```
+
+Drive the windows and watermarks from your orchestrator (dbt, a scheduler,
+etc.); the extension itself does not manage checkpoints or schedules.
+
 ## 8. Quota governor
 
 To avoid burning your daily API allotment, a quota governor gates **Bulk
@@ -676,8 +756,10 @@ SELECT * FROM salesforce_query_cost();
 It returns, among other columns: `object`, `soql`, `transport`,
 `est_rows`, `transport_reason`, `projected_fields`, `total_fields`,
 `pushed_filters`, `residual_filters`, `where_pushed`, `pages_fetched`,
-`rows_emitted`, `bulk`, `count_pushdown`, `bulk_chunks`,
-`quota_remaining`, `quota_allowed`, and `guidance`.
+`rows_emitted`, `bulk`, `count_pushdown`, `bulk_chunks`, `bulk_polls`,
+`quota_remaining`, `quota_allowed`, and `guidance`. `guidance` states
+whether Salesforce filtered server-side or DuckDB filtered after a full
+remote scan; `bulk_polls` is the Bulk job status-poll count.
 
 Focused helpers return a single aspect of the last scan:
 
