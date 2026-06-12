@@ -544,6 +544,86 @@ Ressalvas: **não há ordem global de linhas entre chunks**, e os chunks
 podem ser desiguais ou até vazios, dependendo de como os valores de `Id` se
 distribuem.
 
+### Recipe de seed e backfill para datalake
+
+A primeira carga completa de um objeto grande é justamente a falha que
+motivou o trabalho de pushdown de faixa: um único Bulk de milhões de linhas
+pode estourar o orçamento de polls, e uma janela `CreatedDate >= X AND
+CreatedDate < Y` só ajuda se essa faixa de fato for empurrada para o SOQL.
+Siga esta sequência em vez de apontar o Bulk para o objeto inteiro.
+
+**1. Prove que o predicado é empurrado antes de extrair.** Um `WHERE` que
+parece seletivo não vale nada se quem filtra é o DuckDB *depois* de um scan
+remoto completo. Rode a janela por `salesforce_query_cost()` e confirme que a
+faixa é server-side:
+
+```sql
+SELECT Id FROM sf.Produto_Oferta__c
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00'
+  AND CreatedDate <  TIMESTAMP '2024-02-01 00:00:00'
+LIMIT 0;
+
+SELECT where_pushed, pushed_filters, residual_filters, guidance
+FROM salesforce_query_cost();
+-- esperado: where_pushed contém a faixa de CreatedDate, residual_filters = 0,
+-- guidance = "Salesforce is filtering server-side". Se em vez disso disser
+-- "DuckDB is filtering after a full remote scan", a faixa NÃO foi empurrada —
+-- corrija o predicado antes de extrair (veja a seção 13 sobre o que fica residual).
+```
+
+`COUNT(*)` sobre a mesma janela é empurrado para um único `SELECT COUNT()` e
+devolve a contagem por janela de graça (zero egresso de registros), então dá
+para dimensionar cada janela:
+
+```sql
+SELECT COUNT(*) FROM sf.Produto_Oferta__c
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00'
+  AND CreatedDate <  TIMESTAMP '2024-02-01 00:00:00';
+```
+
+> `salesforce_aggregate()` (seção 11) também valida a seletividade
+> server-side, mas prova apenas que *o Salesforce* consegue filtrar a faixa —
+> uma extração normal ainda precisa provar que o **scan** empurra o mesmo
+> predicado via `salesforce_query_cost()`. São caminhos de código diferentes.
+
+**2. Divida o seed em janelas de `CreatedDate` (ou `SystemModstamp`)
+empurradas** e grave cada uma via DuckDB em Parquet ou tabela de lake. Cada
+janela é um Bulk limitado:
+
+```sql
+SET sf_force_transport='bulk';
+SET sf_bulk_require_predicate=true;   -- recusa leitura acidental do objeto inteiro
+SET sf_bulk_poll_budget=2000;         -- uma janela grande pode precisar de > 600 polls
+
+COPY (
+  SELECT Id, Name, Amount, CreatedDate, SystemModstamp
+  FROM sf.Produto_Oferta__c
+  WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00'
+    AND CreatedDate <  TIMESTAMP '2024-02-01 00:00:00'
+) TO 'lake/produto_oferta/2024-01.parquet' (FORMAT parquet);
+```
+
+Com `sf_bulk_require_predicate=true`, uma leitura Bulk cujo predicado não foi
+empurrado falha rápido *antes* de criar o job — então o erro aparece como
+erro, não como over-fetch de milhões de linhas. Após cada janela, confira
+`salesforce_query_cost().bulk_polls` para ver o quão perto o job chegou do
+orçamento e aumente `sf_bulk_poll_budget` se preciso.
+
+**3. Mantenha incrementalmente por `SystemModstamp`.** Depois do seed,
+atualize só as linhas alteradas com uma janela meio-aberta a partir da última
+marca-d'água, relendo um lookback curto para absorver desvio de relógio:
+
+```sql
+COPY (
+  SELECT Id, Name, Amount, CreatedDate, SystemModstamp
+  FROM sf.Produto_Oferta__c
+  WHERE SystemModstamp >= TIMESTAMP '2024-06-01 00:00:00'  -- última marca-d'água - lookback
+) TO 'lake/produto_oferta/incr-2024-06.parquet' (FORMAT parquet);
+```
+
+Conduza as janelas e marcas-d'água pelo seu orquestrador (dbt, scheduler
+etc.); a extensão em si não gerencia checkpoints nem agendamentos.
+
 ## 8. Governança de quota
 
 Para evitar consumir sua cota diária de API, uma governança de quota
@@ -649,8 +729,11 @@ SELECT * FROM salesforce_query_cost();
 Ela retorna, entre outras colunas: `object`, `soql`, `transport`,
 `est_rows`, `transport_reason`, `projected_fields`, `total_fields`,
 `pushed_filters`, `residual_filters`, `where_pushed`, `pages_fetched`,
-`rows_emitted`, `bulk`, `count_pushdown`, `bulk_chunks`,
-`quota_remaining`, `quota_allowed` e `guidance`.
+`rows_emitted`, `bulk`, `count_pushdown`, `bulk_chunks`, `bulk_polls`,
+`quota_remaining`, `quota_allowed` e `guidance`. `guidance` diz se foi o
+Salesforce que filtrou server-side ou se foi o DuckDB que filtrou após um
+scan remoto completo; `bulk_polls` é a contagem de polls de status do job
+Bulk.
 
 Auxiliares focados retornam um único aspecto do último scan:
 

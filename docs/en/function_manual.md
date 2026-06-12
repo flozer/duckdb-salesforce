@@ -764,6 +764,79 @@ SET sf_bulk_chunks = 4;
 SELECT Id, Name FROM sf.Account;
 ```
 
+### `sf_bulk_poll_budget`
+
+#### What it does
+
+Bounds how many times a Bulk job is polled for completion before failing fast.
+
+#### How it works
+
+- Type: `BIGINT`
+- Default: `600` (~250 ms per poll)
+
+`BulkStartJob` polls the job status until `JobComplete`. When the count
+reaches the budget it raises a clear error naming this setting, instead of
+polling forever. The live count is surfaced as `salesforce_query_cost()
+.bulk_polls`, so a job that times out shows how far it got.
+
+#### Why use it
+
+A large backfill window can legitimately need more than 600 polls; raise the
+budget for it. Lower it to fail faster in tests or interactive sessions.
+
+#### Daily use
+
+```sql
+SET sf_force_transport = 'bulk';
+SET sf_bulk_poll_budget = 2000;   -- allow a long-running job to finish
+
+SELECT Id FROM sf.BigObject__c
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00'
+  AND CreatedDate <  TIMESTAMP '2024-02-01 00:00:00';
+
+SELECT bulk_polls FROM salesforce_query_cost();
+```
+
+### `sf_bulk_require_predicate`
+
+#### What it does
+
+Refuses a Bulk read that pushes **no** predicate to SOQL (a full-object
+extraction), before any job is created.
+
+#### How it works
+
+- Type: `BOOLEAN`
+- Default: `false` (guidance only)
+
+When `true`, a Bulk scan whose `where_pushed` is empty fails fast with a
+`BinderException`. Default `false` leaves behavior unchanged — the
+`salesforce_query_cost().guidance` still warns about the unfiltered read.
+The guard checks the **pushed** predicate, not the SQL text: a `WHERE` that
+stays residual (e.g. a function on the column, see §14) does not satisfy it.
+
+#### Why use it
+
+For planned large backfills: it forces every Bulk read through a pushed
+`CreatedDate` / `SystemModstamp` window, so an accidental full-object scan
+surfaces as an error rather than a multi-million-row over-fetch.
+
+#### Daily use
+
+```sql
+SET sf_force_transport = 'bulk';
+SET sf_bulk_require_predicate = true;
+
+-- fails fast: no predicate pushed
+-- SELECT Id FROM sf.BigObject__c;
+
+-- proceeds: CreatedDate range is pushed to SOQL
+SELECT Id FROM sf.BigObject__c
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00'
+  AND CreatedDate <  TIMESTAMP '2024-02-01 00:00:00';
+```
+
 ## Level 3 - Diagnostics and observability
 
 These are no-argument table functions that report on the **last scan** in
@@ -806,7 +879,8 @@ Returns one row describing the last scan. Output columns:
 | `bulk_chunks` | BIGINT | PK chunk count applied (Bulk) |
 | `quota_remaining` | BIGINT | Remaining API requests at decision time |
 | `quota_allowed` | BOOLEAN | Whether the quota governor allowed the scan |
-| `guidance` | VARCHAR | Human-readable advice for tuning the scan |
+| `guidance` | VARCHAR | Human-readable advice; states whether Salesforce filtered server-side or DuckDB filtered after a full remote scan |
+| `bulk_polls` | BIGINT | Bulk job status-poll count (NULL for non-Bulk scans) |
 
 Last-scan, best-effort, single-thread snapshot.
 

@@ -28,6 +28,7 @@ struct ScanCost {
     bool bulk = false;
     bool count_pushdown = false;
     int64_t bulk_chunks = 1; // PK-chunk count (#v0.7 §9); 1 = no chunking
+    int64_t bulk_polls = -1; // ROADMAP §15: Bulk status polls; -1 -> NULL (not Bulk)
     string query_mode = "query"; // #v0.9 §1: query | queryAll
     bool quota_consulted = false; // false -> quota_* NULL
     int64_t quota_remaining = -1;
@@ -40,13 +41,23 @@ ScanCost g_cost;
 // Short, actionable selectivity hints (not an essay). Joined with "; ".
 string BuildGuidance(const ScanCost &c) {
     vector<string> hints;
-    if (c.where_pushed.empty()) {
+    // The §15 distinction: is Salesforce filtering server-side, or is DuckDB
+    // filtering locally after dragging a full remote scan across the wire?
+    if (!c.where_pushed.empty()) {
+        hints.push_back("Salesforce is filtering server-side (predicate pushed to SOQL)");
+    } else {
         hints.push_back("no predicate pushed to SOQL — full-object scan; add a filterable WHERE");
     }
     if (c.residual_filters > 0) {
         hints.push_back(StringUtil::Format(
-            "%lld filter(s) applied residually (not server-filterable) — over-fetch",
+            "DuckDB is filtering after a full remote scan: %lld filter(s) applied "
+            "residually (not server-filterable) — over-fetch",
             (long long)c.residual_filters));
+    }
+    if (c.bulk && c.where_pushed.empty()) {
+        hints.push_back("Bulk full-object read with no pushed predicate — for a large "
+                        "backfill, split by CreatedDate/SystemModstamp windows, or set "
+                        "sf_bulk_require_predicate to enforce it");
     }
     if (c.total_fields > 0 && c.projected_fields >= c.total_fields) {
         hints.push_back("all fields projected — SELECT fewer columns to cut egress");
@@ -84,14 +95,14 @@ unique_ptr<FunctionData> QueryCostBind(ClientContext &, TableFunctionBindInput &
              "bulk",            "count_pushdown",
              "bulk_chunks",     "query_mode",
              "quota_remaining", "quota_allowed",
-             "guidance"};
+             "guidance",        "bulk_polls"};
     return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
                     LogicalType::BIGINT,  LogicalType::VARCHAR, LogicalType::BIGINT,
                     LogicalType::BIGINT,  LogicalType::BIGINT,  LogicalType::BIGINT,
                     LogicalType::VARCHAR, LogicalType::BIGINT,  LogicalType::BIGINT,
                     LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::BIGINT,
                     LogicalType::VARCHAR, LogicalType::BIGINT,  LogicalType::BOOLEAN,
-                    LogicalType::VARCHAR};
+                    LogicalType::VARCHAR, LogicalType::BIGINT};
     return nullptr;
 }
 
@@ -145,6 +156,7 @@ void QueryCostFunction(ClientContext &, TableFunctionInput &data, DataChunk &out
         FlatVector::SetNull(output.data[17], 0, true);
     }
     Str(output, 18, BuildGuidance(c));
+    IntOrNull(output, 19, c.bulk_polls);
     gstate.emitted = true;
     output.SetCardinality(1);
 }
@@ -182,6 +194,11 @@ void DiagSetPages(int64_t pages) {
 void DiagSetBulkChunks(int64_t chunks) {
     std::lock_guard<std::mutex> g(g_lock);
     g_cost.bulk_chunks = chunks;
+}
+
+void DiagSetBulkPolls(int64_t polls) {
+    std::lock_guard<std::mutex> g(g_lock);
+    g_cost.bulk_polls = polls;
 }
 
 void DiagAddRowsEmitted(int64_t rows) {

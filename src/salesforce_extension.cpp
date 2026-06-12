@@ -297,6 +297,24 @@ static void LoadInternal(ExtensionLoader &loader) {
         "default; capped at 8). Sequential in this cut. Bulk transport only.",
         LogicalType::BIGINT, Value::BIGINT(1));
 
+    // Bulk backfill guardrails (ROADMAP §15). Poll budget bounds how long
+    // BulkStartJob waits for a job to finish before failing fast; raise it for a
+    // large backfill that legitimately needs more polls. require_predicate is an
+    // opt-in guard that rejects a full-object Bulk read (no pushed predicate).
+    config.AddExtensionOption(
+        "sf_bulk_poll_budget",
+        "Max Bulk job-status polls before failing fast (default 600, ~250ms "
+        "each). Raise for a large backfill; surfaced as salesforce_query_cost()"
+        ".bulk_polls.",
+        LogicalType::BIGINT, Value::BIGINT(600));
+    config.AddExtensionOption(
+        "sf_bulk_require_predicate",
+        "When true, a Bulk read with no predicate pushed to SOQL (full-object "
+        "extraction) fails fast instead of running. Default false (guidance "
+        "only). Use for planned large backfills to force a CreatedDate/"
+        "SystemModstamp window.",
+        LogicalType::BOOLEAN, Value::BOOLEAN(false));
+
     // Test-only Bulk mock hooks (active when sf_mock_token_status != 0).
     config.AddExtensionOption("sf_mock_bulk_create_status", "TEST ONLY. Bulk job-create HTTP status.",
                               LogicalType::BIGINT, Value::BIGINT(200));

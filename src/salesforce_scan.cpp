@@ -17,6 +17,7 @@
 #include "salesforce_value.hpp"
 
 #include <atomic>
+#include <limits>
 #include <unordered_set>
 
 #include "duckdb/common/exception.hpp"
@@ -69,6 +70,7 @@ struct ScanGlobalState : public GlobalTableFunctionState {
     // the chunk work-list, hands out chunk indices, and aggregates diagnostics.
     bool bulk = false;
     bool query_all = false;                   // #v0.9 §1: queryAll mode (per-thread sessions read this)
+    int bulk_poll_budget = 600;               // ROADMAP §15: per-thread Bulk sessions read this
     vector<string> bulk_chunk_soqls;          // full SOQL per chunk (built in InitGlobal)
     std::atomic<idx_t> next_chunk{0};         // dispenser: next chunk index to claim
     std::atomic<idx_t> total_bulk_pages{0};   // aggregate result pages (all threads)
@@ -320,6 +322,21 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     gstate->session = make_uniq<SalesforceSession>(bind.config, *gstate->client);
     gstate->session->SetToken(bind.token); // reuse ATTACH token (refreshes on 401)
     gstate->session->SetQueryAll(gstate->query_all); // probes honour the mode too
+    // Bulk poll budget (ROADMAP §15): how many job-status polls BulkStartJob may
+    // run before failing fast. Default 600 keeps prior behaviour.
+    Value pbv;
+    if (context.TryGetCurrentSetting("sf_bulk_poll_budget", pbv) && !pbv.IsNull()) {
+        // Clamp into int range BEFORE the cast: a BIGINT setting can exceed
+        // INT_MAX, and a raw static_cast would wrap (possibly negative).
+        int64_t b = pbv.GetValue<int64_t>();
+        if (b < 1) {
+            b = 1;
+        } else if (b > std::numeric_limits<int>::max()) {
+            b = std::numeric_limits<int>::max();
+        }
+        gstate->bulk_poll_budget = static_cast<int>(b);
+    }
+    gstate->session->SetBulkPollBudget(gstate->bulk_poll_budget);
     SetLastScanPages(0);
 
     // Resolve 'auto' -> 'rest'|'bulk' ONCE here (no mid-stream escalation: that
@@ -389,6 +406,24 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
         }
     }
     SetLastTransport(effective, est_rows, reason);
+
+    // Bulk backfill guardrail (ROADMAP §15): a Bulk read with NO predicate pushed
+    // to SOQL is a full-object extraction — the exact shape that exhausts the
+    // poll budget on large objects. Off by default (guidance only); when
+    // sf_bulk_require_predicate is enabled, fail fast before creating the job so
+    // a planned large backfill must prove a pushed CreatedDate/SystemModstamp
+    // window first.
+    if (effective == "bulk" && bind.pushed_where.empty()) {
+        Value rpv;
+        if (context.TryGetCurrentSetting("sf_bulk_require_predicate", rpv) && !rpv.IsNull() &&
+            rpv.GetValue<bool>()) {
+            throw BinderException(
+                "Bulk read on '%s' has no pushed predicate (full-object extraction). "
+                "sf_bulk_require_predicate is on: add a server-filterable WHERE — e.g. a "
+                "CreatedDate/SystemModstamp range — or disable the guard to proceed.",
+                bind.object);
+        }
+    }
 
     // COUNT pushdown (#v0.5 §5): a zero-real-column scan with NO residual filter
     // needs only the row count. Run a single SELECT COUNT() and emit that many
@@ -623,6 +658,7 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
             lstate.session = make_uniq<SalesforceSession>(bind.config, *lstate.client);
             lstate.session->SetToken(bind.token);
             lstate.session->SetQueryAll(gstate.query_all); // #v0.9 §1
+            lstate.session->SetBulkPollBudget(gstate.bulk_poll_budget); // ROADMAP §15
         }
         if (lstate.cursor >= lstate.page.size()) {
             // Need a fresh page: advance the current chunk, or claim the next.

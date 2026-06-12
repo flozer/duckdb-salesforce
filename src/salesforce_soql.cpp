@@ -11,6 +11,7 @@
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/planner/expression.hpp"
+#include "duckdb/planner/expression/bound_between_expression.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression/bound_comparison_expression.hpp"
 #include "duckdb/planner/expression/bound_conjunction_expression.hpp"
@@ -166,6 +167,43 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
             }
             out = field + " " + op + " " +
                   SoqlLiteral(constant->Cast<BoundConstantExpression>().value);
+            return true;
+        }
+
+        // column BETWEEN lower AND upper (exact). DuckDB's FilterCombiner
+        // rewrites `field >= lo AND field < hi` (and the >/<= operand/inclusivity
+        // variants, including reversed `const <op> field`) on ONE column into a
+        // single BoundBetweenExpression before it reaches pushdown. Without this
+        // case the whole range fell back to residual (full remote scan). Emit the
+        // two half-ranges with inclusivity-correct operators; exact because both
+        // bounds are plain column-vs-constant comparisons matching SOQL.
+        if (klass == ExpressionClass::BOUND_BETWEEN) {
+            auto &bw = expr.Cast<BoundBetweenExpression>();
+            string field;
+            if (!FieldFor(*bw.input, fields, projection_to_field, field)) {
+                return false;
+            }
+            if (bw.lower->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT ||
+                bw.upper->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+                return false; // function/cast/non-literal bound -> residual
+            }
+            const Value &lo_val = bw.lower->Cast<BoundConstantExpression>().value;
+            const Value &hi_val = bw.upper->Cast<BoundConstantExpression>().value;
+            if (lo_val.IsNull() || hi_val.IsNull()) {
+                // Degenerate range (`field >= null`): SoqlLiteral would emit the
+                // SOQL `null` keyword, which is only valid for = / != null. Leave
+                // residual; DuckDB handles the NULL-bound semantics correctly.
+                return false;
+            }
+            string lo_op, hi_op;
+            if (!ComparisonOp(bw.LowerComparisonType(), lo_op) ||
+                !ComparisonOp(bw.UpperComparisonType(), hi_op)) {
+                return false;
+            }
+            string lo = SoqlLiteral(lo_val);
+            string hi = SoqlLiteral(hi_val);
+            out = "(" + field + " " + lo_op + " " + lo + " AND " + field + " " + hi_op +
+                  " " + hi + ")";
             return true;
         }
 
