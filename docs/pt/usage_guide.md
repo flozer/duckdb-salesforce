@@ -979,7 +979,43 @@ Caveat: isto **não** é histórico, CDC nem replicação, e não é um snapshot
 local — apenas expõe a capacidade de leitura do Salesforce naquele scan. A
 utility `salesforce_query()` é sempre `query` e ignora `sf_query_mode`.
 
-## 13. Limitações
+## 13. Report Bridge (opt-in)
+
+Liga **relatórios** do Salesforce ao DuckDB para descoberta e validação — não
+extração grande. Um relatório é uma definição feita pelo negócio, não uma query
+SOQL, e a Reports API síncrona limita a 2.000 linhas. Três funções
+somente-leitura:
+
+```sql
+-- 1. descobrir definições de relatório (não dados)
+SELECT Id, Name, Format FROM salesforce_reports('sf');
+
+-- 2. rodar uma amostra TABULAR pequena (máx. 2000 linhas); colunas reservadas
+--    __sf_report_* carregam diagnósticos (truncated / all_data / max_rows / guidance)
+SELECT * FROM salesforce_report('sf', '00O...');
+
+-- 3. ingredientes estruturados + um SOQL candidato best-effort para validar
+SELECT soql, translatable, caveats FROM salesforce_report_soql('sf', '00O...');
+```
+
+Fluxo pretendido: validar o relatório no Salesforce → rodar uma amostra
+ground-truth com `salesforce_report()` → inspecionar nomes de campo + SOQL
+candidato via `salesforce_report_soql()` → validar o candidato contra a amostra
+→ depois materializar em escala via scans normais `sf.<Object>` (Bulk, PK
+chunking, pushdown — seção 7).
+
+Ressalvas principais:
+
+- `salesforce_report()` é **amostra/oráculo**, não caminho de extração. Verifique
+  `__sf_report_truncated`. Um relatório com **0 linhas retorna 0 linhas e nenhuma
+  linha de diagnóstico** — a truncagem só é visível quando a amostra é não-vazia.
+- `salesforce_report_soql().soql` é **candidato, não contrato de equivalência**:
+  só é produzido para relatórios tabulares de objeto único com identificadores
+  seguros e operadores suportados; senão `translatable = false`, `soql = NULL`, e
+  `caveats` explicam o motivo. Sempre valide contra a amostra antes de escalar.
+- Relatórios summary/matrix não são suportados neste corte (apenas tabular).
+
+## 14. Limitações
 
 Conheça estes limites antes de construir sobre a extensão:
 

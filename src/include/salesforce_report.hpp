@@ -1,0 +1,29 @@
+#pragma once
+
+#include "duckdb.hpp"
+#include "duckdb/function/table_function.hpp"
+
+namespace duckdb {
+
+// Report Bridge (ROADMAP §16). Three opt-in, read-only functions over the
+// attached Salesforce catalog. The analytics HTTP foundation (synchronous report
+// run + describe) lives in SalesforceSession::RunReport / DescribeReport and is
+// exercised end-to-end through these functions' offline tests.
+
+// salesforce_reports(catalog) — list report DEFINITIONS (Id, Name,
+// DeveloperName, FolderName, Format) via the queryable Report sObject, using the
+// attached catalog's credentials. Lists definitions, not report data (§16 B).
+TableFunction GetSalesforceReportsFunction();
+
+// salesforce_report(catalog, report_id) — run a report synchronously and return
+// its TABULAR rows as a validation sample (max 2000), with reserved
+// __sf_report_* diagnostic columns appended. Sample/oracle, not extraction (§16 C).
+TableFunction GetSalesforceReportFunction();
+
+// salesforce_report_soql(catalog, report_id) — return structured report
+// ingredients (report_type, base_object, columns, filters) plus a best-effort
+// DERIVED candidate `soql` with translatable + caveats. Candidate, not an
+// equivalence contract (§16 D).
+TableFunction GetSalesforceReportSoqlFunction();
+
+} // namespace duckdb

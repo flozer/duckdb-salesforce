@@ -202,6 +202,14 @@ public:
         vector<string> results_locators;
     };
 
+    // Reports & Dashboards Analytics API (ROADMAP §16): run + /describe seqs.
+    struct ReportMock {
+        vector<int> run_statuses;
+        vector<string> run_bodies;
+        vector<int> describe_statuses;
+        vector<string> describe_bodies;
+    };
+
     ScriptedMockHttpClient(int token_status, string token_body, vector<int> describe_statuses,
                            vector<string> describe_bodies, vector<int> query_statuses,
                            vector<string> query_bodies, vector<int> global_statuses,
@@ -209,7 +217,7 @@ public:
                            vector<string> count_bodies, vector<int> limits_statuses,
                            vector<string> limits_bodies, vector<int> tooling_statuses,
                            vector<string> tooling_bodies, vector<int> queryall_statuses,
-                           vector<string> queryall_bodies, BulkMock bulk)
+                           vector<string> queryall_bodies, BulkMock bulk, ReportMock report)
         : token_status_(token_status), token_body_(std::move(token_body)),
           describe_statuses_(std::move(describe_statuses)),
           describe_bodies_(std::move(describe_bodies)),
@@ -224,7 +232,8 @@ public:
           tooling_statuses_(std::move(tooling_statuses)),
           tooling_bodies_(std::move(tooling_bodies)),
           queryall_statuses_(std::move(queryall_statuses)),
-          queryall_bodies_(std::move(queryall_bodies)), bulk_(std::move(bulk)) {
+          queryall_bodies_(std::move(queryall_bodies)), bulk_(std::move(bulk)),
+          report_(std::move(report)) {
     }
 
     HttpResponse Post(const HttpRequest &request) override {
@@ -241,6 +250,16 @@ public:
     }
 
     HttpResponse Get(const HttpRequest &request) override {
+        // Reports Analytics API (§16): run vs /describe. Checked FIRST because the
+        // analytics describe URL (.../analytics/reports/<id>/describe) also
+        // contains "/describe" and would otherwise hit the sObjects-describe seq.
+        if (request.url.find("/analytics/reports/") != string::npos) {
+            if (request.url.find("/describe") != string::npos) {
+                return Step(report_.describe_statuses, report_.describe_bodies,
+                            report_describe_index_);
+            }
+            return Step(report_.run_statuses, report_.run_bodies, report_run_index_);
+        }
         // Tooling API fast schema (#v0.6 §6): .../tooling/query -> tooling seq.
         if (request.url.find("/tooling/") != string::npos) {
             return Step(tooling_statuses_, tooling_bodies_, tooling_index_);
@@ -314,6 +333,7 @@ private:
     vector<int> queryall_statuses_;
     vector<string> queryall_bodies_;
     BulkMock bulk_;
+    ReportMock report_;
     size_t describe_index_ = 0;
     size_t query_index_ = 0;
     size_t global_index_ = 0;
@@ -323,6 +343,8 @@ private:
     size_t queryall_index_ = 0;
     size_t bulk_status_index_ = 0;
     size_t bulk_results_index_ = 0;
+    size_t report_run_index_ = 0;
+    size_t report_describe_index_ = 0;
 };
 
 // Split a string on a multi-char sentinel. An empty input yields one empty
@@ -435,12 +457,27 @@ unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &contex
         bulk.results_bodies = SplitOn(SettingStr(context, "sf_mock_bulk_results_body"), "|~|");
         bulk.results_locators = SplitOn(SettingStr(context, "sf_mock_bulk_results_locator"), ",");
 
+        // Reports Analytics API mock (§16): run + /describe sequences.
+        ScriptedMockHttpClient::ReportMock report;
+        report.run_statuses = ParseIntCsv(SettingStr(context, "sf_mock_report_status"));
+        if (report.run_statuses.empty()) {
+            report.run_statuses.push_back(200);
+        }
+        report.run_bodies = SplitOn(SettingStr(context, "sf_mock_report_body"), "|~|");
+        report.describe_statuses =
+            ParseIntCsv(SettingStr(context, "sf_mock_report_describe_status"));
+        if (report.describe_statuses.empty()) {
+            report.describe_statuses.push_back(200);
+        }
+        report.describe_bodies =
+            SplitOn(SettingStr(context, "sf_mock_report_describe_body"), "|~|");
+
         return make_uniq_base<SalesforceHttpClient, ScriptedMockHttpClient>(
             static_cast<int>(token_status), SettingStr(context, "sf_mock_token_body"),
             std::move(d_status), std::move(d_body), std::move(q_status), std::move(q_body),
             std::move(g_status), std::move(g_body), std::move(c_status), std::move(c_body),
             std::move(l_status), std::move(l_body), std::move(t_status), std::move(t_body),
-            std::move(qa_status), std::move(qa_body), std::move(bulk));
+            std::move(qa_status), std::move(qa_body), std::move(bulk), std::move(report));
     }
     return CreateLiveHttpClient();
 }

@@ -28,6 +28,7 @@ set(EXTENSION_SOURCES
     src/salesforce_types.cpp
     src/salesforce_describe.cpp
     src/salesforce_query.cpp
+    src/salesforce_report.cpp
     src/salesforce_value.cpp
     src/salesforce_scan.cpp
     src/salesforce_soql.cpp

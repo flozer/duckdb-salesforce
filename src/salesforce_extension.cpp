@@ -4,6 +4,7 @@
 #include "salesforce_storage.hpp"
 #include "salesforce_describe.hpp"
 #include "salesforce_query.hpp"
+#include "salesforce_report.hpp"
 #include "salesforce_value.hpp"
 #include "salesforce_soql.hpp"
 #include "salesforce_quota.hpp"
@@ -75,6 +76,13 @@ static void LoadInternal(ExtensionLoader &loader) {
     // delivered, quota, and short selectivity guidance. Aggregates the granular
     // salesforce_last_* diagnostics; does not replace them.
     loader.RegisterFunction(GetSalesforceQueryCostFunction());
+
+    // Report Bridge (§16) — list report definitions.
+    loader.RegisterFunction(GetSalesforceReportsFunction());
+    // Report Bridge (§16) Phase C — tabular report sample + diagnostics.
+    loader.RegisterFunction(GetSalesforceReportFunction());
+    // Report Bridge (§16) Phase D — best-effort candidate SOQL reconstruction.
+    loader.RegisterFunction(GetSalesforceReportSoqlFunction());
 
     // salesforce_relationships() — LAST-RESOLUTION relationship diagnostics
     // (#v1.0): one `config` row (sf_relationships mode, effective depth,
@@ -332,6 +340,20 @@ static void LoadInternal(ExtensionLoader &loader) {
                               LogicalType::VARCHAR, Value(""));
     config.AddExtensionOption("sf_mock_bulk_results_locator",
                               "TEST ONLY. Sforce-Locator per results page (comma-separated; empty = last).",
+                              LogicalType::VARCHAR, Value(""));
+
+    // Report Bridge analytics mock (§16). Run + describe sequences ('|~|').
+    config.AddExtensionOption("sf_mock_report_status",
+                              "TEST ONLY. Analytics report-run HTTP status(es), CSV.",
+                              LogicalType::VARCHAR, Value(""));
+    config.AddExtensionOption("sf_mock_report_body",
+                              "TEST ONLY. Analytics report-run JSON body/pages ('|~|').",
+                              LogicalType::VARCHAR, Value(""));
+    config.AddExtensionOption("sf_mock_report_describe_status",
+                              "TEST ONLY. Analytics report /describe HTTP status(es), CSV.",
+                              LogicalType::VARCHAR, Value(""));
+    config.AddExtensionOption("sf_mock_report_describe_body",
+                              "TEST ONLY. Analytics report /describe JSON body ('|~|').",
                               LogicalType::VARCHAR, Value(""));
 }
 
