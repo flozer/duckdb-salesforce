@@ -10,6 +10,12 @@ $ErrorActionPreference = 'Continue'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 Set-Location $root
 
+# Version precedence: -Version param > RELEASE_VERSION env > a v-prefixed
+# GITHUB_REF_NAME (tag push) > community descriptor > 'unknown'. The explicit
+# sources let a workflow_dispatch on main (GITHUB_REF_NAME=main) still package
+# the intended release version instead of falling back to the descriptor.
+if (-not $Version -and $env:RELEASE_VERSION) { $Version = $env:RELEASE_VERSION }
+if ($Version.StartsWith('v')) { $Version = $Version.Substring(1) } # tolerate v-prefix
 if (-not $Version -and $env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME.StartsWith('v')) {
     $Version = $env:GITHUB_REF_NAME.Substring(1)
 }
