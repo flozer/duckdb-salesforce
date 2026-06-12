@@ -165,6 +165,9 @@ static unique_ptr<FunctionData> ReportsBind(ClientContext &context,
             "salesforce_reports(catalog) requires the attached Salesforce catalog "
             "alias, e.g. salesforce_reports('sf')");
     }
+    if (input.inputs[0].IsNull()) {
+        throw BinderException("salesforce_reports: catalog alias must not be NULL.");
+    }
     string alias = input.inputs[0].ToString();
 
     auto bind = make_uniq<ReportsBindData>();

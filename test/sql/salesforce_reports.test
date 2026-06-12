@@ -36,5 +36,11 @@ FROM salesforce_last_soql();
 ----
 true
 
+# --- NULL alias rejected with a clear error -----------------------------------
+statement error
+SELECT * FROM salesforce_reports(NULL);
+----
+must not be NULL
+
 statement ok
 DETACH sf;
