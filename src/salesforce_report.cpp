@@ -222,11 +222,166 @@ static void ReportsFunction(ClientContext &context, TableFunctionInput &data,
     output.SetCardinality(produced);
 }
 
+// --- salesforce_report(alias, report_id): tabular sample (Phase C) -----------
+
+static constexpr int64_t kReportMaxRows = 2000;
+static const char *kReportGuidance =
+    "report result is a validation sample only (max 2000 rows, no pagination); "
+    "scale via sf.<Object> scans, not this function";
+
+struct ReportBindData : public FunctionData {
+    idx_t data_cols = 0;                 // count of report (non-reserved) columns
+    vector<vector<string>> rows;         // cell labels, in detailColumns order
+    bool truncated = false;
+    bool all_data = false;
+    bool has_all_data = false;           // false -> __sf_report_all_data is NULL
+
+    unique_ptr<FunctionData> Copy() const override {
+        auto r = make_uniq<ReportBindData>();
+        r->data_cols = data_cols;
+        r->rows = rows;
+        r->truncated = truncated;
+        r->all_data = all_data;
+        r->has_all_data = has_all_data;
+        return std::move(r);
+    }
+    bool Equals(const FunctionData &other_p) const override {
+        auto &o = other_p.Cast<ReportBindData>();
+        return data_cols == o.data_cols && rows.size() == o.rows.size();
+    }
+};
+
+struct ReportGlobalState : public GlobalTableFunctionState {
+    idx_t cursor = 0;
+    idx_t MaxThreads() const override {
+        return 1;
+    }
+};
+
+static unique_ptr<FunctionData> ReportBind(ClientContext &context, TableFunctionBindInput &input,
+                                           vector<LogicalType> &return_types,
+                                           vector<string> &names) {
+    auto &args = input.inputs;
+    if (args.size() < 2) {
+        throw BinderException(
+            "salesforce_report(catalog, report_id) requires the attached catalog "
+            "alias and a report id, e.g. salesforce_report('sf', '00O...')");
+    }
+    if (args[0].IsNull() || args[1].IsNull()) {
+        throw BinderException("salesforce_report: arguments must not be NULL.");
+    }
+    string alias = args[0].ToString();
+    string report_id = args[1].ToString();
+
+    SalesforceConfig config;
+    SalesforceTokenSet token;
+    GetSalesforceCatalogCredentials(context, alias, config, token);
+
+    auto client = BuildHttpClientForContext(context);
+    SalesforceSession session(config, *client);
+    session.SetToken(token);
+    string body = session.RunReport(report_id);
+
+    // Tabular only: the synchronous tabular factMap lives under the "T!T" key.
+    // Summary/matrix reports key their factMap by grouping (e.g. "0!T") and are
+    // out of the first cut.
+    string factmap = sfjson::ExtractObject(body, "factMap");
+    string tt = sfjson::ExtractObject(factmap, "T!T");
+    if (tt.empty()) {
+        throw BinderException(
+            "salesforce_report: only tabular reports are supported in this cut "
+            "(summary/matrix unsupported); report '%s'",
+            report_id);
+    }
+
+    auto bind = make_uniq<ReportBindData>();
+
+    // Columns: detailColumns order, named by the extended-metadata label.
+    string metadata = sfjson::ExtractObject(body, "reportMetadata");
+    vector<string> detail_cols = sfjson::GetStringArray(metadata, "detailColumns");
+    string ext = sfjson::ExtractObject(body, "reportExtendedMetadata");
+    string col_info = sfjson::ExtractObject(ext, "detailColumnInfo");
+    for (auto &api : detail_cols) {
+        string info = sfjson::ExtractObject(col_info, api);
+        string label = info.empty() ? "" : sfjson::GetString(info, "label");
+        names.push_back(label.empty() ? api : label);
+        return_types.push_back(LogicalType::VARCHAR);
+    }
+    bind->data_cols = detail_cols.size();
+
+    // Rows: dataCells[*].label, positional with detailColumns.
+    for (auto &row_json : sfjson::GetObjectArray(tt, "rows")) {
+        vector<string> vals;
+        for (auto &cell : sfjson::GetObjectArray(row_json, "dataCells")) {
+            vals.push_back(sfjson::GetString(cell, "label"));
+        }
+        vals.resize(bind->data_cols); // pad short rows; ignore extra cells
+        bind->rows.push_back(std::move(vals));
+    }
+
+    // Truncation: allData when present (else unknown -> all_data NULL, no claim).
+    string raw;
+    bool found = false, is_null = false;
+    sfjson::GetValue(body, "allData", raw, found, is_null);
+    bind->has_all_data = found && !is_null;
+    bind->all_data = (raw == "true");
+    bind->truncated = bind->has_all_data ? !bind->all_data : false;
+
+    // Reserved diagnostic columns (prefix cannot collide with report fields).
+    names.push_back("__sf_report_truncated");
+    return_types.push_back(LogicalType::BOOLEAN);
+    names.push_back("__sf_report_all_data");
+    return_types.push_back(LogicalType::BOOLEAN);
+    names.push_back("__sf_report_max_rows");
+    return_types.push_back(LogicalType::BIGINT);
+    names.push_back("__sf_report_guidance");
+    return_types.push_back(LogicalType::VARCHAR);
+
+    return std::move(bind);
+}
+
+static unique_ptr<GlobalTableFunctionState> ReportInit(ClientContext &,
+                                                       TableFunctionInitInput &) {
+    return make_uniq<ReportGlobalState>();
+}
+
+static void ReportFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &bd = data.bind_data->Cast<ReportBindData>();
+    auto &gs = data.global_state->Cast<ReportGlobalState>();
+    const idx_t dc = bd.data_cols;
+
+    idx_t produced = 0;
+    while (gs.cursor < bd.rows.size() && produced < STANDARD_VECTOR_SIZE) {
+        const auto &vals = bd.rows[gs.cursor];
+        for (idx_t c = 0; c < dc; c++) {
+            FlatVector::GetData<string_t>(output.data[c])[produced] =
+                StringVector::AddString(output.data[c], c < vals.size() ? vals[c] : string());
+        }
+        FlatVector::GetData<bool>(output.data[dc + 0])[produced] = bd.truncated;
+        if (bd.has_all_data) {
+            FlatVector::GetData<bool>(output.data[dc + 1])[produced] = bd.all_data;
+        } else {
+            FlatVector::SetNull(output.data[dc + 1], produced, true);
+        }
+        FlatVector::GetData<int64_t>(output.data[dc + 2])[produced] = kReportMaxRows;
+        FlatVector::GetData<string_t>(output.data[dc + 3])[produced] =
+            StringVector::AddString(output.data[dc + 3], kReportGuidance);
+        gs.cursor++;
+        produced++;
+    }
+    output.SetCardinality(produced);
+}
+
 } // namespace
 
 TableFunction GetSalesforceReportsFunction() {
     return TableFunction("salesforce_reports", {LogicalType::VARCHAR}, ReportsFunction,
                          ReportsBind, ReportsInit);
+}
+
+TableFunction GetSalesforceReportFunction() {
+    return TableFunction("salesforce_report", {LogicalType::VARCHAR, LogicalType::VARCHAR},
+                         ReportFunction, ReportBind, ReportInit);
 }
 
 TableFunction GetSalesforceReportFetchRawFunction() {

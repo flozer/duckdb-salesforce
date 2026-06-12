@@ -20,4 +20,9 @@ TableFunction GetSalesforceReportFetchRawFunction();
 // attached catalog's credentials. Lists definitions, not report data (§16 B).
 TableFunction GetSalesforceReportsFunction();
 
+// salesforce_report(catalog, report_id) — run a report synchronously and return
+// its TABULAR rows as a validation sample (max 2000), with reserved
+// __sf_report_* diagnostic columns appended. Sample/oracle, not extraction (§16 C).
+TableFunction GetSalesforceReportFunction();
+
 } // namespace duckdb

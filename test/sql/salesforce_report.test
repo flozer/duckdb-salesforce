@@ -1,0 +1,67 @@
+# name: test/sql/salesforce_report.test
+# description: §16 Report Bridge Phase C — salesforce_report() tabular sample + diagnostics (mocked)
+# group: [salesforce]
+#
+# salesforce_report(alias, report_id) runs a report synchronously and returns its
+# TABULAR rows (factMap "T!T") as a validation sample, with reserved __sf_report_
+# diagnostic columns appended. It is a sample/oracle, NOT a large-extraction path.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- tabular run: rows named by detailColumn label + reserved diagnostics ------
+statement ok
+SET sf_mock_report_body = '{"allData":true,"hasDetailRows":true,"reportMetadata":{"detailColumns":["ACCOUNT_NAME","AMOUNT"]},"reportExtendedMetadata":{"detailColumnInfo":{"ACCOUNT_NAME":{"label":"Account Name"},"AMOUNT":{"label":"Amount"}}},"factMap":{"T!T":{"rows":[{"dataCells":[{"label":"Acme"},{"label":"100"}]},{"dataCells":[{"label":"Globex"},{"label":"50"}]}]}}}';
+
+query II
+SELECT "Account Name", "Amount" FROM salesforce_report('sf', '00O1') ORDER BY "Account Name";
+----
+Acme	100
+Globex	50
+
+query I
+SELECT DISTINCT __sf_report_truncated = false AND __sf_report_all_data = true
+   AND __sf_report_max_rows = 2000
+FROM salesforce_report('sf', '00O1');
+----
+true
+
+# generated SOQL/endpoint not asserted here (analytics REST, not SOQL); routing
+# is proven in salesforce_report_phase_a.test.
+
+# --- allData=false: truncated sample + loud guidance --------------------------
+statement ok
+SET sf_mock_report_body = '{"allData":false,"reportMetadata":{"detailColumns":["ACCOUNT_NAME"]},"reportExtendedMetadata":{"detailColumnInfo":{"ACCOUNT_NAME":{"label":"Account Name"}}},"factMap":{"T!T":{"rows":[{"dataCells":[{"label":"Acme"}]}]}}}';
+
+query I
+SELECT DISTINCT __sf_report_truncated = true AND __sf_report_all_data = false
+   AND contains(__sf_report_guidance, 'sample')
+FROM salesforce_report('sf', '00O1');
+----
+true
+
+# --- non-tabular (no "T!T" factMap) -> clear error ----------------------------
+statement ok
+SET sf_mock_report_body = '{"allData":true,"reportMetadata":{"reportFormat":"SUMMARY","detailColumns":["NAME"]},"factMap":{"0!T":{"rows":[]}}}';
+
+statement error
+SELECT * FROM salesforce_report('sf', '00O1');
+----
+tabular
+
+# --- NULL args rejected -------------------------------------------------------
+statement error
+SELECT * FROM salesforce_report(NULL, '00O1');
+----
+must not be NULL
+
+statement ok
+DETACH sf;
