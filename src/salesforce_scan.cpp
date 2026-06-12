@@ -17,6 +17,7 @@
 #include "salesforce_value.hpp"
 
 #include <atomic>
+#include <limits>
 #include <unordered_set>
 
 #include "duckdb/common/exception.hpp"
@@ -325,7 +326,15 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
     // run before failing fast. Default 600 keeps prior behaviour.
     Value pbv;
     if (context.TryGetCurrentSetting("sf_bulk_poll_budget", pbv) && !pbv.IsNull()) {
-        gstate->bulk_poll_budget = static_cast<int>(pbv.GetValue<int64_t>());
+        // Clamp into int range BEFORE the cast: a BIGINT setting can exceed
+        // INT_MAX, and a raw static_cast would wrap (possibly negative).
+        int64_t b = pbv.GetValue<int64_t>();
+        if (b < 1) {
+            b = 1;
+        } else if (b > std::numeric_limits<int>::max()) {
+            b = std::numeric_limits<int>::max();
+        }
+        gstate->bulk_poll_budget = static_cast<int>(b);
     }
     gstate->session->SetBulkPollBudget(gstate->bulk_poll_budget);
     SetLastScanPages(0);

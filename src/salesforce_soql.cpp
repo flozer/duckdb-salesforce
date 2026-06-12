@@ -187,13 +187,21 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
                 bw.upper->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
                 return false; // function/cast/non-literal bound -> residual
             }
+            const Value &lo_val = bw.lower->Cast<BoundConstantExpression>().value;
+            const Value &hi_val = bw.upper->Cast<BoundConstantExpression>().value;
+            if (lo_val.IsNull() || hi_val.IsNull()) {
+                // Degenerate range (`field >= null`): SoqlLiteral would emit the
+                // SOQL `null` keyword, which is only valid for = / != null. Leave
+                // residual; DuckDB handles the NULL-bound semantics correctly.
+                return false;
+            }
             string lo_op, hi_op;
             if (!ComparisonOp(bw.LowerComparisonType(), lo_op) ||
                 !ComparisonOp(bw.UpperComparisonType(), hi_op)) {
                 return false;
             }
-            string lo = SoqlLiteral(bw.lower->Cast<BoundConstantExpression>().value);
-            string hi = SoqlLiteral(bw.upper->Cast<BoundConstantExpression>().value);
+            string lo = SoqlLiteral(lo_val);
+            string hi = SoqlLiteral(hi_val);
             out = "(" + field + " " + lo_op + " " + lo + " AND " + field + " " + hi_op +
                   " " + hi + ")";
             return true;

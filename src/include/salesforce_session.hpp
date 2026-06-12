@@ -72,7 +72,8 @@ public:
     // Bulk job poll budget (ROADMAP §15): max status polls before BulkStartJob
     // fails fast with a clear poll-count error. Default 600 preserves prior
     // behaviour; a large backfill that genuinely needs more can raise it via
-    // sf_bulk_poll_budget. Values < 1 are clamped to 1 by the caller.
+    // sf_bulk_poll_budget. The setting is clamped to int range before it reaches
+    // here; BulkStartJob additionally treats any value < 1 as 1.
     void SetBulkPollBudget(int budget) {
         bulk_poll_budget_ = budget;
     }
