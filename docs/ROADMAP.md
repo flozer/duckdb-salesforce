@@ -1,10 +1,10 @@
 # duckdb-salesforce Roadmap
 
-Status: post-`v0.9.3` development roadmap. `v0.9.3` is the current own release of
-this repo — it ships the §15 datalake / range-pushdown + Bulk-backfill hardening
-(marked DELIVERED below) on top of `v0.9.2`. The approved
+Status: post-`v0.10.0` development roadmap. `v0.10.0` is the current own release
+of this repo — it ships the §16 Report Bridge on top of the `v0.9.3` datalake /
+range-pushdown + Bulk-backfill hardening. The approved
 `duckdb/community-extensions` baseline remains `v0.9.2`; the community catalog is
-NOT updated to `v0.9.3` until a future feature pack is bundled and an explicit
+NOT updated to `v0.10.0` until a future feature pack is bundled and an explicit
 human GO is given. This file records the strategic direction after the connector
 reached feature maturity, cross-platform CI, and public documentation.
 
@@ -33,13 +33,13 @@ transformations, Parquet export, and analytical workflows.
 `v0.9.2` is the approved community baseline. Treat it as a product release, not
 as a development checkpoint.
 
-`v0.9.3` is the current own release: it adds the §15 datalake / range-pushdown +
-Bulk-backfill hardening on top of `v0.9.2`. It is a normal product release of
-this repo and does NOT change the community baseline — `duckdb/community-extensions`
-stays at `v0.9.2` until a future feature pack is bundled, release notes and
-descriptor are aligned, smoke evidence is captured, and an explicit human GO is
-given. Tag, GitHub Release, and Linux/Windows release assets for `v0.9.3` are
-complete; only the community update remains gated.
+`v0.10.0` is the current own release: it adds the §16 Report Bridge on top of
+`v0.9.3`. It is a normal product release of this repo and does NOT change the
+community baseline — `duckdb/community-extensions` stays at `v0.9.2` until a
+future feature pack is bundled, release notes and descriptor are aligned, smoke
+evidence is captured, and an explicit human GO is given. Tag/GitHub Release and
+Linux/Windows assets for `v0.10.0` are handled by the release-assets workflow;
+only the community update remains gated.
 
 - Keep `main` stable and releasable.
 - Do roadmap/planning work in a dedicated planning branch.
