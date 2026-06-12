@@ -1602,7 +1602,18 @@ identifiers are safe Salesforce names and whose filters use supported operators
 single-quoted and escaped; numerics are bare; date/boolean/null values, unsafe
 identifiers, unsupported operators, and `OR`/`NOT`/grouped `reportBooleanFilter`
 logic set `translatable = false`, `soql = NULL`, and explain why in `caveats`.
-The structured ingredients are always returned regardless of `translatable`.
+`base_object` is derived from the report type (`CustomEntity$X` → `X`) and
+accepted only when `X` is a safe identifier that **exists and is queryable** in
+Describe Global. Every projected and filtered field is then validated against the
+sObject Describe; the SOQL projection is relativized to bare field names. A field
+used in a filter must additionally be **filterable** (a non-filterable field
+would make the candidate SOQL fail at Salesforce). Relationship-traversal
+(`Rel.Field`) and pseudo columns do not resolve. Anything
+that fails — an unsafe/internal base, a non-existent or non-queryable object, a
+field missing on the object, a cross filter, an unsupported operator, or
+`OR`/`NOT`/grouped filter logic — yields `translatable = false` with `soql = NULL`
+and an explaining caveat. No partial SOQL is ever emitted. The structured
+ingredients are always returned regardless of `translatable`.
 
 #### Daily use
 

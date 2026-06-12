@@ -1612,8 +1612,18 @@ suportados (`=`, `!=`, `<`, `>`, e `contains` → `LIKE '%v%'`). Literais string
 são aspas-simples e escapados; numéricos ficam crus; valores date/boolean/null,
 identificadores inseguros, operadores não suportados, e lógica `OR`/`NOT`/
 agrupada em `reportBooleanFilter` definem `translatable = false`, `soql = NULL`,
-e explicam o motivo em `caveats`. Os ingredientes estruturados são sempre
-retornados, independente de `translatable`.
+e explicam o motivo em `caveats`. `base_object` é derivado do report type
+(`CustomEntity$X` → `X`) e aceito só quando `X` é um identificador seguro que
+**existe e é queryable** no Describe Global. Cada campo projetado/filtrado é então
+validado contra o sObject Describe; a projeção do SOQL é relativizada para nomes
+de campo simples. Um campo usado em filtro precisa adicionalmente ser
+**filterable** (um campo não-filtrável faria o SOQL candidato falhar no
+Salesforce). Traversal de relacionamento (`Rel.Field`) e pseudo-colunas não
+resolvem. Qualquer falha — base insegura/interna, objeto inexistente ou não
+queryable, campo ausente no objeto, cross filter, operador não suportado, ou
+lógica `OR`/`NOT`/agrupada — resulta em `translatable = false` com `soql = NULL` e
+um caveat explicativo. SOQL parcial nunca é emitido. Os ingredientes estruturados
+são sempre retornados, independente de `translatable`.
 
 #### Uso no dia a dia
 
