@@ -1,0 +1,178 @@
+# name: test/sql/salesforce_range_pushdown.test
+# description: §15 — exact two-sided range pushdown on CreatedDate / SystemModstamp (mocked)
+# group: [salesforce]
+#
+# DuckDB's FilterCombiner rewrites `field >= lo AND field < hi` on the SAME
+# column into a single BoundBetweenExpression before it reaches the scan's
+# complex-filter pushdown. Without explicit BETWEEN handling the whole range
+# fell back to residual (full remote scan + local filter). These cases assert
+# the range is translated to SOQL and removed from the residual set.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"CreatedDate","type":"datetime","filterable":true},{"name":"SystemModstamp","type":"datetime","filterable":true},{"name":"BirthDate","type":"date","filterable":true}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"001","Name":"Acme","CreatedDate":"2024-01-15T10:20:30.000+0000","SystemModstamp":"2024-01-16T00:00:00.000+0000","BirthDate":"2024-01-10"}]}';
+
+statement ok
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- half-open range on CreatedDate (>= lo AND < hi): both bounds pushed -------
+statement ok
+SELECT Id FROM sf.Account
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00' AND CreatedDate < TIMESTAMP '2024-02-01 00:00:00';
+
+query I
+SELECT contains(soql, 'CreatedDate >= 2024-01-01T00:00:00Z')
+   AND contains(soql, 'CreatedDate < 2024-02-01T00:00:00Z')
+FROM salesforce_last_soql();
+----
+true
+
+query I
+SELECT pushed_filters >= 1 AND residual_filters = 0 AND where_pushed <> ''
+FROM salesforce_query_cost();
+----
+true
+
+# --- closed range (>= lo AND <= hi): inclusive upper bound --------------------
+statement ok
+SELECT Id FROM sf.Account
+WHERE SystemModstamp >= TIMESTAMP '2024-01-01 00:00:00' AND SystemModstamp <= TIMESTAMP '2024-03-01 00:00:00';
+
+query I
+SELECT contains(soql, 'SystemModstamp >= 2024-01-01T00:00:00Z')
+   AND contains(soql, 'SystemModstamp <= 2024-03-01T00:00:00Z')
+FROM salesforce_last_soql();
+----
+true
+
+query I
+SELECT residual_filters = 0 FROM salesforce_query_cost();
+----
+true
+
+# --- reversed operands (constant on the left) --------------------------------
+statement ok
+SELECT Id FROM sf.Account
+WHERE TIMESTAMP '2024-01-01 00:00:00' <= CreatedDate AND CreatedDate < TIMESTAMP '2024-02-01 00:00:00';
+
+query I
+SELECT contains(salesforce_last_soql.soql, 'CreatedDate >= 2024-01-01T00:00:00Z')
+   AND contains(salesforce_last_soql.soql, 'CreatedDate < 2024-02-01T00:00:00Z')
+   AND residual_filters = 0
+FROM salesforce_last_soql(), salesforce_query_cost();
+----
+true
+
+# --- DATE column range --------------------------------------------------------
+statement ok
+SELECT Id FROM sf.Account
+WHERE BirthDate >= DATE '2024-01-01' AND BirthDate < DATE '2024-02-01';
+
+query I
+SELECT contains(salesforce_last_soql.soql, 'BirthDate >= 2024-01-01')
+   AND contains(salesforce_last_soql.soql, 'BirthDate < 2024-02-01')
+   AND residual_filters = 0
+FROM salesforce_last_soql(), salesforce_query_cost();
+----
+true
+
+# --- COUNT(*) pushdown carries the range into the COUNT() SOQL ----------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":7,"done":true,"records":[]}';
+
+query I
+SELECT COUNT(*) FROM sf.Account
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00' AND CreatedDate < TIMESTAMP '2024-02-01 00:00:00';
+----
+7
+
+query I
+SELECT contains(soql, 'SELECT COUNT() FROM Account WHERE')
+   AND contains(soql, 'CreatedDate >= 2024-01-01T00:00:00Z')
+   AND contains(soql, 'CreatedDate < 2024-02-01T00:00:00Z')
+FROM salesforce_last_soql();
+----
+true
+
+query I
+SELECT count_pushdown = true AND residual_filters = 0 FROM salesforce_query_cost();
+----
+true
+
+# --- Bulk transport: range lands in the Bulk job-create SOQL ------------------
+statement ok
+SET sf_mock_bulk_results_body = 'Id
+001';
+
+statement ok
+SET sf_force_transport = 'bulk';
+
+statement ok
+SELECT Id FROM sf.Account
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00' AND CreatedDate < TIMESTAMP '2024-02-01 00:00:00';
+
+query I
+SELECT contains(body, 'CreatedDate >= 2024-01-01T00:00:00Z')
+   AND contains(body, 'CreatedDate < 2024-02-01T00:00:00Z')
+FROM salesforce_last_bulk_create_body();
+----
+true
+
+query I
+SELECT bulk = true AND residual_filters = 0 FROM salesforce_query_cost();
+----
+true
+
+statement ok
+SET sf_force_transport = 'auto';
+
+# --- queryAll mode: range pushes into the /queryAll request -------------------
+statement ok
+SET sf_mock_queryall_body = '{"done":true,"records":[{"Id":"d1"}]}';
+
+statement ok
+SET sf_query_mode = 'queryAll';
+
+statement ok
+SELECT Id FROM sf.Account
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00' AND CreatedDate < TIMESTAMP '2024-02-01 00:00:00';
+
+query I
+SELECT contains(soql, 'CreatedDate >= 2024-01-01T00:00:00Z')
+   AND contains(soql, 'CreatedDate < 2024-02-01T00:00:00Z')
+FROM salesforce_last_soql();
+----
+true
+
+query I
+SELECT query_mode = 'queryAll' AND residual_filters = 0 FROM salesforce_query_cost();
+----
+true
+
+statement ok
+SET sf_query_mode = 'query';
+
+# --- unsupported: function on the range column stays residual (correct) -------
+# year(CreatedDate) BETWEEN 2024 AND 2025 — cast/function bounds are NOT a plain
+# column range, must NOT be pushed.
+statement ok
+SELECT Id FROM sf.Account WHERE year(CreatedDate) >= 2024 AND year(CreatedDate) < 2025;
+
+query I
+SELECT salesforce_last_soql.soql NOT LIKE '%WHERE%' AND residual_filters >= 1
+FROM salesforce_last_soql(), salesforce_query_cost();
+----
+true
+
+statement ok
+DETACH sf;
