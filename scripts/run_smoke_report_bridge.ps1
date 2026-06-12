@@ -32,6 +32,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# DuckDB emits UTF-8. Force UTF-8 on the Windows console/capture so accents and
+# any table glyphs render correctly instead of CP437/CP850 mojibake
+# (e.g. "Relatórios" not "Relat├│rios").
+try {
+    [Console]::InputEncoding  = [System.Text.UTF8Encoding]::new($false)
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $OutputEncoding           = [System.Text.UTF8Encoding]::new($false)
+    chcp 65001 > $null 2>&1
+} catch {
+    # non-Windows / console without code-page support — ignore.
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 
 # --- mode resolution ----------------------------------------------------------
@@ -106,12 +119,15 @@ function Fail([string]$step, [string]$out) {
 if ($mode -eq 'list') {
     $where = if ($Format) { "WHERE upper(Format) = upper('$Format')" } else { '' }
     Write-Host ("[list] salesforce_reports('sf') " + $(if ($Format) { "(Format = $Format)" } else { '(all)' })) -ForegroundColor Cyan
+    # CSV (not the Unicode-border table): readable, copyable, log-friendly evidence.
     $sql = @"
 $attach
-.mode duckbox
+.mode csv
+.headers on
 SELECT Id, Name, DeveloperName, FolderName, Format
 FROM salesforce_reports('sf') $where
 ORDER BY (upper(Format) = 'TABULAR') DESC, Name;
+.headers off
 SELECT count(*) AS total_reports FROM salesforce_reports('sf') $where;
 "@
     $r = Invoke-Duck $sql
