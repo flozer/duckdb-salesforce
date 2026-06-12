@@ -77,9 +77,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     // salesforce_last_* diagnostics; does not replace them.
     loader.RegisterFunction(GetSalesforceQueryCostFunction());
 
-    // Report Bridge (§16) Phase A — TEST/foundation analytics fetch harness.
-    loader.RegisterFunction(GetSalesforceReportFetchRawFunction());
-    // Report Bridge (§16) Phase B — list report definitions.
+    // Report Bridge (§16) — list report definitions.
     loader.RegisterFunction(GetSalesforceReportsFunction());
     // Report Bridge (§16) Phase C — tabular report sample + diagnostics.
     loader.RegisterFunction(GetSalesforceReportFunction());

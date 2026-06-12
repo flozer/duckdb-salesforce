@@ -57,6 +57,35 @@ SELECT * FROM salesforce_report('sf', '00O1');
 ----
 tabular
 
+# --- column-name collision guard: duplicate labels + reserved-prefix label ----
+# A,B share label "Region" (duplicate); C's label collides with a reserved
+# diagnostic name -> falls back to the API name "C".
+statement ok
+SET sf_mock_report_body = '{"allData":true,"reportMetadata":{"detailColumns":["A","B","C"]},"reportExtendedMetadata":{"detailColumnInfo":{"A":{"label":"Region"},"B":{"label":"Region"},"C":{"label":"__sf_report_truncated"}}},"factMap":{"T!T":{"rows":[{"dataCells":[{"label":"x"},{"label":"y"},{"label":"z"}]}]}}}';
+
+query III
+SELECT "Region", "Region_2", "C" FROM salesforce_report('sf', '00O1');
+----
+x	y	z
+
+# reserved diagnostic column is intact (not shadowed by the colliding label)
+query I
+SELECT __sf_report_truncated = false FROM salesforce_report('sf', '00O1');
+----
+true
+
+# --- HTTP error surfaces a clear, secret-free error ---------------------------
+statement ok
+SET sf_mock_report_status = 500;
+
+statement error
+SELECT * FROM salesforce_report('sf', '00O1');
+----
+salesforce
+
+statement ok
+SET sf_mock_report_status = 200;
+
 # --- NULL args rejected -------------------------------------------------------
 statement error
 SELECT * FROM salesforce_report(NULL, '00O1');
