@@ -1,0 +1,57 @@
+# name: test/sql/salesforce_report_phase_a.test
+# description: §16 Report Bridge Phase A — analytics HTTP foundation + mock (no live SF)
+# group: [salesforce]
+#
+# Phase A proves the Salesforce Reports & Dashboards REST API plumbing offline:
+# correct endpoint routing (run vs /describe), GET method (the run + describe go
+# through AuthorizedGet), response delivered intact, basic JSON parse, and a
+# clear secret-free error on HTTP failure. The user-facing salesforce_reports()
+# / salesforce_report() / salesforce_report_soql() functions arrive in Phases
+# B-D; this exercises the foundation through a TEST-ONLY trigger.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_report_body = '{"allData":true,"hasDetailRows":true,"factMap":{"T!T":{"rows":[]}}}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportFormat":"TABULAR","reportType":{"type":"AccountList"}}}';
+
+# --- run mode: hits /analytics/reports/<id>, returns run body, parses allData --
+query I
+SELECT all_data FROM salesforce_report_fetch_raw('00O1', 'run',
+    client_id := 'c', client_secret := 's', refresh_token := 'r');
+----
+true
+
+# Body delivered intact (routing to the analytics branch, not the generic query)
+query I
+SELECT contains(body, 'factMap')
+FROM salesforce_report_fetch_raw('00O1', 'run',
+    client_id := 'c', client_secret := 's', refresh_token := 'r');
+----
+true
+
+# --- describe mode: hits /analytics/reports/<id>/describe ----------------------
+query I
+SELECT contains(body, 'reportMetadata') AND contains(body, 'TABULAR')
+FROM salesforce_report_fetch_raw('00O1', 'describe',
+    client_id := 'c', client_secret := 's', refresh_token := 'r');
+----
+true
+
+# --- failure: non-2xx surfaces a clear, secret-free error ----------------------
+statement ok
+SET sf_mock_report_status = 500;
+
+statement error
+SELECT body FROM salesforce_report_fetch_raw('00O1', 'run',
+    client_id := 'c', client_secret := 's', refresh_token := 'r');
+----
+salesforce

@@ -470,6 +470,20 @@ SalesforceQueryPage SalesforceSession::FetchPage(const string &path) {
     return pg;
 }
 
+string SalesforceSession::RunReport(const string &report_id) {
+    // Synchronous run with row-level detail so a tabular factMap is populated.
+    // 2,000-row cap + allData handling is the caller's concern (Phase C).
+    string path = "/services/data/" + config_.api_version + "/analytics/reports/" +
+                  report_id + "?includeDetails=true";
+    return AuthorizedGet(path);
+}
+
+string SalesforceSession::DescribeReport(const string &report_id) {
+    string path = "/services/data/" + config_.api_version + "/analytics/reports/" +
+                  report_id + "/describe";
+    return AuthorizedGet(path);
+}
+
 SalesforceQueryResult SalesforceSession::Query(const string &soql) {
     // Eager: fetch every page. Defensive ceiling bounds a misbehaving cursor.
     constexpr idx_t kMaxPages = 1000000;

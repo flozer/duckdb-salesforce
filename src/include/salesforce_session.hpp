@@ -107,6 +107,15 @@ public:
     // Implemented over FetchPage. Guards against pagination loops.
     SalesforceQueryResult Query(const string &soql);
 
+    // Salesforce Reports & Dashboards REST API (ROADMAP §16, synchronous only).
+    // RunReport executes the report and returns the raw JSON body (factMap +
+    // reportMetadata + reportExtendedMetadata); DescribeReport returns the raw
+    // report /describe JSON. Both reuse the existing auth / 401-refresh /
+    // api_version path via AuthorizedGet and throw a clear, secret-free error on
+    // HTTP failure. Parsing into rows / candidate SOQL is Phases B-D.
+    string RunReport(const string &report_id);
+    string DescribeReport(const string &report_id);
+
     // Initial query path for a SOQL string:
     // /services/data/<api_version>/query?q=<url-encoded>.
     string QueryPath(const string &soql) const;
