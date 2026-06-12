@@ -8,7 +8,7 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.9.2"><img alt="release v0.9.2" src="https://img.shields.io/badge/release-v0.9.2-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.9.3"><img alt="release v0.9.3" src="https://img.shields.io/badge/release-v0.9.3-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
     <a href="https://github.com/duckdb/community-extensions/pull/2037"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-merged-brightgreen.svg"></a>
   </p>
