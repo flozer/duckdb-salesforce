@@ -570,6 +570,22 @@ engine.
 
 ### 16. Salesforce Report Bridge
 
+> **Status: DELIVERED in `v0.10.0`.** Three opt-in, read-only functions:
+> `salesforce_reports('sf')`, `salesforce_report('sf', id)` (tabular sample +
+> reserved `__sf_report_*` diagnostics), `salesforce_report_soql('sf', id)`
+> (structured ingredients + best-effort, identifier/literal-safe candidate SOQL).
+> Offline mock tests + a maintainer live smoke (evidence:
+> `docs/smoke/report-bridge-v0.10.0.md`).
+>
+> **Future enhancement — base-object mapping.** `salesforce_report_soql()`
+> currently derives `base_object` from `reportMetadata.reportType.type`, which is
+> the report type's internal name (e.g. `CustomEntity$…`), not the underlying
+> sObject API name. This is **safe today** because an unsafe name yields
+> `translatable = false`, but it makes most real reports non-translatable.
+> Investigate the report `/describe` `reportTypeMetadata` (or related describe
+> metadata) to map report type → actual base sObject when it can be done safely,
+> raising the translatable rate without weakening the safety guards.
+
 Salesforce reports are useful business-authored definitions, but they are not
 SOQL queries and do not expose an underlying query. This feature should provide a
 read-only bridge for report discovery, small report execution, and best-effort
