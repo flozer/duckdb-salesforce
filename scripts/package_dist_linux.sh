@@ -16,8 +16,13 @@ if [ ! -f "$EXT" ]; then
     exit 1
 fi
 
-VERSION=""
-if [ -n "${GITHUB_REF_NAME:-}" ]; then
+# Version precedence: explicit arg ($1) > RELEASE_VERSION env > a v-prefixed
+# GITHUB_REF_NAME (tag push) > community descriptor > "unknown". The explicit
+# sources let a workflow_dispatch on main (GITHUB_REF_NAME=main) still package
+# the intended release version instead of falling back to the descriptor.
+VERSION="${1:-${RELEASE_VERSION:-}}"
+VERSION="${VERSION#v}" # tolerate a v-prefixed explicit value
+if [ -z "$VERSION" ] && [ -n "${GITHUB_REF_NAME:-}" ]; then
     case "$GITHUB_REF_NAME" in
         v*) VERSION="${GITHUB_REF_NAME#v}" ;;
     esac

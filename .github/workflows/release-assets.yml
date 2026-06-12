@@ -30,6 +30,19 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Resolve release version
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag != '' && inputs.tag || github.ref_name }}"
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          # Only force a version when the tag is a real vX.Y.Z; a non-tag ref
+          # (e.g. 'main' on workflow_dispatch) leaves it empty so the package
+          # script keeps its existing descriptor fallback.
+          case "$TAG" in
+            v*) echo "RELEASE_VERSION=${TAG#v}" >> "$GITHUB_ENV" ;;
+            *)  echo "RELEASE_VERSION=" >> "$GITHUB_ENV" ;;
+          esac
+
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -95,6 +108,16 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Resolve release version
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag != '' && inputs.tag || github.ref_name }}"
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          case "$TAG" in
+            v*) echo "RELEASE_VERSION=${TAG#v}" >> "$GITHUB_ENV" ;;
+            *)  echo "RELEASE_VERSION=" >> "$GITHUB_ENV" ;;
+          esac
+
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -112,7 +135,7 @@ jobs:
 
       - name: Package
         shell: pwsh
-        run: scripts/package_dist_windows.ps1
+        run: scripts/package_dist_windows.ps1 -Version $env:RELEASE_VERSION
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
