@@ -9,6 +9,7 @@
 
 #include "salesforce_report.hpp"
 #include "salesforce_config.hpp"
+#include "salesforce_describe.hpp"
 #include "salesforce_http.hpp"
 #include "salesforce_json.hpp"
 #include "salesforce_session.hpp"
@@ -18,6 +19,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 
+#include <unordered_map>
 #include <unordered_set>
 
 namespace duckdb {
@@ -505,9 +507,6 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     bind->report_name = sfjson::GetString(metadata, "name");
     string report_type_obj = sfjson::ExtractObject(metadata, "reportType");
     bind->report_type = sfjson::GetString(report_type_obj, "type");
-    // Best-effort base object: the report type's API name. The user must verify
-    // it against an actual sObject (caveated below).
-    bind->base_object = bind->report_type;
     string format = sfjson::GetString(metadata, "reportFormat");
     bind->columns = sfjson::GetStringArray(metadata, "detailColumns");
     for (auto &f : sfjson::GetObjectArray(metadata, "reportFilters")) {
@@ -533,19 +532,96 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                           "' is not translatable in this cut (summary/matrix and "
                           "grouped/aggregated reports are unsupported)");
     }
-    if (bind->base_object.empty()) {
+    // Cross filters (semi-/anti-join) are out of this cut.
+    if (!sfjson::GetObjectArray(metadata, "crossFilters").empty()) {
         bind->translatable = false;
-        caveats.push_back("base object could not be derived from the report type");
-    } else if (!IsSafeIdentifier(bind->base_object)) {
-        bind->translatable = false;
-        caveats.push_back("base object '" + bind->base_object +
-                          "' is not a safe SOQL identifier");
+        caveats.push_back("report has cross filters (semi-/anti-join) which are not "
+                          "supported in this cut");
     }
-    for (auto &col : bind->columns) {
-        if (!IsSafeIdentifier(col)) {
+
+    // Derive a base-object CANDIDATE from the report type: "CustomEntity$X" -> X
+    // (else the type as-is). It must be a safe identifier; '$' names are never a
+    // base object. The candidate is then VALIDATED against the org below.
+    const string &rt = bind->report_type;
+    string base = rt;
+    auto dollar = rt.rfind('$');
+    if (dollar != string::npos) {
+        base = rt.substr(dollar + 1);
+    }
+    bind->base_object = base.empty() ? rt : base; // structured ingredient (best-effort)
+    if (base.empty() || !IsSafeIdentifier(base)) {
+        bind->translatable = false;
+        caveats.push_back("could not derive a safe base object from report type '" +
+                          rt + "'");
+    }
+
+    // Validate against the org: the base object must EXIST and be QUERYABLE in
+    // Describe Global, and every projected/filtered field must EXIST on the
+    // sObject Describe. No silent partial SOQL — any miss -> translatable=false.
+    std::unordered_map<string, bool> field_filterable; // lower(name) -> filterable
+    bool object_validated = false;
+    if (bind->translatable && IsSafeIdentifier(base)) {
+        try {
+            bool queryable = false;
+            for (auto &n : session.GlobalDescribe()) {
+                if (StringUtil::CIEquals(n, base)) {
+                    queryable = true;
+                    break;
+                }
+            }
+            if (!queryable) {
+                bind->translatable = false;
+                caveats.push_back("base object '" + base +
+                                  "' was not found as a queryable object in Describe "
+                                  "Global");
+            } else {
+                for (auto &fld : session.Describe(base).fields) {
+                    field_filterable[StringUtil::Lower(fld.name)] = fld.filterable;
+                }
+                object_validated = true;
+            }
+        } catch (...) {
             bind->translatable = false;
-            caveats.push_back("column '" + col + "' is not a safe SOQL identifier");
-            break;
+            caveats.push_back("could not validate base object '" + base +
+                              "' against the org describe");
+        }
+    }
+
+    // Resolve a report column/filter token to a DIRECT field of the base object:
+    // strip the "<base>." prefix, require a bare safe identifier that exists on
+    // the sObject. Relationship traversal (Rel.Field) and pseudo columns do not
+    // resolve -> translatable=false.
+    auto resolve_field = [&](const string &name, string &out) -> bool {
+        string f = name;
+        string pfx = base + ".";
+        if (f.rfind(pfx, 0) == 0) {
+            f = f.substr(pfx.size());
+        }
+        if (f.empty() || f.find('.') != string::npos || !IsSafeIdentifier(f)) {
+            return false;
+        }
+        if (!field_filterable.count(StringUtil::Lower(f))) {
+            return false;
+        }
+        out = f;
+        return true;
+    };
+
+    vector<string> soql_fields;
+    if (object_validated) {
+        for (auto &c : bind->columns) {
+            string field;
+            if (!resolve_field(c, field)) {
+                bind->translatable = false;
+                caveats.push_back("column '" + c + "' does not resolve to a field on '" +
+                                  base + "'");
+                continue;
+            }
+            soql_fields.push_back(field);
+        }
+        if (soql_fields.empty()) {
+            bind->translatable = false;
+            caveats.push_back("no projectable columns resolve on '" + base + "'");
         }
     }
 
@@ -558,25 +634,37 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
             caveats.push_back("unsupported filter operator '" + f.op + "'");
             continue;
         }
-        if (!IsSafeIdentifier(f.field)) {
+        if (!object_validated) {
+            continue; // object not validated -> already untranslatable
+        }
+        string field;
+        if (!resolve_field(f.field, field)) {
             bind->translatable = false;
             caveats.push_back("filter field '" + f.field +
-                              "' is not a safe SOQL identifier");
+                              "' does not resolve to a field on '" + base + "'");
+            continue;
+        }
+        // A WHERE field must be filterable, or the candidate SOQL would fail at
+        // Salesforce. (Projection only needs the field to exist.)
+        if (!field_filterable[StringUtil::Lower(field)]) {
+            bind->translatable = false;
+            caveats.push_back("filter field '" + f.field + "' is not filterable on '" +
+                              base + "'");
             continue;
         }
         if (is_like) {
             // contains -> LIKE '%v%' (always a quoted string). Broad wildcard.
-            clauses.push_back(f.field + " LIKE " + SoqlStr("%" + f.value + "%"));
+            clauses.push_back(field + " LIKE " + SoqlStr("%" + f.value + "%"));
             wildcard_caveat = true;
         } else if (IsNumericLiteral(f.value)) {
-            clauses.push_back(f.field + " " + soql_op + " " + f.value);
+            clauses.push_back(field + " " + soql_op + " " + f.value);
         } else if (IsAmbiguousLiteral(f.value)) {
             bind->translatable = false;
             caveats.push_back("filter value '" + f.value +
                               "' (date/boolean/null) is not auto-translated; write "
                               "the SOQL literal manually");
         } else {
-            clauses.push_back(f.field + " " + soql_op + " " + SoqlStr(f.value));
+            clauses.push_back(field + " " + soql_op + " " + SoqlStr(f.value));
         }
     }
 
@@ -594,16 +682,15 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     }
 
     if (bind->translatable) {
-        string sql = "SELECT " + StringUtil::Join(bind->columns, ", ") + " FROM " +
-                     bind->base_object;
+        string sql = "SELECT " + StringUtil::Join(soql_fields, ", ") + " FROM " + base;
         if (!clauses.empty()) {
             sql += " WHERE " + StringUtil::Join(clauses, " AND ");
         }
         bind->soql = sql;
         caveats.push_back("candidate SOQL is best-effort and NOT an equivalence "
-                          "contract: report-column/field API names are derived from "
-                          "metadata — validate against a salesforce_report() sample "
-                          "before scaling");
+                          "contract: base object and field API names are derived "
+                          "from report metadata — validate against a "
+                          "salesforce_report() sample before scaling");
     }
     bind->caveats = StringUtil::Join(caveats, "; ");
 

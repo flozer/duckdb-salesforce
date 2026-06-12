@@ -1,13 +1,13 @@
 # name: test/sql/salesforce_report_soql.test
-# description: §16 Report Bridge Phase D — salesforce_report_soql() candidate SOQL (mocked)
+# description: §16 Report Bridge — salesforce_report_soql() describe-validated candidate SOQL (mocked)
 # group: [salesforce]
 #
-# Returns structured ingredients first (report_type, base_object, columns,
-# filters) plus a DERIVED candidate `soql` the user must validate. SOQL != SQL:
-# string literals are single-quoted + escaped, identifiers are validated, and
-# anything ambiguous (OR/NOT logic, unsafe identifier, date/bool literal) yields
-# translatable=false + soql NULL + a caveat. Candidate is not an equivalence
-# contract.
+# Metadata-first + VALIDATED. base_object is derived from the report type
+# (CustomEntity$X -> X) and only accepted when X is a safe identifier that exists
+# and is queryable in Describe Global. Every projected/filtered field is validated
+# against the sObject Describe. Anything unresolved -> translatable=false,
+# soql=NULL, caveat. No silent partial SOQL. Candidate is not an equivalence
+# contract. Cross filters / summary / matrix are out of this cut.
 
 require salesforce
 
@@ -20,65 +20,111 @@ SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.sale
 statement ok
 ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
 
-# --- single-object tabular: numeric raw, contains -> quoted LIKE + perf caveat -
+# Describe Global: Account__c is queryable; NoQuery__c is not.
 statement ok
-SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"Big Accounts","reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name","AnnualRevenue"],"reportBooleanFilter":"1 AND 2","reportFilters":[{"column":"AnnualRevenue","operator":"greaterThan","value":"100"},{"column":"Name","operator":"contains","value":"Inc"}]}}';
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account__c","queryable":true},{"name":"NoQuery__c","queryable":false}]}';
+
+# sObject Describe for Account__c: fields Name, Amount__c.
+statement ok
+SET sf_mock_describe_body = '{"name":"Account__c","fields":[{"name":"Name","type":"string","filterable":true},{"name":"Amount__c","type":"double","filterable":true},{"name":"NonFilterable__c","type":"string","filterable":false}]}';
+
+# --- CustomEntity$Account__c + queryable + fields exist -> translatable --------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"Big","reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Name","Account__c.Amount__c"],"reportFilters":[{"column":"Account__c.Amount__c","operator":"greaterThan","value":"100"},{"column":"Account__c.Name","operator":"contains","value":"Inc"}]}}';
 
 query I
-SELECT translatable
-   AND report_type = 'Account' AND base_object = 'Account'
-   AND contains(soql, 'FROM Account')
-   AND contains(soql, 'AnnualRevenue > 100')
+SELECT translatable AND base_object = 'Account__c'
+   AND contains(soql, 'FROM Account__c')
+   AND contains(soql, 'Amount__c > 100')
    AND contains(soql, 'Name LIKE ''%Inc%''')
+   AND NOT contains(soql, 'Account__c.Amount__c')
    AND len(columns) = 2 AND len(filters) = 2
    AND contains(caveats, 'wildcard')
 FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
-# structured filters exposed as a LIST<STRUCT(field,op,value)>
+# structured filter ingredients keep the original (object-qualified) field name
 query TTT
 SELECT (filters[1]).field, (filters[1]).op, (filters[1]).value
 FROM salesforce_report_soql('sf', '00O1');
 ----
-AnnualRevenue	greaterThan	100
+Account__c.Amount__c	greaterThan	100
 
-# --- string equality is single-quoted; apostrophe escaped --------------------
+# --- string equality single-quoted + apostrophe escaped ----------------------
 statement ok
-SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportFilters":[{"column":"Name","operator":"equals","value":"it''s"}]}}';
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Name"],"reportFilters":[{"column":"Account__c.Name","operator":"equals","value":"it''s"}]}}';
 
 query I
-SELECT translatable
-   AND contains(soql, 'Name = ''')
-   AND contains(soql, 'it\''s')
+SELECT translatable AND contains(soql, 'Name = ''') AND contains(soql, 'it\''s')
 FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
-# --- reportBooleanFilter with OR -> not translatable --------------------------
+# --- base object not found in Describe Global -> not translatable -------------
 statement ok
-SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportBooleanFilter":"1 OR 2","reportFilters":[{"column":"Name","operator":"equals","value":"a"},{"column":"Name","operator":"equals","value":"b"}]}}';
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Missing__c"},"reportFormat":"TABULAR","detailColumns":["Missing__c.Name"],"reportFilters":[]}}';
 
 query I
-SELECT translatable = false AND soql IS NULL AND contains(caveats, 'filter logic')
+SELECT translatable = false AND soql IS NULL
+   AND (contains(caveats, 'not found') OR contains(caveats, 'queryable'))
 FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
-# --- unsafe identifier (space in column) -> not translatable ------------------
+# --- base object exists but not queryable -> not translatable -----------------
 statement ok
-SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Bad Name"],"reportFilters":[]}}';
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$NoQuery__c"},"reportFormat":"TABULAR","detailColumns":["NoQuery__c.Name"],"reportFilters":[]}}';
 
 query I
-SELECT translatable = false AND soql IS NULL AND contains(caveats, 'identifier')
-   AND len(columns) = 1
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'queryable')
 FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
-# --- summary report -> not translatable + caveats -----------------------------
+# --- non-filterable field in WHERE -> not translatable (would fail at SF) -----
 statement ok
-SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"Case"},"reportFormat":"SUMMARY","detailColumns":["Subject"],"reportFilters":[]}}';
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Name"],"reportFilters":[{"column":"Account__c.NonFilterable__c","operator":"equals","value":"x"}]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'not filterable')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- non-filterable field is fine in the PROJECTION (existence only) ----------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Name","Account__c.NonFilterable__c"],"reportFilters":[]}}';
+
+query I
+SELECT translatable AND contains(soql, 'NonFilterable__c')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- field not present on the sObject describe -> not translatable ------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Ghost__c"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'Ghost__c')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- cross filter present -> not translatable ---------------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Name"],"reportFilters":[],"crossFilters":[{"primaryEntityField":"Account__c","relatedEntity":"Contact","operator":"with"}]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'cross filter')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- summary report -> not translatable (no describe calls needed) ------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"SUMMARY","detailColumns":["Account__c.Name"],"reportFilters":[]}}';
 
 query I
 SELECT translatable = false AND soql IS NULL AND contains(caveats, 'summary')
@@ -88,10 +134,20 @@ true
 
 # --- unsupported operator -> not translatable ---------------------------------
 statement ok
-SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportFilters":[{"column":"Name","operator":"startsWith","value":"A"}]}}';
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Name"],"reportFilters":[{"column":"Account__c.Name","operator":"startsWith","value":"A"}]}}';
 
 query I
 SELECT translatable = false AND contains(caveats, 'operator')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- reportBooleanFilter with OR -> not translatable --------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Name"],"reportBooleanFilter":"1 OR 2","reportFilters":[{"column":"Account__c.Name","operator":"equals","value":"a"},{"column":"Account__c.Name","operator":"equals","value":"b"}]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'filter logic')
 FROM salesforce_report_soql('sf', '00O1');
 ----
 true
