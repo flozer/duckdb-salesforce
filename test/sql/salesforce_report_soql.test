@@ -1,0 +1,68 @@
+# name: test/sql/salesforce_report_soql.test
+# description: §16 Report Bridge Phase D — salesforce_report_soql() candidate SOQL (mocked)
+# group: [salesforce]
+#
+# salesforce_report_soql(alias, report_id) returns structured ingredients first
+# (report_type, base_object, columns, filters) plus a DERIVED candidate `soql`
+# the user must validate. translatable=false (with caveats) for ambiguous /
+# unsupported shapes. Candidate SOQL is not an equivalence contract.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- single-object tabular -> translatable candidate --------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"Big Accounts","reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name","AnnualRevenue"],"reportBooleanFilter":"1 AND 2","reportFilters":[{"column":"AnnualRevenue","operator":"greaterThan","value":"100"},{"column":"Name","operator":"contains","value":"Inc"}]}}';
+
+query I
+SELECT translatable
+   AND report_type = 'Account' AND base_object = 'Account'
+   AND contains(soql, 'SELECT') AND contains(soql, 'FROM Account') AND contains(soql, 'WHERE')
+   AND len(columns) = 2 AND len(filters) = 2
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# structured filters exposed as a LIST<STRUCT(field,op,value)>
+query TTT
+SELECT (filters[1]).field, (filters[1]).op, (filters[1]).value
+FROM salesforce_report_soql('sf', '00O1');
+----
+AnnualRevenue	greaterThan	100
+
+# --- summary report -> not translatable + caveats -----------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"Cases by Status","reportType":{"type":"Case"},"reportFormat":"SUMMARY","detailColumns":["Subject"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'summary')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- unsupported operator -> not translatable ---------------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"X","reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportFilters":[{"column":"Name","operator":"startsWith","value":"A"}]}}';
+
+query I
+SELECT translatable = false AND contains(caveats, 'operator')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- NULL args rejected -------------------------------------------------------
+statement error
+SELECT * FROM salesforce_report_soql(NULL, '00O1');
+----
+must not be NULL
+
+statement ok
+DETACH sf;

@@ -83,6 +83,8 @@ static void LoadInternal(ExtensionLoader &loader) {
     loader.RegisterFunction(GetSalesforceReportsFunction());
     // Report Bridge (§16) Phase C — tabular report sample + diagnostics.
     loader.RegisterFunction(GetSalesforceReportFunction());
+    // Report Bridge (§16) Phase D — best-effort candidate SOQL reconstruction.
+    loader.RegisterFunction(GetSalesforceReportSoqlFunction());
 
     // salesforce_relationships() — LAST-RESOLUTION relationship diagnostics
     // (#v1.0): one `config` row (sf_relationships mode, effective depth,

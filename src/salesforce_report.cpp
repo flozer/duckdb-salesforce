@@ -372,6 +372,235 @@ static void ReportFunction(ClientContext &, TableFunctionInput &data, DataChunk 
     output.SetCardinality(produced);
 }
 
+// --- salesforce_report_soql(alias, report_id): candidate SOQL (Phase D) ------
+
+struct ReportFilter {
+    string field;
+    string op;    // raw Salesforce operator (e.g. greaterThan, contains)
+    string value;
+};
+
+// Map a Salesforce report filter operator to a SOQL comparison. Returns false
+// for operators outside the safe subset (caller marks the report untranslatable).
+static bool SafeOperator(const string &op, string &soql_op, bool &is_like) {
+    is_like = false;
+    if (op == "equals") { soql_op = "="; return true; }
+    if (op == "notEqual") { soql_op = "!="; return true; }
+    if (op == "lessThan") { soql_op = "<"; return true; }
+    if (op == "greaterThan") { soql_op = ">"; return true; }
+    if (op == "contains") { soql_op = "LIKE"; is_like = true; return true; }
+    return false;
+}
+
+struct ReportSoqlBindData : public FunctionData {
+    string report_id;
+    string report_name;
+    string report_type;
+    string base_object;
+    vector<string> columns;
+    vector<ReportFilter> filters;
+    string soql;
+    bool translatable = false;
+    string caveats;
+
+    unique_ptr<FunctionData> Copy() const override {
+        return make_uniq<ReportSoqlBindData>(*this);
+    }
+    bool Equals(const FunctionData &other_p) const override {
+        auto &o = other_p.Cast<ReportSoqlBindData>();
+        return report_id == o.report_id && soql == o.soql;
+    }
+};
+
+struct ReportSoqlGlobalState : public GlobalTableFunctionState {
+    bool emitted = false;
+    idx_t MaxThreads() const override {
+        return 1;
+    }
+};
+
+static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
+                                               TableFunctionBindInput &input,
+                                               vector<LogicalType> &return_types,
+                                               vector<string> &names) {
+    auto &args = input.inputs;
+    if (args.size() < 2) {
+        throw BinderException(
+            "salesforce_report_soql(catalog, report_id) requires the attached "
+            "catalog alias and a report id");
+    }
+    if (args[0].IsNull() || args[1].IsNull()) {
+        throw BinderException("salesforce_report_soql: arguments must not be NULL.");
+    }
+    string alias = args[0].ToString();
+
+    auto bind = make_uniq<ReportSoqlBindData>();
+    bind->report_id = args[1].ToString();
+
+    SalesforceConfig config;
+    SalesforceTokenSet token;
+    GetSalesforceCatalogCredentials(context, alias, config, token);
+    auto client = BuildHttpClientForContext(context);
+    SalesforceSession session(config, *client);
+    session.SetToken(token);
+    string body = session.DescribeReport(bind->report_id);
+
+    // Structured ingredients first — these are reliable from the describe.
+    string metadata = sfjson::ExtractObject(body, "reportMetadata");
+    bind->report_name = sfjson::GetString(metadata, "name");
+    string report_type_obj = sfjson::ExtractObject(metadata, "reportType");
+    bind->report_type = sfjson::GetString(report_type_obj, "type");
+    // Best-effort base object: the report type's API name. The user must verify
+    // it against an actual sObject (caveated below).
+    bind->base_object = bind->report_type;
+    string format = sfjson::GetString(metadata, "reportFormat");
+    bind->columns = sfjson::GetStringArray(metadata, "detailColumns");
+    for (auto &f : sfjson::GetObjectArray(metadata, "reportFilters")) {
+        ReportFilter rf;
+        rf.field = sfjson::GetString(f, "column");
+        rf.op = sfjson::GetString(f, "operator");
+        rf.value = sfjson::GetString(f, "value");
+        bind->filters.push_back(std::move(rf));
+    }
+
+    // Translatability: conservative. Only single-object TABULAR with safe filter
+    // operators yields a candidate SOQL; everything else stays untranslatable
+    // with an explicit reason. Candidate SOQL is never an equivalence contract.
+    vector<string> caveats;
+    bind->translatable = true;
+    if (!StringUtil::CIEquals(format, "TABULAR")) {
+        bind->translatable = false;
+        caveats.push_back("report format '" + format +
+                          "' is not translatable in this cut (summary/matrix and "
+                          "grouped/aggregated reports are unsupported)");
+    }
+    if (bind->base_object.empty()) {
+        bind->translatable = false;
+        caveats.push_back("base object could not be derived from the report type");
+    }
+    vector<string> clauses;
+    for (auto &f : bind->filters) {
+        string soql_op;
+        bool is_like = false;
+        if (!SafeOperator(f.op, soql_op, is_like)) {
+            bind->translatable = false;
+            caveats.push_back("unsupported filter operator '" + f.op + "'");
+            continue;
+        }
+        if (is_like) {
+            clauses.push_back(f.field + " LIKE '%" + f.value + "%'");
+        } else {
+            clauses.push_back(f.field + " " + soql_op + " " + f.value);
+        }
+    }
+
+    if (bind->translatable) {
+        string sql = "SELECT " + StringUtil::Join(bind->columns, ", ") + " FROM " +
+                     bind->base_object;
+        if (!clauses.empty()) {
+            // First cut joins filters with AND; reportBooleanFilter logic (e.g.
+            // "1 AND 2", OR) is left for a later cut and caveated.
+            sql += " WHERE " + StringUtil::Join(clauses, " AND ");
+        }
+        bind->soql = sql;
+        caveats.push_back("candidate SOQL is best-effort and NOT an equivalence "
+                          "contract: base object and column/field API names are "
+                          "derived from report metadata — validate against a "
+                          "salesforce_report() sample before scaling");
+        string bool_filter = sfjson::GetString(metadata, "reportBooleanFilter");
+        if (!bool_filter.empty()) {
+            caveats.push_back("report boolean filter logic '" + bool_filter +
+                              "' was simplified to AND; verify the combination");
+        }
+    }
+    bind->caveats = StringUtil::Join(caveats, "; ");
+
+    child_list_t<LogicalType> filter_struct;
+    filter_struct.push_back({"field", LogicalType::VARCHAR});
+    filter_struct.push_back({"op", LogicalType::VARCHAR});
+    filter_struct.push_back({"value", LogicalType::VARCHAR});
+
+    names = {"report_id",  "report_name", "report_type", "base_object", "columns",
+             "filters",    "soql",        "translatable", "caveats"};
+    return_types = {LogicalType::VARCHAR,
+                    LogicalType::VARCHAR,
+                    LogicalType::VARCHAR,
+                    LogicalType::VARCHAR,
+                    LogicalType::LIST(LogicalType::VARCHAR),
+                    LogicalType::LIST(LogicalType::STRUCT(filter_struct)),
+                    LogicalType::VARCHAR,
+                    LogicalType::BOOLEAN,
+                    LogicalType::VARCHAR};
+    return std::move(bind);
+}
+
+static unique_ptr<GlobalTableFunctionState> ReportSoqlInit(ClientContext &,
+                                                           TableFunctionInitInput &) {
+    return make_uniq<ReportSoqlGlobalState>();
+}
+
+static void ReportSoqlFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &bd = data.bind_data->Cast<ReportSoqlBindData>();
+    auto &gs = data.global_state->Cast<ReportSoqlGlobalState>();
+    if (gs.emitted) {
+        output.SetCardinality(0);
+        return;
+    }
+
+    auto str = [&](idx_t col, const string &v) {
+        FlatVector::GetData<string_t>(output.data[col])[0] =
+            StringVector::AddString(output.data[col], v);
+    };
+    str(0, bd.report_id);
+    str(1, bd.report_name);
+    str(2, bd.report_type);
+    str(3, bd.base_object);
+
+    // columns: LIST<VARCHAR>
+    {
+        auto &lvec = output.data[4];
+        idx_t n = bd.columns.size();
+        ListVector::Reserve(lvec, n);
+        auto &child = ListVector::GetEntry(lvec);
+        auto child_data = FlatVector::GetData<string_t>(child);
+        for (idx_t k = 0; k < n; k++) {
+            child_data[k] = StringVector::AddString(child, bd.columns[k]);
+        }
+        ListVector::SetListSize(lvec, n);
+        FlatVector::GetData<list_entry_t>(lvec)[0] = list_entry_t(0, n);
+    }
+
+    // filters: LIST<STRUCT(field, op, value)>
+    {
+        auto &lvec = output.data[5];
+        idx_t m = bd.filters.size();
+        ListVector::Reserve(lvec, m);
+        auto &child = ListVector::GetEntry(lvec); // STRUCT vector
+        auto &entries = StructVector::GetEntries(child);
+        auto fld = FlatVector::GetData<string_t>(*entries[0]);
+        auto op = FlatVector::GetData<string_t>(*entries[1]);
+        auto val = FlatVector::GetData<string_t>(*entries[2]);
+        for (idx_t k = 0; k < m; k++) {
+            fld[k] = StringVector::AddString(*entries[0], bd.filters[k].field);
+            op[k] = StringVector::AddString(*entries[1], bd.filters[k].op);
+            val[k] = StringVector::AddString(*entries[2], bd.filters[k].value);
+        }
+        ListVector::SetListSize(lvec, m);
+        FlatVector::GetData<list_entry_t>(lvec)[0] = list_entry_t(0, m);
+    }
+
+    if (bd.translatable) {
+        str(6, bd.soql);
+    } else {
+        FlatVector::SetNull(output.data[6], 0, true);
+    }
+    FlatVector::GetData<bool>(output.data[7])[0] = bd.translatable;
+    str(8, bd.caveats);
+
+    gs.emitted = true;
+    output.SetCardinality(1);
+}
+
 } // namespace
 
 TableFunction GetSalesforceReportsFunction() {
@@ -382,6 +611,12 @@ TableFunction GetSalesforceReportsFunction() {
 TableFunction GetSalesforceReportFunction() {
     return TableFunction("salesforce_report", {LogicalType::VARCHAR, LogicalType::VARCHAR},
                          ReportFunction, ReportBind, ReportInit);
+}
+
+TableFunction GetSalesforceReportSoqlFunction() {
+    return TableFunction("salesforce_report_soql",
+                         {LogicalType::VARCHAR, LogicalType::VARCHAR}, ReportSoqlFunction,
+                         ReportSoqlBind, ReportSoqlInit);
 }
 
 TableFunction GetSalesforceReportFetchRawFunction() {

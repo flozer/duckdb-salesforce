@@ -25,4 +25,10 @@ TableFunction GetSalesforceReportsFunction();
 // __sf_report_* diagnostic columns appended. Sample/oracle, not extraction (§16 C).
 TableFunction GetSalesforceReportFunction();
 
+// salesforce_report_soql(catalog, report_id) — return structured report
+// ingredients (report_type, base_object, columns, filters) plus a best-effort
+// DERIVED candidate `soql` with translatable + caveats. Candidate, not an
+// equivalence contract (§16 D).
+TableFunction GetSalesforceReportSoqlFunction();
+
 } // namespace duckdb
