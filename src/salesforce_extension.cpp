@@ -79,6 +79,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
     // Report Bridge (§16) Phase A — TEST/foundation analytics fetch harness.
     loader.RegisterFunction(GetSalesforceReportFetchRawFunction());
+    // Report Bridge (§16) Phase B — list report definitions.
+    loader.RegisterFunction(GetSalesforceReportsFunction());
 
     // salesforce_relationships() — LAST-RESOLUTION relationship diagnostics
     // (#v1.0): one `config` row (sf_relationships mode, effective depth,

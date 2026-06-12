@@ -15,4 +15,9 @@ namespace duckdb {
 // salesforce_report_soql() functions arrive in Phases B-D.
 TableFunction GetSalesforceReportFetchRawFunction();
 
+// salesforce_reports(catalog) — list report DEFINITIONS (Id, Name,
+// DeveloperName, FolderName, Format) via the queryable Report sObject, using the
+// attached catalog's credentials. Lists definitions, not report data (§16 B).
+TableFunction GetSalesforceReportsFunction();
+
 } // namespace duckdb

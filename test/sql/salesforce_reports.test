@@ -1,0 +1,40 @@
+# name: test/sql/salesforce_reports.test
+# description: §16 Report Bridge Phase B — salesforce_reports() definition listing (mocked)
+# group: [salesforce]
+#
+# salesforce_reports(alias) lists report DEFINITIONS (not data) by querying the
+# standard queryable Report sObject through the attached catalog's credentials.
+# Equivalent raw query: SELECT Id, Name, DeveloperName, FolderName, Format FROM sf.Report;
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"00O1","Name":"Pipeline","DeveloperName":"pipeline","FolderName":"Sales","Format":"Tabular"},{"Id":"00O2","Name":"Cases","DeveloperName":"cases","FolderName":"Support","Format":"Summary"}]}';
+
+# --- lists definitions via the Report sObject ---------------------------------
+query IIIII
+SELECT Id, Name, DeveloperName, FolderName, Format FROM salesforce_reports('sf') ORDER BY Id;
+----
+00O1	Pipeline	pipeline	Sales	Tabular
+00O2	Cases	cases	Support	Summary
+
+# --- generated SOQL targets Report with the expected projection ---------------
+query I
+SELECT contains(soql, 'FROM Report')
+   AND contains(soql, 'DeveloperName')
+   AND contains(soql, 'FolderName')
+FROM salesforce_last_soql();
+----
+true
+
+statement ok
+DETACH sf;
