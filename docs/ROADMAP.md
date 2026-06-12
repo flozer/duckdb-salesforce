@@ -1,8 +1,12 @@
 # duckdb-salesforce Roadmap
 
-Status: post-`v0.8.1` roadmap. This file records the strategic direction after
-the connector reached feature maturity, cross-platform CI, public documentation,
-and a community-submission-ready package.
+Status: post-`v0.9.3` development roadmap. `v0.9.3` is the current own release of
+this repo — it ships the §15 datalake / range-pushdown + Bulk-backfill hardening
+(marked DELIVERED below) on top of `v0.9.2`. The approved
+`duckdb/community-extensions` baseline remains `v0.9.2`; the community catalog is
+NOT updated to `v0.9.3` until a future feature pack is bundled and an explicit
+human GO is given. This file records the strategic direction after the connector
+reached feature maturity, cross-platform CI, and public documentation.
 
 The core mission is to provide the best bridge between Salesforce and DuckDB for
 analytics. The extension should expose Salesforce data safely, efficiently, and
@@ -23,6 +27,37 @@ transformations, Parquet export, and analytical workflows.
   mock-only, and secret-free.
 - Keep `duckdb/community-extensions` blocked until the explicit C.5 human gate
   is granted.
+
+## Post-Community Release Discipline
+
+`v0.9.2` is the approved community baseline. Treat it as a product release, not
+as a development checkpoint.
+
+`v0.9.3` is the current own release: it adds the §15 datalake / range-pushdown +
+Bulk-backfill hardening on top of `v0.9.2`. It is a normal product release of
+this repo and does NOT change the community baseline — `duckdb/community-extensions`
+stays at `v0.9.2` until a future feature pack is bundled, release notes and
+descriptor are aligned, smoke evidence is captured, and an explicit human GO is
+given. Tag and community update for `v0.9.3` remain gated.
+
+- Keep `main` stable and releasable.
+- Do roadmap/planning work in a dedicated planning branch.
+- Do implementation work in short-lived feature branches, one risk area at a
+  time.
+- Do not reuse or move an already published release tag. `v0.9.2` is immutable;
+  fixes after that baseline need a new tag/version.
+- Prefer additive, opt-in surfaces for new behavior. Keep existing scan,
+  authentication, transport selection, and descriptor behavior unchanged unless
+  the roadmap explicitly calls for a breaking or compatibility-sensitive change.
+- Before merging a feature branch into `main`, require code review, focused
+  tests for the touched behavior, local build validation, and green CI.
+- Create a new release tag only after the validated feature branch has merged to
+  `main`.
+- Before publishing a new community update, require release notes, version/tag
+  alignment, smoke evidence, descriptor review, and an explicit human GO for the
+  `duckdb/community-extensions` PR.
+- Never push branches, tags, commits, releases, or pull requests to
+  `duckdb/community-extensions` without explicit maintainer approval.
 
 ## Delivered Baseline
 
@@ -434,6 +469,176 @@ Acceptance:
 - Feature is opt-in or lazy enough not to slow common scans.
 - No metadata writes exist.
 - Docs state exactly which metadata is enriched.
+
+## v1.4: Datalake Seed And Backfill Hardening — DELIVERED (v0.9.3)
+
+Goal: make large initial read loads predictable for datalake users without
+turning the connector into an ETL, CDC, replication, or orchestration product.
+DuckDB, dbt, and the lakehouse own materialization and incremental maintenance;
+the connector owns safe, observable Salesforce reads.
+
+### 15. Predicate Range Pushdown And Bulk Backfill Guardrails — DELIVERED (v0.9.3)
+
+> **Status: DELIVERED in `v0.9.3`.** Exact two-sided range pushdown via
+> `BoundBetween` on `CreatedDate`/`SystemModstamp` (and any field) with zero
+> residual across scan, REST, Bulk, `queryAll`, and `COUNT(*)`; unsupported
+> bounds (function/cast/non-literal/NULL) stay residual and correct. Configurable
+> Bulk poll budget (`sf_bulk_poll_budget`) replacing the hardcoded 600; opt-in
+> `sf_bulk_require_predicate` fail-fast guard; `salesforce_query_cost().bulk_polls`
+> plus guidance distinguishing "Salesforce is filtering server-side" from "DuckDB
+> is filtering after a full remote scan". Offline mock regression tests
+> (`salesforce_range_pushdown.test`, `salesforce_bulk_guardrails.test`) and an
+> EN/PT seed/backfill recipe. Merged to `main`; community baseline unaffected
+> (stays `v0.9.2`). The scope/acceptance notes below are retained as the
+> as-built record.
+
+The production `Produto_Oferta__c` seed exposed a practical failure mode: a full
+roughly 4M-row Bulk read hit the current Bulk polling budget, and monthly
+`CreatedDate >= X AND CreatedDate < Y` windows behaved like the full scan. A
+direct SOQL aggregate proved Salesforce can filter the date range quickly, and
+single lower-bound predicates on `CreatedDate`/`SystemModstamp` push down, but
+the two-sided range form remained residual in the table-scan path. This makes
+the initial seed hard to split safely.
+
+Scope:
+
+- Harden predicate pushdown for exact two-sided ranges on the same Salesforce
+  field, especially `CreatedDate` and `SystemModstamp`, across normal scans,
+  `COUNT(*)` pushdown, REST, Bulk, and `queryAll`.
+- Preserve existing semantics: push only exact ranges whose DuckDB and SOQL
+  timestamp/date comparisons match; leave uncertain casts, functions, timezone
+  conversions, or non-literal bounds residual.
+- Add regression coverage for `field >= lower AND field < upper`,
+  `field >= lower AND field <= upper`, equivalent reversed operands, and the
+  aggregate/count plan shape that previously lost the pushed range.
+- Ensure `salesforce_query_cost()` makes the failure mode visible: pushed range
+  text, pushed/residual filter counts, transport, count-pushdown status, Bulk
+  chunk count, poll count, and clear guidance when a selective-looking range
+  remains residual.
+- Add Bulk backfill guardrails for large read jobs: configurable poll budget or
+  timeout, progress diagnostics, and a fail-fast warning when Bulk is about to
+  run with no pushed predicate against a large object.
+- Document a safe initial-seed pattern for datalake users: validate selectivity
+  with `COUNT(*)`/`salesforce_query_cost()`, split the first load by pushed
+  `CreatedDate` or `SystemModstamp` windows, write data through DuckDB/dbt to
+  Parquet or lake tables, then use incremental maintenance keyed on
+  `SystemModstamp`.
+
+Out of scope:
+
+- Connector-managed scheduling, checkpoints, CDC, retries across windows, or
+  lakehouse writes.
+- New Salesforce write APIs or Bulk ingest APIs.
+- Guessing date windows automatically before diagnostics prove a predicate is
+  pushed.
+- Treating residual filters as safe for large backfills. Residual filters remain
+  correct, but they are not acceptable as the only filter for a planned large
+  extraction.
+- Live Salesforce tests in CI.
+
+Acceptance:
+
+- Offline mock tests prove exact range pushdown for `CreatedDate` and
+  `SystemModstamp` with zero residual filters in scan, REST, Bulk, `queryAll`,
+  and `COUNT(*)` paths.
+- Offline mock tests prove unsupported date expressions stay residual and keep
+  results correct.
+- Diagnostics show pushed range, residual count, Bulk poll count, and guidance
+  that distinguishes "Salesforce is filtering" from "DuckDB is filtering after a
+  full remote scan".
+- A mock Bulk job can exceed the old poll count without losing progress
+  visibility when an explicit higher poll budget is configured.
+- Documentation includes a maintainer-reviewed seed/backfill recipe and warns
+  that `salesforce_aggregate()` may validate server-side selectivity, but normal
+  extraction must still prove pushdown through `salesforce_query_cost()`.
+- CI remains offline, mock-only, and secret-free; live datalake smoke tests
+  remain maintainer-gated.
+- Default behavior remains conservative and existing successful scans keep the
+  same semantics.
+
+## v1.5: Report Bridge
+
+Goal: help users bridge validated Salesforce reports into DuckDB workflows
+without turning the connector into a report runner, ETL tool, or replication
+engine.
+
+### 16. Salesforce Report Bridge
+
+Salesforce reports are useful business-authored definitions, but they are not
+SOQL queries and do not expose an underlying query. This feature should provide a
+read-only bridge for report discovery, small report execution, and best-effort
+SOQL reconstruction that users must validate before scaling through normal
+`sf.<Object>` scans.
+
+Scope:
+
+- Document that report definitions can already be listed through the standard
+  queryable `Report` sObject:
+
+  ```sql
+  SELECT Id, Name, DeveloperName, FolderName, Format FROM sf.Report;
+  ```
+
+- Optionally add a thin `salesforce_reports()` convenience wrapper. It lists
+  report definitions, not report data.
+- Add an opt-in `salesforce_report('<reportId>')` table function over the
+  Salesforce Reports & Dashboards REST API
+  (`GET`/`POST /services/data/vXX.0/analytics/reports/{id}`), synchronous only.
+  Async `/instances` support is a future cut.
+- Surface Salesforce report execution limits clearly: maximum 2,000 returned
+  rows with no pagination, up to 100 columns, up to 20 custom field filters,
+  roughly 500 synchronous runs per hour, and 20 concurrent synchronous runs.
+- Decode only tabular report results in the first cut. These map cleanly to flat
+  rows through `factMap["T!T"].rows`, `detailColumns`, and
+  `reportExtendedMetadata`. Summary and matrix reports remain unsupported.
+- Add a read-only `salesforce_report_soql('<reportId>')` helper built on
+  `GET /services/data/vXX.0/analytics/reports/{id}/describe`. It returns the
+  reliable ingredients (report type/base object, column API names, filters, and
+  boolean filter logic) plus a best-effort synthesized `soql` string, a
+  `translatable` boolean, and `caveats` text.
+- Translate only safe shapes: single-object tabular reports, projections from
+  `detailColumns`, simple comparisons (`=`, `!=`, `<`, `>`), `contains` as
+  `LIKE`, `AND`/`OR` filter logic, supported Salesforce date literals, and
+  Top-N as `ORDER BY` plus `LIMIT`.
+- Return `translatable = false` for multi-object report types, with/without
+  cross filters, summary or matrix groupings and aggregates, bucket fields,
+  custom summary formulas, and formula columns.
+- Keep the intended human workflow explicit: a business analyst validates the
+  report in Salesforce; a data engineer executes a small ground-truth sample via
+  `salesforce_report()`, inspects field API names and candidate SOQL via
+  `salesforce_report_soql()`, validates the candidate against the report sample,
+  then materializes at scale through normal `sf.<Object>` scans using Bulk, PK
+  chunking, and pushdown.
+
+Out of scope:
+
+- Large extraction through the Reports API. The 2,000-row Salesforce cap makes
+  `salesforce_report()` unsuitable for bulk extraction.
+- Exact report-to-SOQL equivalence. The connector reconstructs a candidate SOQL;
+  it does not extract a hidden query.
+- Summary or matrix report execution.
+- Automatic multi-object report-to-SOQL translation.
+- Incremental refresh, orchestration, CDC, or replication. Users should maintain
+  materialized outputs in DuckDB with `CREATE TABLE AS` plus periodic `MERGE` or
+  `INSERT` keyed on `Id` or `SystemModstamp`.
+- Live Salesforce tests in CI.
+
+Acceptance:
+
+- Offline mock tests prove report definition listing, tabular
+  `salesforce_report()` fact-map parsing, and explicit surfacing of the
+  2,000-row cap.
+- Offline mock tests prove `salesforce_report_soql()` synthesis for a
+  single-object tabular report and `translatable = false` for unsupported
+  multi-object, summary, bucket, or formula shapes.
+- Documentation states that candidate SOQL is best-effort and must be validated
+  against an executed report sample; the connector makes no guarantee of exact
+  equivalence.
+- Default behavior remains unchanged. All report bridge behavior is opt-in.
+- CI remains offline, mock-only, and secret-free; live tests remain
+  maintainer-gated.
+- The `duckdb/community-extensions` C.5 human publication gate remains in force
+  for any release that includes this capability.
 
 ## Documentation-Only: Materialization With DuckDB
 
