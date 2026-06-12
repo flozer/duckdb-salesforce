@@ -1525,6 +1525,92 @@ Combine a non-empty filter with `group_by` to group only the matching rows —
 for example
 `salesforce_aggregate('sf', 'Account', 'COUNT(Id) n', 'AnnualRevenue > 0', 'Industry')`.
 
+## Level 6 - Report Bridge
+
+Three opt-in, read-only functions bridge Salesforce **reports** into DuckDB.
+They are for discovery and validation, not large extraction: a report is a
+business-authored definition, not a SOQL query, and the synchronous Reports API
+returns at most 2,000 rows. The intended flow is: list a report, run a small
+sample, reconstruct a candidate SOQL, validate the candidate against the sample,
+then materialize at scale through normal `sf.<Object>` scans.
+
+### `salesforce_reports(catalog)`
+
+#### What it does
+
+Lists report **definitions** (not data) from the attached org.
+
+#### How it works
+
+Queries the standard queryable `Report` sObject through the catalog's
+credentials. Returns `Id`, `Name`, `DeveloperName`, `FolderName`, `Format`.
+Equivalent raw query: `SELECT Id, Name, DeveloperName, FolderName, Format FROM sf.Report`.
+
+#### Daily use
+
+```sql
+SELECT Id, Name, Format FROM salesforce_reports('sf') ORDER BY Name;
+```
+
+### `salesforce_report(catalog, report_id)`
+
+#### What it does
+
+Runs a **tabular** report synchronously and returns its rows as a validation
+**sample** (max 2,000 rows, no pagination) — NOT a large-extraction path.
+
+#### How it works
+
+- Columns come from the report's `detailColumns`, named by the
+  `reportExtendedMetadata` label. A label that duplicates another, or that
+  collides with a reserved `__sf_report_*` name, is disambiguated (duplicates get
+  a `_N` suffix; reserved-prefixed labels fall back to the API name).
+- Four reserved diagnostic columns are appended to every row:
+  `__sf_report_truncated` (BOOLEAN — the report did not return all data),
+  `__sf_report_all_data` (BOOLEAN — the API's `allData`, NULL if absent),
+  `__sf_report_max_rows` (BIGINT — 2000), `__sf_report_guidance` (VARCHAR).
+- Summary and matrix reports (no tabular `T!T` factMap) raise a clear error.
+
+> **0-row caveat:** a report that returns no rows yields no result rows, and
+> therefore no diagnostic row. Truncation is only observable when the sample has
+> at least one row.
+
+#### Daily use
+
+```sql
+SELECT * FROM salesforce_report('sf', '00O...');
+-- inspect __sf_report_truncated to see whether you are looking at a full result
+```
+
+### `salesforce_report_soql(catalog, report_id)`
+
+#### What it does
+
+Returns the report's structured ingredients plus a **best-effort candidate
+SOQL** — a starting point you must validate, never an equivalence contract.
+
+#### How it works
+
+One row: `report_id`, `report_name`, `report_type`, `base_object`,
+`columns` LIST<VARCHAR>, `filters` LIST<STRUCT(field, op, value)>, `soql`,
+`translatable` BOOLEAN, `caveats`.
+
+SOQL is not SQL, so synthesis is conservative. `soql` is produced (and
+`translatable = true`) only for a single-object **tabular** report whose
+identifiers are safe Salesforce names and whose filters use supported operators
+(`=`, `!=`, `<`, `>`, and `contains` → `LIKE '%v%'`). String literals are
+single-quoted and escaped; numerics are bare; date/boolean/null values, unsafe
+identifiers, unsupported operators, and `OR`/`NOT`/grouped `reportBooleanFilter`
+logic set `translatable = false`, `soql = NULL`, and explain why in `caveats`.
+The structured ingredients are always returned regardless of `translatable`.
+
+#### Daily use
+
+```sql
+SELECT soql, translatable, caveats FROM salesforce_report_soql('sf', '00O...');
+-- if translatable, run soql via sf.<Object> and compare to the salesforce_report() sample
+```
+
 ## Pushdown reference
 
 The scan planner pushes as much of the query into SOQL as is safe, and

@@ -1534,6 +1534,94 @@ FROM salesforce_aggregate(
 ORDER BY active_count DESC;
 ```
 
+## Nível 6 - Report Bridge
+
+Três funções opt-in, somente-leitura, ligam **relatórios** do Salesforce ao
+DuckDB. São para descoberta e validação, não extração grande: um relatório é uma
+definição feita pelo negócio, não uma query SOQL, e a Reports API síncrona
+retorna no máximo 2.000 linhas. Fluxo pretendido: listar um relatório, rodar uma
+amostra pequena, reconstruir um SOQL candidato, validar o candidato contra a
+amostra, depois materializar em escala via scans normais `sf.<Object>`.
+
+### `salesforce_reports(catalog)`
+
+#### O que faz
+
+Lista **definições** de relatório (não dados) da org anexada.
+
+#### Como funciona
+
+Consulta o sObject `Report` (queryable) com as credenciais do catálogo. Retorna
+`Id`, `Name`, `DeveloperName`, `FolderName`, `Format`. Query crua equivalente:
+`SELECT Id, Name, DeveloperName, FolderName, Format FROM sf.Report`.
+
+#### Uso no dia a dia
+
+```sql
+SELECT Id, Name, Format FROM salesforce_reports('sf') ORDER BY Name;
+```
+
+### `salesforce_report(catalog, report_id)`
+
+#### O que faz
+
+Roda um relatório **tabular** de forma síncrona e retorna as linhas como
+**amostra** de validação (máx. 2.000 linhas, sem paginação) — NÃO é caminho de
+extração grande.
+
+#### Como funciona
+
+- Colunas vêm de `detailColumns`, nomeadas pelo label de
+  `reportExtendedMetadata`. Label duplicado, ou que colida com um nome reservado
+  `__sf_report_*`, é desambiguado (duplicatas ganham sufixo `_N`; labels com
+  prefixo reservado caem para o nome de API).
+- Quatro colunas de diagnóstico reservadas são anexadas a cada linha:
+  `__sf_report_truncated` (BOOLEAN — o relatório não retornou todos os dados),
+  `__sf_report_all_data` (BOOLEAN — o `allData` da API, NULL se ausente),
+  `__sf_report_max_rows` (BIGINT — 2000), `__sf_report_guidance` (VARCHAR).
+- Relatórios summary/matrix (sem factMap tabular `T!T`) geram erro claro.
+
+> **Ressalva de 0 linhas:** um relatório sem linhas retorna zero linhas e,
+> portanto, nenhuma linha de diagnóstico. A truncagem só é observável quando a
+> amostra tem ao menos uma linha.
+
+#### Uso no dia a dia
+
+```sql
+SELECT * FROM salesforce_report('sf', '00O...');
+-- veja __sf_report_truncated para saber se está olhando um resultado completo
+```
+
+### `salesforce_report_soql(catalog, report_id)`
+
+#### O que faz
+
+Retorna os ingredientes estruturados do relatório mais um **SOQL candidato
+best-effort** — ponto de partida a validar, nunca um contrato de equivalência.
+
+#### Como funciona
+
+Uma linha: `report_id`, `report_name`, `report_type`, `base_object`,
+`columns` LIST<VARCHAR>, `filters` LIST<STRUCT(field, op, value)>, `soql`,
+`translatable` BOOLEAN, `caveats`.
+
+SOQL não é SQL, então a síntese é conservadora. `soql` é produzido (e
+`translatable = true`) só para relatório **tabular** de objeto único cujos
+identificadores são nomes Salesforce seguros e cujos filtros usam operadores
+suportados (`=`, `!=`, `<`, `>`, e `contains` → `LIKE '%v%'`). Literais string
+são aspas-simples e escapados; numéricos ficam crus; valores date/boolean/null,
+identificadores inseguros, operadores não suportados, e lógica `OR`/`NOT`/
+agrupada em `reportBooleanFilter` definem `translatable = false`, `soql = NULL`,
+e explicam o motivo em `caveats`. Os ingredientes estruturados são sempre
+retornados, independente de `translatable`.
+
+#### Uso no dia a dia
+
+```sql
+SELECT soql, translatable, caveats FROM salesforce_report_soql('sf', '00O...');
+-- se translatable, rode o soql via sf.<Object> e compare com a amostra de salesforce_report()
+```
+
 ## Referência de pushdown
 
 O planejador de scan aplica pushdown ao SOQL do máximo da consulta que for

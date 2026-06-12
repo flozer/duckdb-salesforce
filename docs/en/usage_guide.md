@@ -968,7 +968,43 @@ Scope and caveats:
   there is no optimizer or plan rewrite. Any Salesforce error from a
   relationship / polymorphic aggregate surfaces verbatim.
 
-## 14. Limitations
+## 14. Report Bridge (opt-in)
+
+Bridge Salesforce **reports** into DuckDB for discovery and validation — not
+large extraction. A report is a business-authored definition, not a SOQL query,
+and the synchronous Reports API caps at 2,000 rows. Three read-only functions:
+
+```sql
+-- 1. discover report definitions (not data)
+SELECT Id, Name, Format FROM salesforce_reports('sf');
+
+-- 2. run a small TABULAR sample (max 2000 rows); reserved __sf_report_* columns
+--    carry diagnostics (truncated / all_data / max_rows / guidance)
+SELECT * FROM salesforce_report('sf', '00O...');
+
+-- 3. structured ingredients + a best-effort candidate SOQL to validate
+SELECT soql, translatable, caveats FROM salesforce_report_soql('sf', '00O...');
+```
+
+Intended flow: validate the report in Salesforce → run a ground-truth sample
+with `salesforce_report()` → inspect field names + candidate SOQL via
+`salesforce_report_soql()` → validate the candidate against the sample → then
+materialize at scale through normal `sf.<Object>` scans (Bulk, PK chunking,
+pushdown — §7).
+
+Key caveats:
+
+- `salesforce_report()` is a **sample/oracle**, not an extraction path. Check
+  `__sf_report_truncated`. A report returning **0 rows yields 0 rows and no
+  diagnostic row** — truncation is only visible when the sample is non-empty.
+- `salesforce_report_soql().soql` is a **candidate, not an equivalence
+  contract**: it is produced only for single-object tabular reports with safe
+  identifiers and supported operators; otherwise `translatable = false`,
+  `soql = NULL`, and `caveats` explain why. Always validate it against the
+  sample before scaling.
+- Summary/matrix reports are unsupported in this cut (tabular only).
+
+## 15. Limitations
 
 Know these boundaries before you build on the extension:
 
