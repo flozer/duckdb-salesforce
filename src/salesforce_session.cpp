@@ -8,6 +8,7 @@
 #include "salesforce_session.hpp"
 #include "salesforce_config.hpp"
 #include "salesforce_describe.hpp"
+#include "salesforce_diag.hpp"
 #include "salesforce_http.hpp"
 #include "salesforce_json.hpp"
 
@@ -354,9 +355,14 @@ string SalesforceSession::BulkStartJob(const string &soql) {
 
     // 2) poll until JobComplete (bounded; short backoff). The server must finish
     // the job before any results exist — only the result DOWNLOAD is lazy (#8).
-    constexpr int kMaxPolls = 600;
+    // Budget is configurable (ROADMAP §15: sf_bulk_poll_budget) so a large
+    // backfill can wait longer; the live poll count is mirrored to the
+    // diagnostics so a job that times out shows how far it got.
+    const int max_polls = bulk_poll_budget_ < 1 ? 1 : bulk_poll_budget_;
+    int polls = 0;
     for (int i = 0;; i++) {
         HttpResponse st = AuthorizedSend(false, job_path, "");
+        DiagSetBulkPolls(++polls);
         if (st.status < 200 || st.status >= 300) {
             ThrowBulkError("job status", st);
         }
@@ -368,8 +374,10 @@ string SalesforceSession::BulkStartJob(const string &soql) {
             string msg = sfjson::GetString(st.body, "errorMessage");
             throw IOException("salesforce bulk: job %s%s%s.", state, msg.empty() ? "" : " - ", msg);
         }
-        if (i >= kMaxPolls) {
-            throw IOException("salesforce bulk: job did not complete after %d polls.", kMaxPolls);
+        if (i >= max_polls) {
+            throw IOException("salesforce bulk: job did not complete after %d polls "
+                              "(raise sf_bulk_poll_budget for a large backfill).",
+                              max_polls);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }

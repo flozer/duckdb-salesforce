@@ -69,6 +69,13 @@ public:
     void SetQueryAll(bool query_all) {
         query_all_ = query_all;
     }
+    // Bulk job poll budget (ROADMAP §15): max status polls before BulkStartJob
+    // fails fast with a clear poll-count error. Default 600 preserves prior
+    // behaviour; a large backfill that genuinely needs more can raise it via
+    // sf_bulk_poll_budget. Values < 1 are clamped to 1 by the caller.
+    void SetBulkPollBudget(int budget) {
+        bulk_poll_budget_ = budget;
+    }
     const SalesforceTokenSet &Token() const {
         return token_;
     }
@@ -148,6 +155,7 @@ private:
     SalesforceHttpClient &client_;
     SalesforceTokenSet token_;
     bool query_all_ = false; // #v0.9 §1: /query vs /queryAll + Bulk operation
+    int bulk_poll_budget_ = 600; // ROADMAP §15: max Bulk status polls
 };
 
 } // namespace duckdb

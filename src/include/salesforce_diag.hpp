@@ -27,6 +27,11 @@ void DiagSetPages(int64_t pages);
 // (1 = no chunking). Surfaced as salesforce_query_cost().bulk_chunks.
 void DiagSetBulkChunks(int64_t chunks);
 
+// Bulk job status-poll count (ROADMAP §15): how many times BulkStartJob polled
+// the job before it completed (or timed out). Surfaced as
+// salesforce_query_cost().bulk_polls; NULL for non-Bulk scans.
+void DiagSetBulkPolls(int64_t polls);
+
 // Rows DELIVERED to DuckDB (output cardinality), accumulated across chunks.
 void DiagAddRowsEmitted(int64_t rows);
 

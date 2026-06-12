@@ -1,0 +1,120 @@
+# name: test/sql/salesforce_bulk_guardrails.test
+# description: §15 — Bulk poll budget, poll-count diagnostic, require-predicate guard, guidance (mocked)
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"CreatedDate","type":"datetime","filterable":true},{"name":"Note","type":"string","filterable":false}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"RestRow","CreatedDate":"2024-01-15T00:00:00.000+0000"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === poll budget + poll-count diagnostic =====================================
+statement ok
+SET sf_mock_bulk_create_body = '{"id":"JOB1","state":"UploadComplete"}';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id
+001';
+
+statement ok
+SET sf_force_transport = 'bulk';
+
+# Job stays InProgress for two polls, then completes on the third.
+statement ok
+SET sf_mock_bulk_status_body = '{"state":"InProgress"}|~|{"state":"InProgress"}|~|{"state":"JobComplete"}';
+
+statement ok
+SET sf_bulk_poll_budget = 10;
+
+statement ok
+SELECT Id FROM sf.Account;
+
+# Diagnostic surfaces the real number of status polls (3).
+query I
+SELECT bulk_polls = 3 AND bulk = true FROM salesforce_query_cost();
+----
+true
+
+# --- budget too small: fail fast with a clear, poll-count message ------------
+statement ok
+SET sf_mock_bulk_status_body = '{"state":"InProgress"}';
+
+statement ok
+SET sf_bulk_poll_budget = 2;
+
+statement error
+SELECT Id FROM sf.Account;
+----
+did not complete after 2 polls
+
+# --- restore a completing job + generous budget ------------------------------
+statement ok
+SET sf_mock_bulk_status_body = '{"state":"JobComplete"}';
+
+statement ok
+SET sf_bulk_poll_budget = 600;
+
+# === require-predicate guard =================================================
+# Default (off): a full-object Bulk read is allowed but flagged in guidance.
+statement ok
+SELECT Id FROM sf.Account;
+
+query I
+SELECT contains(guidance, 'no pushed predicate') OR contains(guidance, 'full-object')
+FROM salesforce_query_cost();
+----
+true
+
+# Enabled: a full-object Bulk read fails fast before any job is created.
+statement ok
+SET sf_bulk_require_predicate = true;
+
+statement error
+SELECT Id FROM sf.Account;
+----
+no pushed predicate
+
+# With a pushed predicate the guard is satisfied -> the read proceeds.
+statement ok
+SELECT Id FROM sf.Account
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00' AND CreatedDate < TIMESTAMP '2024-02-01 00:00:00';
+
+statement ok
+SET sf_bulk_require_predicate = false;
+
+# === guidance distinguishes server-side vs client-side filtering =============
+statement ok
+SET sf_force_transport = 'rest';
+
+# pushed range -> Salesforce is filtering server-side
+statement ok
+SELECT Id FROM sf.Account
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00' AND CreatedDate < TIMESTAMP '2024-02-01 00:00:00';
+
+query I
+SELECT contains(guidance, 'Salesforce is filtering') FROM salesforce_query_cost();
+----
+true
+
+# residual filter on a non-filterable field -> DuckDB filters after a full scan
+statement ok
+SELECT Id FROM sf.Account WHERE Note = 'x';
+
+query I
+SELECT contains(guidance, 'DuckDB is filtering') FROM salesforce_query_cost();
+----
+true
+
+statement ok
+DETACH sf;
