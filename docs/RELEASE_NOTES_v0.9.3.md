@@ -39,6 +39,9 @@
   `count_pushdown = true`.
 - **Live §15 range probe, Bulk**: same range pushed to SOQL with
   `residual_filters = 0`, `bulk_polls = 14`, and server-side filtering guidance.
+- **GitHub Release assets**: CI run `27435133372` completed successfully and
+  published exactly the expected `v0.9.3` Linux and Windows assets listed below;
+  no stray `v0.9.2` assets remain attached to the release.
 
 ## Compatibility
 
@@ -50,8 +53,7 @@
 
 ## Release assets
 
-Tagging `v0.9.3` triggers `release-assets.yml` to publish the GitHub Release
-`v0.9.3` using this file as the changelog, with platform assets for:
+The GitHub Release `v0.9.3` uses this file as the changelog and publishes:
 
 - `duckdb-salesforce-0.9.3-linux-x64.tar.gz`
 - `duckdb-salesforce-0.9.3-windows-x64.zip`

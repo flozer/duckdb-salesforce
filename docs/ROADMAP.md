@@ -38,7 +38,8 @@ Bulk-backfill hardening on top of `v0.9.2`. It is a normal product release of
 this repo and does NOT change the community baseline — `duckdb/community-extensions`
 stays at `v0.9.2` until a future feature pack is bundled, release notes and
 descriptor are aligned, smoke evidence is captured, and an explicit human GO is
-given. Tag and community update for `v0.9.3` remain gated.
+given. Tag, GitHub Release, and Linux/Windows release assets for `v0.9.3` are
+complete; only the community update remains gated.
 
 - Keep `main` stable and releasable.
 - Do roadmap/planning work in a dedicated planning branch.
@@ -53,6 +54,10 @@ given. Tag and community update for `v0.9.3` remain gated.
   tests for the touched behavior, local build validation, and green CI.
 - Create a new release tag only after the validated feature branch has merged to
   `main`.
+- For every own repo release, keep a dedicated `docs/RELEASE_NOTES_vX.Y.Z.md`
+  changelog, publish GitHub Release assets for Linux and Windows, confirm the
+  asset names match the release version, and record the evidence before treating
+  the release as complete.
 - Before publishing a new community update, require release notes, version/tag
   alignment, smoke evidence, descriptor review, and an explicit human GO for the
   `duckdb/community-extensions` PR.
@@ -488,9 +493,10 @@ the connector owns safe, observable Salesforce reads.
 > plus guidance distinguishing "Salesforce is filtering server-side" from "DuckDB
 > is filtering after a full remote scan". Offline mock regression tests
 > (`salesforce_range_pushdown.test`, `salesforce_bulk_guardrails.test`) and an
-> EN/PT seed/backfill recipe. Merged to `main`; community baseline unaffected
-> (stays `v0.9.2`). The scope/acceptance notes below are retained as the
-> as-built record.
+> EN/PT seed/backfill recipe. Merged to `main`; `v0.9.3` tag/GitHub Release
+> complete with Linux and Windows assets; community baseline unaffected (stays
+> `v0.9.2`). The scope/acceptance notes below are retained as the as-built
+> record.
 
 The production `Produto_Oferta__c` seed exposed a practical failure mode: a full
 roughly 4M-row Bulk read hit the current Bulk polling budget, and monthly
