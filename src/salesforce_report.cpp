@@ -392,6 +392,139 @@ static bool SafeOperator(const string &op, string &soql_op, bool &is_like) {
     return false;
 }
 
+// SOQL string literal: single-quote and escape ' and \ per SOQL rules.
+static string SoqlStr(const string &s) {
+    string out = "'";
+    for (char c : s) {
+        if (c == '\\' || c == '\'') {
+            out.push_back('\\');
+        }
+        out.push_back(c);
+    }
+    out.push_back('\'');
+    return out;
+}
+
+// Bare numeric literal (int or decimal). Safe to emit unquoted in SOQL.
+static bool IsNumericLiteral(const string &s) {
+    if (s.empty()) {
+        return false;
+    }
+    size_t i = (s[0] == '-' || s[0] == '+') ? 1 : 0;
+    bool digit = false, dot = false;
+    for (; i < s.size(); i++) {
+        if (s[i] >= '0' && s[i] <= '9') {
+            digit = true;
+        } else if (s[i] == '.' && !dot) {
+            dot = true;
+        } else {
+            return false;
+        }
+    }
+    return digit;
+}
+
+// Date/datetime/boolean/null values are NOT auto-translated: SOQL date literals
+// are unquoted and context-specific, and true/false/null are ambiguous between a
+// typed literal and a text value. Treat as ambiguous -> untranslatable.
+static bool IsAmbiguousLiteral(const string &v) {
+    string l = StringUtil::Lower(v);
+    if (l == "true" || l == "false" || l == "null") {
+        return true;
+    }
+    // YYYY-MM-DD... (date or ISO datetime) — leading 4 digits then '-'.
+    if (v.size() >= 8 && v[4] == '-' && v[0] >= '0' && v[0] <= '9' && v[1] >= '0' &&
+        v[1] <= '9' && v[2] >= '0' && v[2] <= '9' && v[3] >= '0' && v[3] <= '9') {
+        return true;
+    }
+    return false;
+}
+
+// Safe Salesforce identifier: dot-separated segments, each [A-Za-z][A-Za-z0-9_]*.
+// Covers Account, Custom__c, Account.Name, Parent__r.Name. Rejects spaces,
+// commas, parens, quotes, operators, SQL aliases, subqueries, "*".
+static bool IsSafeIdentifier(const string &s) {
+    if (s.empty()) {
+        return false;
+    }
+    auto valid_seg = [](const string &seg) {
+        if (seg.empty()) {
+            return false;
+        }
+        char c0 = seg[0];
+        if (!((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z'))) {
+            return false;
+        }
+        for (char c : seg) {
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                  (c >= '0' && c <= '9') || c == '_')) {
+                return false;
+            }
+        }
+        return true;
+    };
+    string seg;
+    for (char c : s) {
+        if (c == '.') {
+            if (!valid_seg(seg)) {
+                return false;
+            }
+            seg.clear();
+        } else {
+            seg.push_back(c);
+        }
+    }
+    return valid_seg(seg);
+}
+
+// reportBooleanFilter is translatable only when empty or a pure conjunction
+// "N AND N AND ..." with each index in [1, nfilters]. OR / NOT / parentheses /
+// out-of-range indices are not supported (joining with AND would change meaning).
+static bool BooleanFilterAndOnly(const string &bf, idx_t nfilters) {
+    if (bf.empty()) {
+        return true;
+    }
+    vector<string> toks;
+    string t;
+    for (char c : bf) {
+        if (c == ' ' || c == '\t') {
+            if (!t.empty()) {
+                toks.push_back(t);
+                t.clear();
+            }
+        } else {
+            t.push_back(c);
+        }
+    }
+    if (!t.empty()) {
+        toks.push_back(t);
+    }
+    if (toks.empty() || toks.size() % 2 == 0) {
+        return false; // must be index (AND index)*  -> odd token count
+    }
+    for (idx_t i = 0; i < toks.size(); i++) {
+        if (i % 2 == 0) {
+            for (char c : toks[i]) {
+                if (c < '0' || c > '9') {
+                    return false; // not a bare index (rejects '(', '1)', etc.)
+                }
+            }
+            int idx = 0;
+            try {
+                idx = std::stoi(toks[i]);
+            } catch (...) {
+                return false;
+            }
+            if (idx < 1 || static_cast<idx_t>(idx) > nfilters) {
+                return false;
+            }
+        } else if (toks[i] != "AND") {
+            return false; // OR / NOT / anything else
+        }
+    }
+    return true;
+}
+
 struct ReportSoqlBindData : public FunctionData {
     string report_id;
     string report_name;
@@ -466,8 +599,12 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     // Translatability: conservative. Only single-object TABULAR with safe filter
     // operators yields a candidate SOQL; everything else stays untranslatable
     // with an explicit reason. Candidate SOQL is never an equivalence contract.
+    // SOQL is not SQL: validate format, identifiers, literals, and filter logic.
+    // Any ambiguity -> translatable=false + soql NULL + an explicit caveat.
     vector<string> caveats;
+    bool wildcard_caveat = false;
     bind->translatable = true;
+
     if (!StringUtil::CIEquals(format, "TABULAR")) {
         bind->translatable = false;
         caveats.push_back("report format '" + format +
@@ -477,7 +614,19 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     if (bind->base_object.empty()) {
         bind->translatable = false;
         caveats.push_back("base object could not be derived from the report type");
+    } else if (!IsSafeIdentifier(bind->base_object)) {
+        bind->translatable = false;
+        caveats.push_back("base object '" + bind->base_object +
+                          "' is not a safe SOQL identifier");
     }
+    for (auto &col : bind->columns) {
+        if (!IsSafeIdentifier(col)) {
+            bind->translatable = false;
+            caveats.push_back("column '" + col + "' is not a safe SOQL identifier");
+            break;
+        }
+    }
+
     vector<string> clauses;
     for (auto &f : bind->filters) {
         string soql_op;
@@ -487,31 +636,52 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
             caveats.push_back("unsupported filter operator '" + f.op + "'");
             continue;
         }
-        if (is_like) {
-            clauses.push_back(f.field + " LIKE '%" + f.value + "%'");
-        } else {
-            clauses.push_back(f.field + " " + soql_op + " " + f.value);
+        if (!IsSafeIdentifier(f.field)) {
+            bind->translatable = false;
+            caveats.push_back("filter field '" + f.field +
+                              "' is not a safe SOQL identifier");
+            continue;
         }
+        if (is_like) {
+            // contains -> LIKE '%v%' (always a quoted string). Broad wildcard.
+            clauses.push_back(f.field + " LIKE " + SoqlStr("%" + f.value + "%"));
+            wildcard_caveat = true;
+        } else if (IsNumericLiteral(f.value)) {
+            clauses.push_back(f.field + " " + soql_op + " " + f.value);
+        } else if (IsAmbiguousLiteral(f.value)) {
+            bind->translatable = false;
+            caveats.push_back("filter value '" + f.value +
+                              "' (date/boolean/null) is not auto-translated; write "
+                              "the SOQL literal manually");
+        } else {
+            clauses.push_back(f.field + " " + soql_op + " " + SoqlStr(f.value));
+        }
+    }
+
+    string bool_filter = sfjson::GetString(metadata, "reportBooleanFilter");
+    if (!BooleanFilterAndOnly(bool_filter, bind->filters.size())) {
+        bind->translatable = false;
+        caveats.push_back("report filter logic '" + bool_filter +
+                          "' uses OR/NOT/grouping (or an out-of-range index) that "
+                          "is not supported in this cut");
+    }
+
+    if (wildcard_caveat) {
+        caveats.push_back("contains was mapped to a broad LIKE '%...%' wildcard, "
+                          "which can be slow/non-selective on large objects");
     }
 
     if (bind->translatable) {
         string sql = "SELECT " + StringUtil::Join(bind->columns, ", ") + " FROM " +
                      bind->base_object;
         if (!clauses.empty()) {
-            // First cut joins filters with AND; reportBooleanFilter logic (e.g.
-            // "1 AND 2", OR) is left for a later cut and caveated.
             sql += " WHERE " + StringUtil::Join(clauses, " AND ");
         }
         bind->soql = sql;
         caveats.push_back("candidate SOQL is best-effort and NOT an equivalence "
-                          "contract: base object and column/field API names are "
-                          "derived from report metadata — validate against a "
-                          "salesforce_report() sample before scaling");
-        string bool_filter = sfjson::GetString(metadata, "reportBooleanFilter");
-        if (!bool_filter.empty()) {
-            caveats.push_back("report boolean filter logic '" + bool_filter +
-                              "' was simplified to AND; verify the combination");
-        }
+                          "contract: report-column/field API names are derived from "
+                          "metadata — validate against a salesforce_report() sample "
+                          "before scaling");
     }
     bind->caveats = StringUtil::Join(caveats, "; ");
 

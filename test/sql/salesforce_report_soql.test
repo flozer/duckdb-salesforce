@@ -2,10 +2,12 @@
 # description: §16 Report Bridge Phase D — salesforce_report_soql() candidate SOQL (mocked)
 # group: [salesforce]
 #
-# salesforce_report_soql(alias, report_id) returns structured ingredients first
-# (report_type, base_object, columns, filters) plus a DERIVED candidate `soql`
-# the user must validate. translatable=false (with caveats) for ambiguous /
-# unsupported shapes. Candidate SOQL is not an equivalence contract.
+# Returns structured ingredients first (report_type, base_object, columns,
+# filters) plus a DERIVED candidate `soql` the user must validate. SOQL != SQL:
+# string literals are single-quoted + escaped, identifiers are validated, and
+# anything ambiguous (OR/NOT logic, unsafe identifier, date/bool literal) yields
+# translatable=false + soql NULL + a caveat. Candidate is not an equivalence
+# contract.
 
 require salesforce
 
@@ -18,15 +20,18 @@ SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.sale
 statement ok
 ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
 
-# --- single-object tabular -> translatable candidate --------------------------
+# --- single-object tabular: numeric raw, contains -> quoted LIKE + perf caveat -
 statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"Big Accounts","reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name","AnnualRevenue"],"reportBooleanFilter":"1 AND 2","reportFilters":[{"column":"AnnualRevenue","operator":"greaterThan","value":"100"},{"column":"Name","operator":"contains","value":"Inc"}]}}';
 
 query I
 SELECT translatable
    AND report_type = 'Account' AND base_object = 'Account'
-   AND contains(soql, 'SELECT') AND contains(soql, 'FROM Account') AND contains(soql, 'WHERE')
+   AND contains(soql, 'FROM Account')
+   AND contains(soql, 'AnnualRevenue > 100')
+   AND contains(soql, 'Name LIKE ''%Inc%''')
    AND len(columns) = 2 AND len(filters) = 2
+   AND contains(caveats, 'wildcard')
 FROM salesforce_report_soql('sf', '00O1');
 ----
 true
@@ -38,9 +43,42 @@ FROM salesforce_report_soql('sf', '00O1');
 ----
 AnnualRevenue	greaterThan	100
 
+# --- string equality is single-quoted; apostrophe escaped --------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportFilters":[{"column":"Name","operator":"equals","value":"it''s"}]}}';
+
+query I
+SELECT translatable
+   AND contains(soql, 'Name = ''')
+   AND contains(soql, 'it\''s')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- reportBooleanFilter with OR -> not translatable --------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportBooleanFilter":"1 OR 2","reportFilters":[{"column":"Name","operator":"equals","value":"a"},{"column":"Name","operator":"equals","value":"b"}]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'filter logic')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- unsafe identifier (space in column) -> not translatable ------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Bad Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'identifier')
+   AND len(columns) = 1
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
 # --- summary report -> not translatable + caveats -----------------------------
 statement ok
-SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"Cases by Status","reportType":{"type":"Case"},"reportFormat":"SUMMARY","detailColumns":["Subject"],"reportFilters":[]}}';
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"Case"},"reportFormat":"SUMMARY","detailColumns":["Subject"],"reportFilters":[]}}';
 
 query I
 SELECT translatable = false AND soql IS NULL AND contains(caveats, 'summary')
@@ -50,7 +88,7 @@ true
 
 # --- unsupported operator -> not translatable ---------------------------------
 statement ok
-SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"X","reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportFilters":[{"column":"Name","operator":"startsWith","value":"A"}]}}';
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"Account"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportFilters":[{"column":"Name","operator":"startsWith","value":"A"}]}}';
 
 query I
 SELECT translatable = false AND contains(caveats, 'operator')
