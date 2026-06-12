@@ -440,6 +440,83 @@ SET sf_bulk_chunks = 4;
 SELECT Id, Name FROM sf.Account;
 ```
 
+### `sf_bulk_poll_budget`
+
+#### O que faz
+
+Limita quantas vezes um job Bulk é consultado (poll) até concluir antes de
+falhar rápido.
+
+#### Como funciona
+
+- Tipo: `BIGINT`
+- Padrão: `600` (~250 ms por poll)
+
+`BulkStartJob` consulta o status do job até `JobComplete`. Quando a contagem
+atinge o orçamento, levanta um erro claro que nomeia esta configuração, em
+vez de consultar para sempre. A contagem ao vivo aparece em
+`salesforce_query_cost().bulk_polls`, então um job que estoura o tempo mostra
+até onde chegou.
+
+#### Para que serve
+
+Uma janela grande de backfill pode legitimamente precisar de mais de 600
+polls; aumente o orçamento para ela. Reduza para falhar mais rápido em testes
+ou sessões interativas.
+
+#### Uso no dia a dia
+
+```sql
+SET sf_force_transport = 'bulk';
+SET sf_bulk_poll_budget = 2000;   -- deixa um job demorado concluir
+
+SELECT Id FROM sf.BigObject__c
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00'
+  AND CreatedDate <  TIMESTAMP '2024-02-01 00:00:00';
+
+SELECT bulk_polls FROM salesforce_query_cost();
+```
+
+### `sf_bulk_require_predicate`
+
+#### O que faz
+
+Recusa uma leitura Bulk que **não** empurra nenhum predicado para o SOQL
+(extração do objeto inteiro), antes de criar qualquer job.
+
+#### Como funciona
+
+- Tipo: `BOOLEAN`
+- Padrão: `false` (apenas orientação)
+
+Quando `true`, um scan Bulk com `where_pushed` vazio falha rápido com um
+`BinderException`. O padrão `false` mantém o comportamento inalterado — a
+`salesforce_query_cost().guidance` ainda alerta sobre a leitura sem filtro. O
+guard checa o predicado **empurrado**, não o texto SQL: um `WHERE` que fica
+residual (ex.: uma função sobre a coluna, veja a seção 13) não o satisfaz.
+
+#### Para que serve
+
+Para backfills grandes planejados: força toda leitura Bulk a passar por uma
+janela empurrada de `CreatedDate` / `SystemModstamp`, de modo que um scan
+acidental do objeto inteiro apareça como erro, não como over-fetch de milhões
+de linhas.
+
+#### Uso no dia a dia
+
+```sql
+SET sf_force_transport = 'bulk';
+SET sf_bulk_require_predicate = true;
+
+-- falha rápido: nenhum predicado empurrado
+-- SELECT Id FROM sf.BigObject__c;
+
+-- prossegue: a faixa de CreatedDate é empurrada para o SOQL
+SELECT Id FROM sf.BigObject__c
+WHERE CreatedDate >= TIMESTAMP '2024-01-01 00:00:00'
+  AND CreatedDate <  TIMESTAMP '2024-02-01 00:00:00';
+```
+
 ### Governador de cota da API
 
 O governador consulta o recurso `/limits` do Salesforce e o limite
@@ -801,7 +878,8 @@ Lê o instantâneo do último scan da sessão atual (melhor esforço, thread
 | `bulk_chunks` | BIGINT | Quantidade de chunks de PK aplicada (Bulk) |
 | `quota_remaining` | BIGINT | Requisições de API restantes no momento da decisão |
 | `quota_allowed` | BOOLEAN | Se o governador de cota permitiu o scan |
-| `guidance` | VARCHAR | Conselho legível por humanos para ajustar o scan |
+| `guidance` | VARCHAR | Conselho legível por humanos; diz se o Salesforce filtrou server-side ou se o DuckDB filtrou após um scan remoto completo |
+| `bulk_polls` | BIGINT | Contagem de polls de status do job Bulk (NULL em scans não-Bulk) |
 
 #### Para que serve
 
