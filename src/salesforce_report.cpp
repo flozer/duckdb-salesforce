@@ -41,9 +41,10 @@ struct ReportsBindData : public FunctionData {
         r->token = token;
         return std::move(r);
     }
-    bool Equals(const FunctionData &other_p) const override {
-        auto &other = other_p.Cast<ReportsBindData>();
-        return config.org == other.config.org;
+    bool Equals(const FunctionData &) const override {
+        // Conservative: this bind carries remote-fetched, bind-time data. Never
+        // claim equality so DuckDB cannot reuse/cache across distinct binds.
+        return false;
     }
 };
 
@@ -145,9 +146,9 @@ struct ReportBindData : public FunctionData {
         r->has_all_data = has_all_data;
         return std::move(r);
     }
-    bool Equals(const FunctionData &other_p) const override {
-        auto &o = other_p.Cast<ReportBindData>();
-        return data_cols == o.data_cols && rows.size() == o.rows.size();
+    bool Equals(const FunctionData &) const override {
+        // Conservative: carries remote-fetched rows + diagnostics. Never equal.
+        return false;
     }
 };
 
@@ -459,9 +460,10 @@ struct ReportSoqlBindData : public FunctionData {
     unique_ptr<FunctionData> Copy() const override {
         return make_uniq<ReportSoqlBindData>(*this);
     }
-    bool Equals(const FunctionData &other_p) const override {
-        auto &o = other_p.Cast<ReportSoqlBindData>();
-        return report_id == o.report_id && soql == o.soql;
+    bool Equals(const FunctionData &) const override {
+        // Conservative: carries remote-fetched ingredients + candidate SOQL +
+        // caveats. Never equal.
+        return false;
     }
 };
 
