@@ -662,6 +662,132 @@ Acceptance:
 - The `duckdb/community-extensions` C.5 human publication gate remains in force
   for any release that includes this capability.
 
+## v1.6: Core Metadata And Explainability
+
+Goal: strengthen the extension core by making Salesforce metadata, relationship
+choices, and SOQL planning decisions visible and testable inside DuckDB without
+turning the project into a Salesforce administration, CRUD, metadata deployment,
+or ETL platform.
+
+### 17. Metadata Engine v2 — INCLUDE, NEAR-TERM
+
+The existing connector already uses Describe, Describe Global, Tooling metadata,
+picklist/record-type helpers, and an in-memory metadata cache. The next step is
+not a broad metadata product; it is a tighter read-only metadata engine that
+serves scan planning, Report Bridge translation, relationship safety, and user
+diagnostics.
+
+Accepted scope:
+
+- Treat REST Describe and Describe Global as authoritative for queryability,
+  field existence, field type, filterability, sortability, relationship name,
+  reference targets, picklist values, and record-type metadata.
+- Keep Tooling/EntityDefinition/FieldDefinition as optional enrichment only when
+  REST Describe is insufficient or too expensive for a narrow question.
+- Cache metadata per attached catalog, in memory only, with
+  `salesforce_refresh_metadata()` as the invalidation path.
+- Expose metadata through small, queryable table functions only when it directly
+  helps analysts/debuggers understand a query or report translation decision.
+- Reuse the metadata engine for `salesforce_report_soql()` so generated SOQL
+  only references objects and fields validated against Salesforce metadata.
+
+Out of scope:
+
+- Metadata deployment, schema mutation, CRUD/write APIs, admin automation, and
+  persistent metadata databases.
+- Broad heuristic mappings such as `CUST_NAME -> Name` unless a future release
+  proves them through official metadata plus org validation.
+
+Acceptance:
+
+- Object resolution proves `queryable=true` via Describe Global.
+- Projected fields must exist in sObject Describe.
+- Filter fields must exist and be `filterable=true`; otherwise diagnostics and
+  Report Bridge return a conservative non-translatable result.
+- Offline mock tests cover object missing, object not queryable, field missing,
+  field not filterable, and metadata-call failure.
+
+### 18. Relationship Resolver v2 — INCLUDE, MID-TERM / INCREMENTAL
+
+The extension already supports opt-in parent relationship traversal and
+relationship diagnostics. A full relationship graph explorer can help users, but
+it must stay a read-only metadata surface and should not become an automatic
+join planner.
+
+Accepted scope:
+
+- Derive parent relationship paths from REST Describe (`relationshipName`,
+  `referenceTo`) and expose them through an explicit table function or an
+  extension of existing relationship diagnostics.
+- Mark polymorphic, self-referential, cyclic, unavailable, or ambiguous paths
+  explicitly instead of guessing.
+- Limit traversal depth by default; multi-level exploration must be opt-in and
+  bounded.
+- Feed Report Bridge and diagnostics with relationship metadata only after paths
+  are proven safe.
+
+Out of scope:
+
+- Child relationship graph expansion in the first cut.
+- Automatic SQL join rewriting, relationship aggregate pushdown, or hidden
+  multi-object report translation.
+- Cross-filter translation until semi-/anti-join limitations are studied and
+  covered by mock and live evidence.
+
+Acceptance:
+
+- Relationship output includes source object, relationship name, target object,
+  direction, cardinality/relationship type when known, and caveat/status.
+- Cycles and polymorphic references are detected and reported.
+- No scan behavior changes unless the user opts into relationship expansion.
+
+### 19. Explain SOQL / Explain Salesforce — INCLUDE, NEAR-TERM
+
+The connector already exposes `salesforce_query_cost()` and related diagnostics.
+The next useful step is an explicit explain surface that tells users what the
+extension would send to Salesforce and why. This should start as a table
+function or diagnostic helper, not as a deep integration with DuckDB's native
+`EXPLAIN`, because native plan integration is higher-risk and less portable.
+
+Accepted scope:
+
+- Expose generated SOQL, pushed filters, residual filters, transport choice,
+  count pushdown, Bulk polling budget, metadata cache hits/misses when tracked,
+  Report Bridge translatability, and caveats.
+- Make the output stable and structured so tests and users can reason about it.
+- Prefer a function such as `salesforce_explain(...)` or a last-query diagnostic
+  extension before attempting parser-level `EXPLAIN SALESFORCE` syntax.
+- Keep all explain operations read-only and secret-free.
+
+Out of scope:
+
+- Custom SQL syntax in the first cut.
+- Promising Salesforce's own optimizer plan unless the connector calls an
+  official API that provides one.
+- Executing candidate SOQL automatically as part of explain; validation should
+  remain an explicit smoke/test workflow or a separate future function.
+
+Acceptance:
+
+- Offline tests prove REST/Bulk/queryAll/count/report translation decisions.
+- Explain output distinguishes Salesforce server-side filtering from DuckDB
+  residual filtering.
+- Unsupported features produce caveats instead of optimistic claims.
+
+### Rejected Or Deferred From This Evaluation
+
+- **Reject for core:** metadata deployment framework, CRUD/write integration,
+  Salesforce administration tooling, persistent local metadata warehouse, and ETL
+  orchestration. They conflict with the read-only analytics-first mission.
+- **Defer:** `translation_status = FULL | PARTIAL | DETAIL_EQUIVALENT | NONE`.
+  Useful later, but the current `translatable` boolean keeps the Report Bridge
+  contract small and safe.
+- **Defer:** automatic candidate-SOQL verification/fingerprinting. Valuable for
+  smoke tooling, but it consumes quota and should not be hidden inside
+  `salesforce_report_soql()` or explain paths.
+- **Defer:** summary/matrix/detail-equivalent report translation. It can be
+  useful, but it must never be reported as full equivalence.
+
 ## Documentation-Only: Materialization With DuckDB
 
 Materialization is a DuckDB workflow, not a connector feature.
