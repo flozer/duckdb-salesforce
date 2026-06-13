@@ -8,66 +8,106 @@ is selected or printed; no secrets are printed.
 
 Runner: `scripts/run_smoke_metadata_v0.11.1.ps1`.
 
-## Status: PENDING live run (maintainer-gated)
-
-No live credentials were present in the prep environment
-(`SF_CLIENT_ID`/`SF_CLIENT_SECRET`/`SF_REFRESH_TOKEN` unset), so the live run is
-deferred to the maintainer. The runner's credential preflight was exercised and
-blocks cleanly (`BLOCKED: missing credentials`, exit 3) without printing any
-secret. To produce evidence:
-
-```
-$env:SF_CLIENT_ID=...; $env:SF_CLIENT_SECRET=...; $env:SF_REFRESH_TOKEN=...
-pwsh -File scripts/run_smoke_metadata_v0.11.1.ps1
-```
-
-Then paste the PII-free output into the sections below and flip Status to PASS.
+## Status: PASS (functions execute; metadata correct)
 
 ## Run
 
 | Field | Value |
 |---|---|
-| Timestamp | _pending_ |
-| Git commit | `<short sha>` (docs/v0.11.1-prep) |
-| Shell | `build/release/duckdb.exe` (local Release; **build via `shell` target**) |
+| Timestamp | 2026-06-13T20:04 -03:00 |
+| Git commit | `06d2e49` (docs/v0.11.1-prep; code = `47b5179` on main) |
+| Shell | `build/release/duckdb.exe` (local Release; **rebuilt via `shell` target**) |
 | Extension | statically linked local artifact — NOT community |
-| Org / login_url | _pending_ (env auth) |
-| Object tested | _pending_ (auto: first queryable, or `SF_METADATA_OBJECT`) |
+| Org / login_url | `https://vitoriastone.my.salesforce.com` (env auth) |
+| Object tested | `AIApplication` (auto: first queryable) |
 
-## Expected result: PASS (functions execute; metadata correct)
+Note: the first run hit a stale CLI (pre-Phase-D binary; `salesforce_metadata_objects
+does not exist`). Rebuilding the `shell` target fixed it — source/registration was
+already on `main`. Recorded as a build-ordering reminder, not an extension defect.
 
-### 1. `salesforce_metadata_objects('sf')` — object inventory
-- Counts: `total_objects`, `queryable_objects`, `non_queryable_objects`
-  (expect both queryable=true and queryable=false present in a real org).
-- Sample (first N): `object_name, queryable` — schema names only.
+## 1. `salesforce_metadata_objects('sf')` — object inventory
 
-_paste output_
+```
+        total_objects = 1697
+    queryable_objects = 1447
+non_queryable_objects =  250
+```
 
-### 2. `salesforce_metadata_fields('sf', '<object>')` — field metadata
-- Counts: `total_fields`, `filterable_fields`, `reference_fields`,
-  `picklist_fields`.
-- Sample (first N): `field_name, type, filterable, sortable, relationship_name,
-  reference_to, picklist_values`. Reference fields show their `referenceTo`
-  targets (polymorphic listed, not resolved); picklist fields show allowed
-  values; non-list fields show `[]` (empty, never NULL).
+Both `queryable=true` and `queryable=false` are present (1447 + 250) — the real
+flag is exposed, not a constant. First 10 (by queryable desc, name):
 
-_paste output_
+```
+object_name,queryable
+AIApplication,true
+AIApplicationConfig,true
+AIInsightAction,true
+AIInsightFeedback,true
+AIInsightReason,true
+AIInsightValue,true
+AIRecordInsight,true
+AITrustAttrSetup,true
+AITrustAttribute,true
+AWS_Setting__mdt,true
+```
 
-### 3. `salesforce_refresh_metadata('sf')` — invalidation
-- Returns `catalog, scope, object` (catalog-wide refresh: drops global + every
-  object Describe).
+## 2. `salesforce_metadata_fields('sf', 'AIApplication')` — field metadata
 
-_paste output_
+```
+     total_fields = 13
+filterable_fields = 13
+ reference_fields =  2
+  picklist_fields =  3
+```
 
-### 4. Re-read after refresh — proves re-fetch works
-- `salesforce_metadata_objects('sf')` count after invalidation matches step 1.
+First 10 (by field name):
 
-_paste output_
+```
+field_name,type,filterable,sortable,relationship_name,reference_to,picklist_values
+CreatedById,reference,true,true,CreatedBy,[User],[]
+CreatedDate,datetime,true,true,NULL,[],[]
+DeveloperName,string,true,true,NULL,[],[]
+Id,id,true,true,NULL,[],[]
+IsDeleted,boolean,true,true,NULL,[],[]
+Language,picklist,true,true,NULL,[],"[en_US, de, es, fr, it, ja, sv, ko, zh_TW, zh_CN, pt_BR, nl_NL, da, th, fi, ru, es_MX, no, hu, pl, cs, tr, in, ro, vi, uk, iw, el, bg, en_GB, ar, sk, pt_PT, hr, sl, eu, ca]"
+LastModifiedById,reference,true,true,LastModifiedBy,[User],[]
+LastModifiedDate,datetime,true,true,NULL,[],[]
+MasterLabel,string,true,true,NULL,[],[]
+NamespacePrefix,string,true,true,NULL,[],[]
+```
+
+Validated live:
+- **`reference_to`** populated for reference fields (`CreatedById`/`LastModifiedById`
+  → `[User]`), empty `[]` for non-reference fields.
+- **`picklist_values`** parses `picklistValues[*].value` (`Language` lists its
+  allowed locale codes), empty `[]` for non-picklist fields.
+- Empty lists are `[]`, **never NULL** (only `relationship_name` is NULL when
+  absent).
+
+## 3. `salesforce_refresh_metadata('sf')` — invalidation
+
+```
+catalog = sf
+  scope = global
+ object = NULL
+```
+
+Catalog-wide refresh: drops the global list + every object Describe.
+
+## 4. Re-read after refresh — proves re-fetch works
+
+```
+total_objects_after_refresh = 1697
+```
+
+Same count as step 1 — the engine re-fetched cleanly after invalidation.
 
 ## What this proves
 
 - Describe Global is de-duped behind the shared engine; `metadata_objects` and
   `metadata_fields` read through one per-catalog cache.
+- The `queryable` flag is real (both values present across 1697 objects).
+- `reference_to` / `picklist_values` LIST columns populate from Describe and
+  yield empty lists (never NULL) when absent.
 - `refresh` invalidates and the next read re-fetches without error.
 - All output is read-only schema metadata — no record rows, no secrets.
 
