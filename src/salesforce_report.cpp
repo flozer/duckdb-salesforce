@@ -500,7 +500,9 @@ static string BuiltinReportToken(const string &token) {
     static const std::pair<const char *, const char *> kMap[] = {
         {"ID", "Id"},          {"NAME", "Name"},        {"FIRST_NAME", "FirstName"},
         {"LAST_NAME", "LastName"}, {"EMAIL", "Email"},  {"PHONE", "Phone"},
-        {"CREATED_DATE", "CreatedDate"}, {"LAST_UPDATE", "LastModifiedDate"},
+        {"CREATED_DATE", "CreatedDate"},
+        // LAST_UPDATE -> LastModifiedDate intentionally omitted: not fixture-backed.
+        // Add only with a real report fixture proving the token (conservative map).
     };
     for (auto &m : kMap) {
         if (StringUtil::CIEquals(token, m.first)) {

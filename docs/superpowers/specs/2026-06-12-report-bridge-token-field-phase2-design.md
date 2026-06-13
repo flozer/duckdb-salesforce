@@ -36,8 +36,8 @@ base sObject Describe (case-insensitive). First confirmed candidate wins.
 3. **Small builtin token map** (fixture-backed, for common irregulars):
    - `ID → Id`, `NAME → Name`, `FIRST_NAME → FirstName`, `LAST_NAME → LastName`,
      `EMAIL → Email`, `PHONE → Phone`, `CREATED_DATE → CreatedDate`.
-   - `LAST_UPDATE → LastModifiedDate` **only if confirmed in a real fixture** —
-     do not invent.
+   - `LAST_UPDATE → LastModifiedDate` is **NOT** included until a real report
+     fixture proves the token — do not invent.
    - Every mapped target must still exist on the Describe.
 
 If no source yields a field that exists on the Describe → unresolved.
