@@ -152,6 +152,96 @@ FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
+# === Phase 1: base-object resolver ===========================================
+
+# --- builtin map: ContactList -> Contact (queryable) -> translatable ----------
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Contact.Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable AND base_object = 'Contact'
+   AND contains(soql, 'FROM Contact')
+   AND contains(caveats, 'builtin report type map')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- builtin map target not queryable -> not translatable ---------------------
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":false}]}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'queryable')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- column-prefix fallback (unknown type, single validated prefix) -----------
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Foo__c","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Foo__c","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"SomeWeirdType"},"reportFormat":"TABULAR","detailColumns":["Foo__c.Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable AND base_object = 'Foo__c' AND contains(caveats, 'column prefix')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- ambiguous prefixes -> not translatable -----------------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"SomeWeirdType"},"reportFormat":"TABULAR","detailColumns":["A__c.Name","B__c.Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- resolved base does NOT bypass field validation ---------------------------
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Contact.Ghost__c"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND base_object = 'Contact'
+   AND contains(caveats, 'Ghost__c')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- provenance: CustomEntity$X resolved by custom_entity_suffix --------------
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account__c","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account__c","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable AND base_object = 'Account__c'
+   AND contains(caveats, 'custom_entity_suffix')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
 # --- NULL args rejected -------------------------------------------------------
 statement error
 SELECT * FROM salesforce_report_soql(NULL, '00O1');

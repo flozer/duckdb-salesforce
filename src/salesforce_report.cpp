@@ -476,6 +476,47 @@ struct ReportSoqlGlobalState : public GlobalTableFunctionState {
     }
 };
 
+// Small, explicit, fixture-backed map for standard report types. Each target is
+// still validated as queryable in Describe Global before use — NOT a broad/auto
+// map. Returns "" for unknown types.
+static string BuiltinReportTypeObject(const string &report_type) {
+    static const std::pair<const char *, const char *> kMap[] = {
+        {"ContactList", "Contact"},
+        {"AccountList", "Account"},
+        {"OpportunityList", "Opportunity"},
+    };
+    for (auto &m : kMap) {
+        if (StringUtil::CIEquals(report_type, m.first)) {
+            return m.second;
+        }
+    }
+    return "";
+}
+
+// Weak fallback: the single dotted prefix shared by report column / filter
+// tokens (e.g. "Account.Name" -> "Account"). Returns "" when there is no dotted
+// token or when prefixes are mixed/ambiguous (more than one distinct prefix).
+static string DominantColumnPrefix(const vector<string> &columns,
+                                   const vector<ReportFilter> &filters) {
+    std::unordered_set<string> prefixes;
+    auto add = [&](const string &tok) {
+        auto dot = tok.find('.');
+        if (dot != string::npos && dot > 0) {
+            prefixes.insert(tok.substr(0, dot));
+        }
+    };
+    for (auto &c : columns) {
+        add(c);
+    }
+    for (auto &f : filters) {
+        add(f.field);
+    }
+    if (prefixes.size() != 1) {
+        return ""; // none, or ambiguous mixture -> reject
+    }
+    return *prefixes.begin();
+}
+
 static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                                                TableFunctionBindInput &input,
                                                vector<LogicalType> &return_types,
@@ -539,51 +580,99 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                           "supported in this cut");
     }
 
-    // Derive a base-object CANDIDATE from the report type: "CustomEntity$X" -> X
-    // (else the type as-is). It must be a safe identifier; '$' names are never a
-    // base object. The candidate is then VALIDATED against the org below.
+    // Phase 1 base-object resolver: derive an sObject CANDIDATE from the report
+    // type through an ordered set of safe sources, then accept the first one that
+    // is QUERYABLE in Describe Global. Sources, high -> low priority:
+    //   1. custom_entity_suffix    "CustomEntity$X" -> X
+    //   2. builtin_report_type_map small standard-type map (ContactList->Contact)
+    //   3. column_prefix           single dotted prefix of columns/filters (weak)
+    // reportTypeMetadata is intentionally NOT a source yet (possible Phase 1.1).
+    struct BaseCandidate {
+        string obj;
+        const char *by;
+    };
+    vector<BaseCandidate> candidates;
     const string &rt = bind->report_type;
-    string base = rt;
     auto dollar = rt.rfind('$');
     if (dollar != string::npos) {
-        base = rt.substr(dollar + 1);
+        candidates.push_back({rt.substr(dollar + 1), "custom_entity_suffix"});
+    } else {
+        string mapped = BuiltinReportTypeObject(rt);
+        if (!mapped.empty()) {
+            candidates.push_back({mapped, "builtin_report_type_map"});
+        }
     }
-    bind->base_object = base.empty() ? rt : base; // structured ingredient (best-effort)
-    if (base.empty() || !IsSafeIdentifier(base)) {
-        bind->translatable = false;
-        caveats.push_back("could not derive a safe base object from report type '" +
-                          rt + "'");
+    {
+        string pfx = DominantColumnPrefix(bind->columns, bind->filters);
+        if (!pfx.empty()) {
+            candidates.push_back({pfx, "column_prefix"});
+        }
+    }
+    // Best-effort structured ingredient: first safe candidate, else the raw type.
+    bind->base_object = rt;
+    for (auto &c : candidates) {
+        if (IsSafeIdentifier(c.obj)) {
+            bind->base_object = c.obj;
+            break;
+        }
     }
 
-    // Validate against the org: the base object must EXIST and be QUERYABLE in
-    // Describe Global, and every projected/filtered field must EXIST on the
-    // sObject Describe. No silent partial SOQL — any miss -> translatable=false.
+    // Validate against the org: accept the first candidate that EXISTS and is
+    // QUERYABLE in Describe Global, then load its field set. Resolving the base
+    // only removes the base block — every projected/filtered field is still
+    // validated below. No silent partial SOQL.
+    string base;
     std::unordered_map<string, bool> field_filterable; // lower(name) -> filterable
     bool object_validated = false;
-    if (bind->translatable && IsSafeIdentifier(base)) {
-        try {
-            bool queryable = false;
-            for (auto &n : session.GlobalDescribe()) {
-                if (StringUtil::CIEquals(n, base)) {
-                    queryable = true;
-                    break;
-                }
-            }
-            if (!queryable) {
-                bind->translatable = false;
-                caveats.push_back("base object '" + base +
-                                  "' was not found as a queryable object in Describe "
-                                  "Global");
-            } else {
-                for (auto &fld : session.Describe(base).fields) {
-                    field_filterable[StringUtil::Lower(fld.name)] = fld.filterable;
-                }
-                object_validated = true;
-            }
-        } catch (...) {
+    if (bind->translatable) {
+        if (candidates.empty()) {
             bind->translatable = false;
-            caveats.push_back("could not validate base object '" + base +
-                              "' against the org describe");
+            caveats.push_back("could not derive a base object from report type '" + rt +
+                              "'");
+        } else {
+            try {
+                auto queryable = session.GlobalDescribe(); // one call, cached below
+                const char *by = nullptr;
+                for (auto &c : candidates) {
+                    if (!IsSafeIdentifier(c.obj)) {
+                        continue;
+                    }
+                    for (auto &n : queryable) {
+                        if (StringUtil::CIEquals(n, c.obj)) {
+                            base = c.obj;
+                            by = c.by;
+                            break;
+                        }
+                    }
+                    if (!base.empty()) {
+                        break; // first source that yields a queryable object wins
+                    }
+                }
+                if (base.empty()) {
+                    bind->translatable = false;
+                    caveats.push_back("base object could not be resolved to a queryable "
+                                      "object in Describe Global (report type '" + rt +
+                                      "')");
+                } else {
+                    bind->base_object = base;
+                    string by_s = by;
+                    string label = (by_s == "custom_entity_suffix")
+                                       ? "CustomEntity suffix (custom_entity_suffix)"
+                                   : (by_s == "builtin_report_type_map")
+                                       ? "builtin report type map (builtin_report_type_map)"
+                                       : "column prefix (column_prefix, low confidence)";
+                    caveats.push_back("base object resolved from " + label + ": '" + rt +
+                                      "' -> '" + base + "'");
+                    for (auto &fld : session.Describe(base).fields) {
+                        field_filterable[StringUtil::Lower(fld.name)] = fld.filterable;
+                    }
+                    object_validated = true;
+                }
+            } catch (...) {
+                bind->translatable = false;
+                caveats.push_back("could not validate the base object against the org "
+                                  "describe");
+            }
         }
     }
 
