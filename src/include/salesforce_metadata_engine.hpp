@@ -64,9 +64,10 @@ private:
 SalesforceMetadataEngine &GetSalesforceCatalogMetadataEngine(ClientContext &context,
                                                              const string &alias);
 
-// TEST/foundation harness (Phase A): salesforce_metadata_probe(catalog, object)
-// exercises the engine so offline tests can assert cache hit / invalidation /
-// per-catalog isolation via the describe-call counters. Not a user-facing API.
-TableFunction GetSalesforceMetadataProbeFunction();
+// salesforce_metadata_fields(catalog, object_name) — read-only diagnostic; one
+// row per field, sourced through the shared engine (shares the metadata cache).
+// First cut: object_name, field_name, type, filterable, sortable,
+// relationship_name. reference_to / picklist_values are a later cut.
+TableFunction GetSalesforceMetadataFieldsFunction();
 
 } // namespace duckdb

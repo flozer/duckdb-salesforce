@@ -141,76 +141,99 @@ void SalesforceMetadataEngine::RefreshAll() {
     describe_.clear();
 }
 
-// --- salesforce_metadata_probe(catalog, object) — TEST/foundation harness ----
+// --- salesforce_metadata_fields(catalog, object_name) ------------------------
 //
-// Exercises the engine (GetGlobalObjects + GetObjectDescribe + IsQueryable) so
-// offline tests can assert cache hit / invalidation / per-catalog isolation via
-// the salesforce_describe_calls() / salesforce_global_describe_calls() counters.
-// Not a user-facing surface; the metadata diagnostic function is Phase C.
+// Read-only diagnostic: one row per field of `object_name` on the attached
+// catalog, sourced through the shared engine (so it shares the metadata cache).
+// First cut: object_name, field_name, type, filterable, sortable,
+// relationship_name. reference_to / picklist_values are a later cut.
 
 namespace {
 
-struct MetaProbeBindData : public FunctionData {
-    int64_t n_objects = 0;
-    int64_t n_fields = 0;
-    bool queryable = false;
+struct MetaFieldRow {
+    string field_name;
+    string type;
+    bool filterable;
+    bool sortable;
+    string relationship_name;
+};
+
+struct MetaFieldsBindData : public FunctionData {
+    string object_name;
+    vector<MetaFieldRow> rows;
     unique_ptr<FunctionData> Copy() const override {
-        return make_uniq<MetaProbeBindData>(*this);
+        return make_uniq<MetaFieldsBindData>(*this);
     }
     bool Equals(const FunctionData &) const override {
         return false;
     }
 };
 
-struct MetaProbeGlobalState : public GlobalTableFunctionState {
-    bool emitted = false;
+struct MetaFieldsGlobalState : public GlobalTableFunctionState {
+    idx_t cursor = 0;
     idx_t MaxThreads() const override {
         return 1;
     }
 };
 
-unique_ptr<FunctionData> MetaProbeBind(ClientContext &context, TableFunctionBindInput &input,
-                                       vector<LogicalType> &return_types, vector<string> &names) {
+unique_ptr<FunctionData> MetaFieldsBind(ClientContext &context, TableFunctionBindInput &input,
+                                        vector<LogicalType> &return_types, vector<string> &names) {
     if (input.inputs.size() < 2 || input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
-        throw BinderException("salesforce_metadata_probe(catalog, object) requires a "
+        throw BinderException("salesforce_metadata_fields(catalog, object_name) requires a "
                               "non-NULL catalog alias and object name");
     }
     string alias = input.inputs[0].ToString();
-    string object = input.inputs[1].ToString();
+    auto bind = make_uniq<MetaFieldsBindData>();
+    bind->object_name = input.inputs[1].ToString();
+
     auto &eng = GetSalesforceCatalogMetadataEngine(context, alias);
-    auto bind = make_uniq<MetaProbeBindData>();
-    bind->n_objects = static_cast<int64_t>(eng.GetGlobalObjects(context).size());
-    bind->n_fields = static_cast<int64_t>(eng.GetObjectDescribe(context, object).fields.size());
-    bind->queryable = eng.IsQueryable(context, object);
-    names = {"n_objects", "n_fields", "queryable"};
-    return_types = {LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BOOLEAN};
+    for (auto &fld : eng.GetObjectDescribe(context, bind->object_name).fields) {
+        bind->rows.push_back({fld.name, fld.sf_type, fld.filterable, fld.sortable,
+                              fld.relationship_name});
+    }
+
+    names = {"object_name", "field_name", "type", "filterable", "sortable", "relationship_name"};
+    return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
+                    LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::VARCHAR};
     return std::move(bind);
 }
 
-unique_ptr<GlobalTableFunctionState> MetaProbeInit(ClientContext &, TableFunctionInitInput &) {
-    return make_uniq<MetaProbeGlobalState>();
+unique_ptr<GlobalTableFunctionState> MetaFieldsInit(ClientContext &, TableFunctionInitInput &) {
+    return make_uniq<MetaFieldsGlobalState>();
 }
 
-void MetaProbeFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
-    auto &bd = data.bind_data->Cast<MetaProbeBindData>();
-    auto &gs = data.global_state->Cast<MetaProbeGlobalState>();
-    if (gs.emitted) {
-        output.SetCardinality(0);
-        return;
+void MetaFieldsFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &bd = data.bind_data->Cast<MetaFieldsBindData>();
+    auto &gs = data.global_state->Cast<MetaFieldsGlobalState>();
+    idx_t row = 0;
+    while (row < STANDARD_VECTOR_SIZE && gs.cursor < bd.rows.size()) {
+        const auto &f = bd.rows[gs.cursor];
+        FlatVector::GetData<string_t>(output.data[0])[row] =
+            StringVector::AddString(output.data[0], bd.object_name);
+        FlatVector::GetData<string_t>(output.data[1])[row] =
+            StringVector::AddString(output.data[1], f.field_name);
+        FlatVector::GetData<string_t>(output.data[2])[row] =
+            StringVector::AddString(output.data[2], f.type);
+        FlatVector::GetData<bool>(output.data[3])[row] = f.filterable;
+        FlatVector::GetData<bool>(output.data[4])[row] = f.sortable;
+        if (f.relationship_name.empty()) {
+            FlatVector::SetNull(output.data[5], row, true);
+        } else {
+            FlatVector::GetData<string_t>(output.data[5])[row] =
+                StringVector::AddString(output.data[5], f.relationship_name);
+        }
+        gs.cursor++;
+        row++;
     }
-    FlatVector::GetData<int64_t>(output.data[0])[0] = bd.n_objects;
-    FlatVector::GetData<int64_t>(output.data[1])[0] = bd.n_fields;
-    FlatVector::GetData<bool>(output.data[2])[0] = bd.queryable;
-    gs.emitted = true;
-    output.SetCardinality(1);
+    output.SetCardinality(row);
 }
 
 } // namespace
 
-TableFunction GetSalesforceMetadataProbeFunction() {
-    return TableFunction("salesforce_metadata_probe",
-                         {LogicalType::VARCHAR, LogicalType::VARCHAR}, MetaProbeFunction,
-                         MetaProbeBind, MetaProbeInit);
+TableFunction GetSalesforceMetadataFieldsFunction() {
+    return TableFunction("salesforce_metadata_fields",
+                         {LogicalType::VARCHAR, LogicalType::VARCHAR}, MetaFieldsFunction,
+                         MetaFieldsBind, MetaFieldsInit);
 }
 
 } // namespace duckdb

@@ -84,8 +84,8 @@ static void LoadInternal(ExtensionLoader &loader) {
     loader.RegisterFunction(GetSalesforceReportFunction());
     // Report Bridge (§16) Phase D — best-effort candidate SOQL reconstruction.
     loader.RegisterFunction(GetSalesforceReportSoqlFunction());
-    // Metadata Engine v2 (§17) Phase A — TEST/foundation cache probe.
-    loader.RegisterFunction(GetSalesforceMetadataProbeFunction());
+    // Metadata Engine v2 (§17) — read-only field metadata diagnostic.
+    loader.RegisterFunction(GetSalesforceMetadataFieldsFunction());
 
     // salesforce_relationships() — LAST-RESOLUTION relationship diagnostics
     // (#v1.0): one `config` row (sf_relationships mode, effective depth,
