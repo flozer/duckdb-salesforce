@@ -24,9 +24,15 @@ ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret '
 statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account__c","queryable":true},{"name":"NoQuery__c","queryable":false}]}';
 
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
 # sObject Describe for Account__c: fields Name, Amount__c.
 statement ok
 SET sf_mock_describe_body = '{"name":"Account__c","fields":[{"name":"Name","type":"string","filterable":true},{"name":"Amount__c","type":"double","filterable":true},{"name":"NonFilterable__c","type":"string","filterable":false}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 # --- CustomEntity$Account__c + queryable + fields exist -> translatable --------
 statement ok
@@ -159,7 +165,13 @@ statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Contact.Name"],"reportFilters":[]}}';
@@ -176,6 +188,9 @@ true
 statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":false}]}';
 
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
 query I
 SELECT translatable = false AND soql IS NULL AND contains(caveats, 'queryable')
 FROM salesforce_report_soql('sf', '00O1');
@@ -190,7 +205,13 @@ statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Foo__c","queryable":true}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_describe_body = '{"name":"Foo__c","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"SomeWeirdType"},"reportFormat":"TABULAR","detailColumns":["Foo__c.Name"],"reportFilters":[]}}';
@@ -217,7 +238,13 @@ statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Contact.Ghost__c"],"reportFilters":[]}}';
@@ -234,7 +261,13 @@ statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account__c","queryable":true}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_describe_body = '{"name":"Account__c","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Name"],"reportFilters":[]}}';
@@ -252,7 +285,13 @@ statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"FirstName","type":"string","filterable":true},{"name":"LastName","type":"string","filterable":true},{"name":"Email","type":"string","filterable":true},{"name":"Phone","type":"phone","filterable":false}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 # --- FIRST_NAME / LAST_NAME -> FirstName / LastName ---------------------------
 statement ok
@@ -325,7 +364,13 @@ statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true},{"name":"Account","queryable":true},{"name":"Parent__c","queryable":true}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true}]}|~|{"name":"Account","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Account.Name"],"reportFilters":[]}}';
@@ -361,6 +406,9 @@ statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User","Group"],"filterable":true}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Owner.Name"],"reportFilters":[]}}';
 
 query I
@@ -372,6 +420,9 @@ true
 # --- related field absent on related describe -> blocked ----------------------
 statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true}]}|~|{"name":"Account","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Account.Ghost__c"],"reportFilters":[]}}';
@@ -397,7 +448,13 @@ statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true},{"name":"Account","queryable":false}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Account.Name"],"reportFilters":[]}}';
@@ -413,7 +470,13 @@ statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true},{"name":"Account","queryable":true},{"name":"Parent__c","queryable":true}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"CustomParentId","type":"reference","relationshipName":"Parent__r","referenceTo":["Parent__c"],"filterable":true}]}|~|{"name":"Parent__c","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Parent__r.Name"],"reportFilters":[]}}';
@@ -429,7 +492,13 @@ statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"FirstName","type":"string","filterable":true},{"name":"Email","type":"string","filterable":true},{"name":"Phone","type":"phone","filterable":false},{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User","Group"],"filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 # --- full -> status full, blocked_by none, confidence 1.0 ---------------------
 statement ok
@@ -521,7 +590,13 @@ statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true},{"name":"Account","queryable":true}]}';
 
 statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Name","type":"string","filterable":true},{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true}]}|~|{"name":"Account","fields":[{"name":"IntNet__c","type":"string","filterable":false}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
 
 statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportFilters":[{"column":"Account.IntNet__c","operator":"equals","value":"x"}]}}';
@@ -538,6 +613,59 @@ statement error
 SELECT * FROM salesforce_report_soql(NULL, '00O1');
 ----
 must not be NULL
+
+statement ok
+DETACH sf;
+
+# === report_soql() uses the SHARED per-catalog metadata cache ================
+# Fresh ATTACH resets the describe-call counters; prove report_soql hits the
+# engine cache across calls and re-fetches only after refresh.
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account__c","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account__c","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Account__c"},"reportFormat":"TABULAR","detailColumns":["Account__c.Name"],"reportFilters":[]}}';
+
+# first call: loads Describe Global + the object describe
+statement ok
+SELECT translatable FROM salesforce_report_soql('sf', '00O1');
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# second equivalent call: cache hit -> no new Describe / Describe Global
+statement ok
+SELECT translatable FROM salesforce_report_soql('sf', '00O1');
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# after refresh: re-describes (global + object cleared by full refresh)
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
+SELECT translatable FROM salesforce_report_soql('sf', '00O1');
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
 
 statement ok
 DETACH sf;

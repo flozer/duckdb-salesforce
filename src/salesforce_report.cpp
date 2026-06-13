@@ -552,15 +552,11 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     SalesforceSession session(config, *client);
     session.SetToken(token);
     // Report describe stays a direct call (report-specific, not object metadata).
-    // Object/field/relationship metadata goes through SalesforceMetadataEngine,
-    // which now owns the resolution logic (de-duplicated from this file). A
-    // per-bind engine instance preserves the prior behavior exactly — report_soql
-    // re-reads metadata on each call — while still de-duplicating the Describe
-    // Global + per-object Describe within a single call. The shared per-catalog
-    // cache (GetSalesforceCatalogMetadataEngine) backs the metadata diagnostic
-    // and future scan planning; report_soql intentionally does not reuse it
-    // cross-call so a changing org (or a test mock) is always seen fresh.
-    SalesforceMetadataEngine engine(config, token);
+    // Object/field/relationship metadata goes through the SHARED per-catalog
+    // metadata engine (cache + invalidation owned per ATTACH); the duplicated
+    // resolution logic now lives only in the engine. A changing org is handled by
+    // the salesforce_refresh_metadata() invalidation contract, not by re-reading.
+    auto &engine = GetSalesforceCatalogMetadataEngine(context, alias);
     string body = session.DescribeReport(bind->report_id);
 
     // Structured ingredients first — these are reliable from the describe.

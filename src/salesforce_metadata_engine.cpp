@@ -143,12 +143,20 @@ bool SalesforceMetadataEngine::ResolveRelationship(ClientContext &context, const
 
 void SalesforceMetadataEngine::Refresh(const string &object) {
     describe_.erase(StringUtil::Lower(object));
+    // Drop the cached client/session so the next fetch is rebuilt against the
+    // current context (re-reads live/mock settings). Within a single fetch
+    // sequence the rebuilt session is reused, so multi-object lookups stay
+    // consistent; across refreshes a changed org is seen fresh.
+    session_.reset();
+    client_.reset();
 }
 
 void SalesforceMetadataEngine::RefreshAll() {
     global_loaded_ = false;
     global_objects_.clear();
     describe_.clear();
+    session_.reset();
+    client_.reset();
 }
 
 // --- salesforce_metadata_fields(catalog, object_name) ------------------------
