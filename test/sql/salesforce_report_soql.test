@@ -392,7 +392,26 @@ FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
+# --- related object present but NOT queryable -> blocked ----------------------
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true},{"name":"Account","queryable":false}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Account.Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'Account.Name')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
 # --- custom Parent__r.Name (single validated lookup) -> allowed ---------------
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true},{"name":"Account","queryable":true},{"name":"Parent__c","queryable":true}]}';
+
 statement ok
 SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"CustomParentId","type":"reference","relationshipName":"Parent__r","referenceTo":["Parent__c"],"filterable":true}]}|~|{"name":"Parent__c","fields":[{"name":"Name","type":"string","filterable":true}]}';
 
