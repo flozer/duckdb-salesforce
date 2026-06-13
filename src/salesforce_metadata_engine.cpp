@@ -49,13 +49,25 @@ string NormalizeSnakeToken(const string &token) {
 
 } // namespace
 
+SalesforceMetadataEngine::SalesforceMetadataEngine(SalesforceConfig config,
+                                                   SalesforceTokenSet token)
+    : config_(std::move(config)), token_(std::move(token)) {}
+
+SalesforceMetadataEngine::~SalesforceMetadataEngine() = default;
+
+SalesforceSession &SalesforceMetadataEngine::Session(ClientContext &context) {
+    if (!session_) {
+        client_ = BuildHttpClientForContext(context);
+        session_ = make_uniq<SalesforceSession>(config_, *client_);
+        session_->SetToken(token_);
+    }
+    return *session_;
+}
+
 const vector<string> &SalesforceMetadataEngine::GetGlobalObjects(ClientContext &context) {
     if (!global_loaded_) {
         IncGlobalDescribeCalls(); // DEBUG/TEST: proves Describe-Global-once
-        auto client = BuildHttpClientForContext(context);
-        SalesforceSession session(config_, *client);
-        session.SetToken(token_);
-        global_objects_ = session.GlobalDescribe();
+        global_objects_ = Session(context).GlobalDescribe();
         global_loaded_ = true;
     }
     return global_objects_;
@@ -69,10 +81,7 @@ const SalesforceDescribe &SalesforceMetadataEngine::GetObjectDescribe(ClientCont
         return it->second;
     }
     IncDescribeCalls(); // DEBUG/TEST: proves describe-once per object
-    auto client = BuildHttpClientForContext(context);
-    SalesforceSession session(config_, *client);
-    session.SetToken(token_);
-    auto res = describe_.emplace(key, session.Describe(object));
+    auto res = describe_.emplace(key, Session(context).Describe(object));
     return res.first->second;
 }
 
@@ -111,7 +120,7 @@ bool SalesforceMetadataEngine::ResolveField(ClientContext &context, const string
 
 bool SalesforceMetadataEngine::ResolveRelationship(ClientContext &context, const string &object,
                                                    const string &relationship_name,
-                                                   string &out_target) {
+                                                   string &out_target, string &out_real_name) {
     const SalesforceDescribe &desc = GetObjectDescribe(context, object);
     for (auto &fld : desc.fields) {
         if (fld.relationship_name.empty() ||
@@ -126,6 +135,7 @@ bool SalesforceMetadataEngine::ResolveRelationship(ClientContext &context, const
             return false;
         }
         out_target = target;
+        out_real_name = fld.relationship_name;
         return true;
     }
     return false;
