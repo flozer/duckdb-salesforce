@@ -11,6 +11,7 @@ namespace duckdb {
 class ClientContext;
 class SalesforceHttpClient;
 class SalesforceSession;
+struct SalesforceObjectInfo;
 
 // Metadata Engine v2 (ROADMAP v1.6 §17) — a shared, read-only, per-catalog
 // metadata cache. One instance per attached SalesforceCatalog (per org/ATTACH);
@@ -26,8 +27,13 @@ public:
     SalesforceMetadataEngine(SalesforceConfig config, SalesforceTokenSet token);
     ~SalesforceMetadataEngine(); // both defined in .cpp (unique_ptr to incomplete types)
 
-    // Queryable object names (one Describe Global, memoized).
+    // Queryable object names (one Describe Global, memoized). Derived from the
+    // full global_infos_ cache (queryable==true only) — same result as before.
     const vector<string> &GetGlobalObjects(ClientContext &context);
+
+    // Every global sObject with its queryable flag (one Describe Global, shared
+    // with GetGlobalObjects). For the salesforce_metadata_objects diagnostic.
+    const vector<SalesforceObjectInfo> &GetGlobalObjectInfos(ClientContext &context);
 
     // Per-object REST Describe (memoized by lower(object)).
     const SalesforceDescribe &GetObjectDescribe(ClientContext &context, const string &object);
@@ -65,7 +71,11 @@ private:
     SalesforceTokenSet token_;
     unique_ptr<SalesforceHttpClient> client_;
     unique_ptr<SalesforceSession> session_;
+    // Single source of truth for the global describe. global_objects_ (queryable
+    // names) is derived from global_infos_ on load.
+    void EnsureGlobalLoaded(ClientContext &context);
     bool global_loaded_ = false;
+    vector<SalesforceObjectInfo> global_infos_;
     vector<string> global_objects_;
     std::unordered_map<string, SalesforceDescribe> describe_; // lower(object) -> describe
 };
@@ -78,8 +88,12 @@ SalesforceMetadataEngine &GetSalesforceCatalogMetadataEngine(ClientContext &cont
 
 // salesforce_metadata_fields(catalog, object_name) — read-only diagnostic; one
 // row per field, sourced through the shared engine (shares the metadata cache).
-// First cut: object_name, field_name, type, filterable, sortable,
-// relationship_name. reference_to / picklist_values are a later cut.
+// Columns: object_name, field_name, type, filterable, sortable,
+// relationship_name, reference_to LIST, picklist_values LIST.
 TableFunction GetSalesforceMetadataFieldsFunction();
+
+// salesforce_metadata_objects(catalog) — read-only diagnostic; one row per
+// global sObject (object_name, queryable), sourced through the shared engine.
+TableFunction GetSalesforceMetadataObjectsFunction();
 
 } // namespace duckdb

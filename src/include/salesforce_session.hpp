@@ -12,6 +12,14 @@ struct SalesforceDescribe;
 struct HttpResponse;
 class SalesforceHttpClient;
 
+// One global-describe sObject entry: API name + whether it is SOQL-queryable.
+// Metadata Engine v2 (#v1.6 §17) caches these; the queryable-only name list is
+// derived from them.
+struct SalesforceObjectInfo {
+    string name;
+    bool queryable = false;
+};
+
 // Paginated SOQL query result: raw JSON object per record, in fetch order.
 // Row -> DuckDB vector decoding is issue #7; #6 only fetches.
 struct SalesforceQueryResult {
@@ -102,6 +110,11 @@ public:
     // GET /services/data/<api_version>/sobjects -> names of queryable sObjects
     // (global describe; names + flags only, no fields). For object listing (#14).
     vector<string> GlobalDescribe();
+
+    // Same endpoint, but returns EVERY sObject with its queryable flag (no
+    // filtering). Metadata Engine v2 (#v1.6 §17) sources the global cache from
+    // this and derives the queryable-only list; GlobalDescribe() stays intact.
+    vector<SalesforceObjectInfo> GlobalDescribeInfos();
 
     // Run a SOQL query eagerly: fetch every page (used by salesforce_query #6).
     // Implemented over FetchPage. Guards against pagination loops.

@@ -64,13 +64,32 @@ SalesforceSession &SalesforceMetadataEngine::Session(ClientContext &context) {
     return *session_;
 }
 
-const vector<string> &SalesforceMetadataEngine::GetGlobalObjects(ClientContext &context) {
-    if (!global_loaded_) {
-        IncGlobalDescribeCalls(); // DEBUG/TEST: proves Describe-Global-once
-        global_objects_ = Session(context).GlobalDescribe();
-        global_loaded_ = true;
+void SalesforceMetadataEngine::EnsureGlobalLoaded(ClientContext &context) {
+    if (global_loaded_) {
+        return;
     }
+    IncGlobalDescribeCalls(); // DEBUG/TEST: proves Describe-Global-once
+    global_infos_ = Session(context).GlobalDescribeInfos();
+    // Derive the queryable-only name list — bit-identical to the legacy
+    // GlobalDescribe() filter, so IsQueryable / report_soql / scan are unchanged.
+    global_objects_.clear();
+    for (auto &info : global_infos_) {
+        if (info.queryable) {
+            global_objects_.push_back(info.name);
+        }
+    }
+    global_loaded_ = true;
+}
+
+const vector<string> &SalesforceMetadataEngine::GetGlobalObjects(ClientContext &context) {
+    EnsureGlobalLoaded(context);
     return global_objects_;
+}
+
+const vector<SalesforceObjectInfo> &
+SalesforceMetadataEngine::GetGlobalObjectInfos(ClientContext &context) {
+    EnsureGlobalLoaded(context);
+    return global_infos_;
 }
 
 const SalesforceDescribe &SalesforceMetadataEngine::GetObjectDescribe(ClientContext &context,
@@ -153,6 +172,7 @@ void SalesforceMetadataEngine::Refresh(const string &object) {
 
 void SalesforceMetadataEngine::RefreshAll() {
     global_loaded_ = false;
+    global_infos_.clear();
     global_objects_.clear();
     describe_.clear();
     session_.reset();
@@ -280,12 +300,76 @@ void MetaFieldsFunction(ClientContext &, TableFunctionInput &data, DataChunk &ou
     output.SetCardinality(row);
 }
 
+// --- salesforce_metadata_objects(catalog) ------------------------------------
+//
+// Read-only diagnostic: one row per global sObject (object_name, queryable),
+// sourced through the shared engine's global cache (one Describe Global, shared
+// with GetGlobalObjects). Exposes non-queryable objects too (queryable=false).
+
+struct MetaObjectsBindData : public FunctionData {
+    vector<SalesforceObjectInfo> rows;
+    unique_ptr<FunctionData> Copy() const override {
+        return make_uniq<MetaObjectsBindData>(*this);
+    }
+    bool Equals(const FunctionData &) const override {
+        return false;
+    }
+};
+
+struct MetaObjectsGlobalState : public GlobalTableFunctionState {
+    idx_t cursor = 0;
+    idx_t MaxThreads() const override {
+        return 1;
+    }
+};
+
+unique_ptr<FunctionData> MetaObjectsBind(ClientContext &context, TableFunctionBindInput &input,
+                                         vector<LogicalType> &return_types, vector<string> &names) {
+    if (input.inputs.empty() || input.inputs[0].IsNull()) {
+        throw BinderException("salesforce_metadata_objects(catalog) requires a non-NULL "
+                              "catalog alias");
+    }
+    string alias = input.inputs[0].ToString();
+    auto bind = make_uniq<MetaObjectsBindData>();
+
+    auto &eng = GetSalesforceCatalogMetadataEngine(context, alias);
+    bind->rows = eng.GetGlobalObjectInfos(context);
+
+    names = {"object_name", "queryable"};
+    return_types = {LogicalType::VARCHAR, LogicalType::BOOLEAN};
+    return std::move(bind);
+}
+
+unique_ptr<GlobalTableFunctionState> MetaObjectsInit(ClientContext &, TableFunctionInitInput &) {
+    return make_uniq<MetaObjectsGlobalState>();
+}
+
+void MetaObjectsFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &bd = data.bind_data->Cast<MetaObjectsBindData>();
+    auto &gs = data.global_state->Cast<MetaObjectsGlobalState>();
+    idx_t row = 0;
+    while (row < STANDARD_VECTOR_SIZE && gs.cursor < bd.rows.size()) {
+        const auto &o = bd.rows[gs.cursor];
+        FlatVector::GetData<string_t>(output.data[0])[row] =
+            StringVector::AddString(output.data[0], o.name);
+        FlatVector::GetData<bool>(output.data[1])[row] = o.queryable;
+        gs.cursor++;
+        row++;
+    }
+    output.SetCardinality(row);
+}
+
 } // namespace
 
 TableFunction GetSalesforceMetadataFieldsFunction() {
     return TableFunction("salesforce_metadata_fields",
                          {LogicalType::VARCHAR, LogicalType::VARCHAR}, MetaFieldsFunction,
                          MetaFieldsBind, MetaFieldsInit);
+}
+
+TableFunction GetSalesforceMetadataObjectsFunction() {
+    return TableFunction("salesforce_metadata_objects", {LogicalType::VARCHAR}, MetaObjectsFunction,
+                         MetaObjectsBind, MetaObjectsInit);
 }
 
 } // namespace duckdb

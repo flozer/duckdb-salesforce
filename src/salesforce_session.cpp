@@ -452,6 +452,20 @@ vector<string> SalesforceSession::GlobalDescribe() {
     return names;
 }
 
+vector<SalesforceObjectInfo> SalesforceSession::GlobalDescribeInfos() {
+    string path = "/services/data/" + config_.api_version + "/sobjects";
+    string body = AuthorizedGet(path);
+    vector<SalesforceObjectInfo> infos;
+    for (auto &obj : sfjson::GetObjectArray(body, "sobjects")) {
+        string name = sfjson::GetString(obj, "name");
+        if (name.empty()) {
+            continue;
+        }
+        infos.push_back({name, sfjson::GetBool(obj, "queryable", false)});
+    }
+    return infos;
+}
+
 string SalesforceSession::QueryPath(const string &soql) const {
     // queryAll (#v0.9 §1) also returns archived + soft-deleted (IsDeleted=true)
     // records. queryMore follows the returned nextRecordsUrl either way.
