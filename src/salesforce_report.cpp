@@ -667,6 +667,16 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                         field_filterable[StringUtil::Lower(fld.name)] = fld.filterable;
                     }
                     object_validated = true;
+                    // column_prefix is a diagnostic hint only: a shared "Account."
+                    // prefix could be a relationship on a different root object
+                    // (e.g. Contact with Account.Name -> FROM Contact, not Account).
+                    // It can fill base_object/provenance but must NOT enable
+                    // translatable — better an honest false than a wrong root.
+                    if (by_s == "column_prefix") {
+                        bind->translatable = false;
+                        caveats.push_back("base object inferred from column prefix only; "
+                                          "not enough to guarantee the report root object");
+                    }
                 }
             } catch (...) {
                 bind->translatable = false;

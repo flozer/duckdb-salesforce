@@ -182,7 +182,10 @@ FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
-# --- column-prefix fallback (unknown type, single validated prefix) -----------
+# --- column-prefix is a hint only: fills base_object but NEVER translatable ----
+# Unknown report type, single queryable prefix (Foo__c) with the field present.
+# A shared prefix could be a relationship on a different root object, so this
+# must not emit SOQL: base_object set, translatable=false, soql NULL.
 statement ok
 SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Foo__c","queryable":true}]}';
 
@@ -193,7 +196,8 @@ statement ok
 SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"SomeWeirdType"},"reportFormat":"TABULAR","detailColumns":["Foo__c.Name"],"reportFilters":[]}}';
 
 query I
-SELECT translatable AND base_object = 'Foo__c' AND contains(caveats, 'column prefix')
+SELECT translatable = false AND soql IS NULL AND base_object = 'Foo__c'
+   AND contains(caveats, 'column prefix only')
 FROM salesforce_report_soql('sf', '00O1');
 ----
 true
