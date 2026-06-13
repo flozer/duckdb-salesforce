@@ -1,12 +1,15 @@
 # duckdb-salesforce Roadmap
 
-Status: post-`v0.10.0` development roadmap. `v0.10.0` is the current own release
-of this repo — it ships the §16 Report Bridge on top of the `v0.9.3` datalake /
-range-pushdown + Bulk-backfill hardening. The approved
-`duckdb/community-extensions` baseline remains `v0.9.2`; the community catalog is
-NOT updated to `v0.10.0` until a future feature pack is bundled and an explicit
-human GO is given. This file records the strategic direction after the connector
-reached feature maturity, cross-platform CI, and public documentation.
+Status: post-`v0.10.1` development roadmap. `v0.10.1` is the latest tagged own
+release; `v0.11.0` is in preparation — it adds the v1.6 Report Bridge metadata +
+explainability work (describe-validated base/token/single-hop-relationship
+resolution for `salesforce_report_soql()` + structured diagnostics, Phases 1–4)
+on top of the §16 Report Bridge and the `v0.9.3` datalake / range-pushdown +
+Bulk-backfill hardening. `v0.11.0` is not yet tagged (pending smoke/CI review).
+The approved `duckdb/community-extensions` baseline remains `v0.9.2`; the
+community catalog is NOT updated until a future feature pack is bundled and an
+explicit human GO is given. This file records the strategic direction after the
+connector reached feature maturity, cross-platform CI, and public documentation.
 
 The core mission is to provide the best bridge between Salesforce and DuckDB for
 analytics. The extension should expose Salesforce data safely, efficiently, and
@@ -670,6 +673,16 @@ turning the project into a Salesforce administration, CRUD, metadata deployment,
 or ETL platform.
 
 ### 17. Metadata Engine v2 — INCLUDE, NEAR-TERM
+
+> **Partially DELIVERED (v0.11.0): Report Bridge translation validation +
+> explainability.** `salesforce_report_soql()` now resolves base object, report
+> tokens, and single-hop relationship fields strictly against REST Describe /
+> Describe Global (queryability, field existence, filterability, relationshipName,
+> single referenceTo), and exposes structured explainability columns
+> (`base_object_resolved_by`, `translation_status`, `blocked_by`,
+> `unresolved_columns`, `unresolved_filters`, `confidence`). No partial SOQL.
+> Remaining §17 scope (standalone metadata table functions for analysts; broader
+> scan-planning reuse) stays future.
 
 The existing connector already uses Describe, Describe Global, Tooling metadata,
 picklist/record-type helpers, and an in-memory metadata cache. The next step is
