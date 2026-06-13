@@ -799,8 +799,9 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     // polymorphic (referenceTo != 1), unknown relationshipName, or a missing
     // related object/field. Never invents joins.
     auto resolve_field = [&](const string &token, string &out, bool &out_filterable,
-                             bool &out_rel) -> bool {
+                             bool &out_rel, string &out_related) -> bool {
         out_rel = false;
+        out_related.clear();
         auto dot = token.find('.');
         if (dot == string::npos) {
             string real;
@@ -859,15 +860,16 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
         }
         out = rel->second.first + "." + real; // realRelationshipName.realField
         out_filterable = rel_filterable[tkey][StringUtil::Lower(real)];
+        out_related = target; // related object (for accurate diagnostics)
         return true;
     };
 
     vector<string> soql_fields;
     if (object_validated) {
         for (auto &c : bind->columns) {
-            string field;
+            string field, rel_obj;
             bool filt = false, was_rel = false;
-            if (!resolve_field(c, field, filt, was_rel)) {
+            if (!resolve_field(c, field, filt, was_rel, rel_obj)) {
                 set_block(was_rel ? "relationship" : "projected_field");
                 bind->unresolved_columns.push_back(c);
                 caveats.push_back("column '" + c + "' does not resolve to a field on '" +
@@ -894,22 +896,28 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
         if (!object_validated) {
             continue; // object not validated -> already untranslatable
         }
-        string field;
+        string field, rel_obj;
         bool filt = false, was_rel = false;
-        if (!resolve_field(f.field, field, filt, was_rel)) {
+        if (!resolve_field(f.field, field, filt, was_rel, rel_obj)) {
             set_block(was_rel ? "relationship" : "filter_field");
             bind->unresolved_filters.push_back(f.field);
             caveats.push_back("filter field '" + f.field +
                               "' does not resolve to a field on '" + base + "'");
             continue;
         }
-        // A WHERE field must be filterable on its (related) object, or the
-        // candidate SOQL would fail at Salesforce. Projection only needs it to
-        // exist; for relationship fields this is the related object's flag.
+        // A WHERE field must be filterable on its object, or the candidate SOQL
+        // would fail at Salesforce. Projection only needs it to exist. For a
+        // relationship field the flag (and the object named) belong to the
+        // RELATED object, not the base.
         if (!filt) {
             set_block("filterability");
-            caveats.push_back("filter field '" + f.field + "' is not filterable on '" +
-                              base + "'");
+            if (!rel_obj.empty()) {
+                caveats.push_back("filter field '" + f.field +
+                                  "' is not filterable on related object '" + rel_obj + "'");
+            } else {
+                caveats.push_back("filter field '" + f.field + "' is not filterable on '" +
+                                  base + "'");
+            }
             continue;
         }
         if (is_like) {

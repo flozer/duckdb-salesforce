@@ -516,6 +516,23 @@ FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
+# --- relationship filter not filterable -> caveat names the RELATED object ----
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true},{"name":"Account","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Name","type":"string","filterable":true},{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true}]}|~|{"name":"Account","fields":[{"name":"IntNet__c","type":"string","filterable":false}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportFilters":[{"column":"Account.IntNet__c","operator":"equals","value":"x"}]}}';
+
+query I
+SELECT translatable = false AND blocked_by = 'filterability'
+   AND contains(caveats, 'not filterable on related object ''Account''')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
 # --- NULL args rejected -------------------------------------------------------
 statement error
 SELECT * FROM salesforce_report_soql(NULL, '00O1');
