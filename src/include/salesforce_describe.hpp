@@ -25,6 +25,7 @@ struct SalesforceField {
     // duckdb_type is STRUCT(children...). Depth 1 only; polymorphic skipped.
     string relationship_name;     // describe "relationshipName"
     vector<string> reference_to;  // describe "referenceTo" (target sObjects)
+    vector<string> picklist_values; // describe "picklistValues[*].value" (empty if none)
     bool is_relationship = false; // true => synthesised parent STRUCT column
     vector<SalesforceField> children; // parent scalar fields (for is_relationship)
 };

@@ -163,8 +163,9 @@ void SalesforceMetadataEngine::RefreshAll() {
 //
 // Read-only diagnostic: one row per field of `object_name` on the attached
 // catalog, sourced through the shared engine (so it shares the metadata cache).
-// First cut: object_name, field_name, type, filterable, sortable,
-// relationship_name. reference_to / picklist_values are a later cut.
+// Columns: object_name, field_name, type, filterable, sortable,
+// relationship_name, reference_to LIST<VARCHAR>, picklist_values LIST<VARCHAR>
+// (empty lists, never NULL, when a field has no targets / picklist values).
 
 namespace {
 
@@ -174,6 +175,8 @@ struct MetaFieldRow {
     bool filterable;
     bool sortable;
     string relationship_name;
+    vector<string> reference_to;
+    vector<string> picklist_values;
 };
 
 struct MetaFieldsBindData : public FunctionData {
@@ -207,12 +210,15 @@ unique_ptr<FunctionData> MetaFieldsBind(ClientContext &context, TableFunctionBin
     auto &eng = GetSalesforceCatalogMetadataEngine(context, alias);
     for (auto &fld : eng.GetObjectDescribe(context, bind->object_name).fields) {
         bind->rows.push_back({fld.name, fld.sf_type, fld.filterable, fld.sortable,
-                              fld.relationship_name});
+                              fld.relationship_name, fld.reference_to, fld.picklist_values});
     }
 
-    names = {"object_name", "field_name", "type", "filterable", "sortable", "relationship_name"};
+    names = {"object_name", "field_name",        "type",         "filterable",
+             "sortable",    "relationship_name", "reference_to", "picklist_values"};
     return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
-                    LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::VARCHAR};
+                    LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::VARCHAR,
+                    LogicalType::LIST(LogicalType::VARCHAR),
+                    LogicalType::LIST(LogicalType::VARCHAR)};
     return std::move(bind);
 }
 
@@ -223,6 +229,7 @@ unique_ptr<GlobalTableFunctionState> MetaFieldsInit(ClientContext &, TableFuncti
 void MetaFieldsFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
     auto &bd = data.bind_data->Cast<MetaFieldsBindData>();
     auto &gs = data.global_state->Cast<MetaFieldsGlobalState>();
+    idx_t start = gs.cursor;
     idx_t row = 0;
     while (row < STANDARD_VECTOR_SIZE && gs.cursor < bd.rows.size()) {
         const auto &f = bd.rows[gs.cursor];
@@ -243,6 +250,33 @@ void MetaFieldsFunction(ClientContext &, TableFunctionInput &data, DataChunk &ou
         gs.cursor++;
         row++;
     }
+
+    // LIST<VARCHAR> columns: reference_to (col 6) and picklist_values (col 7).
+    // A field with no values yields an empty list (length 0), never NULL.
+    auto fill_list = [&](idx_t col, vector<string> MetaFieldRow::*member) {
+        auto &lvec = output.data[col];
+        idx_t total = 0;
+        for (idx_t r = 0; r < row; r++) {
+            total += (bd.rows[start + r].*member).size();
+        }
+        ListVector::Reserve(lvec, total);
+        auto &child = ListVector::GetEntry(lvec);
+        auto child_data = FlatVector::GetData<string_t>(child);
+        auto entries = FlatVector::GetData<list_entry_t>(lvec);
+        idx_t off = 0;
+        for (idx_t r = 0; r < row; r++) {
+            const auto &vals = bd.rows[start + r].*member;
+            entries[r].offset = off;
+            entries[r].length = vals.size();
+            for (auto &v : vals) {
+                child_data[off++] = StringVector::AddString(child, v);
+            }
+        }
+        ListVector::SetListSize(lvec, off);
+    };
+    fill_list(6, &MetaFieldRow::reference_to);
+    fill_list(7, &MetaFieldRow::picklist_values);
+
     output.SetCardinality(row);
 }
 

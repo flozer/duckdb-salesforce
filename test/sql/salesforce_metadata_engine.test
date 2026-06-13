@@ -90,5 +90,42 @@ SELECT * FROM salesforce_metadata_fields(NULL, 'Account__c');
 ----
 non-NULL
 
+# --- Phase C: reference_to + picklist_values LIST columns (v1.6 §17) ----------
+statement ok
+SET sf_mock_describe_body = '{"name":"Account__c","fields":[{"name":"Name","type":"string","filterable":true,"sortable":true},{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true,"sortable":false},{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User","Group"],"filterable":true,"sortable":false},{"name":"Status","type":"picklist","picklistValues":[{"value":"Open","active":true},{"value":"Closed","active":true}],"filterable":true,"sortable":true}]}';
+
+statement ok
+SELECT catalog, scope, object FROM salesforce_refresh_metadata('sf', 'Account__c');
+
+# single referenceTo -> one-element list
+query I
+SELECT reference_to = ['Account'] FROM salesforce_metadata_fields('sf', 'Account__c') WHERE field_name = 'AccountId';
+----
+true
+
+# polymorphic referenceTo -> both targets, order preserved
+query I
+SELECT reference_to = ['User', 'Group'] FROM salesforce_metadata_fields('sf', 'Account__c') WHERE field_name = 'OwnerId';
+----
+true
+
+# picklist values parsed from picklistValues[*].value
+query I
+SELECT picklist_values = ['Open', 'Closed'] FROM salesforce_metadata_fields('sf', 'Account__c') WHERE field_name = 'Status';
+----
+true
+
+# normal field -> both lists empty (not NULL)
+query I
+SELECT len(reference_to) = 0 AND len(picklist_values) = 0 FROM salesforce_metadata_fields('sf', 'Account__c') WHERE field_name = 'Name';
+----
+true
+
+# reference field with no picklist -> empty picklist list (not NULL)
+query II
+SELECT reference_to IS NOT NULL, len(picklist_values) FROM salesforce_metadata_fields('sf', 'Account__c') WHERE field_name = 'AccountId';
+----
+true	0
+
 statement ok
 DETACH sf;
