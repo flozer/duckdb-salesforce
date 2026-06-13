@@ -77,3 +77,13 @@ functions:
 - Tag/GitHub Release and Linux/Windows assets are produced by the release-assets
   workflow on the `v0.11.1` tag — **only on explicit maintainer GO**.
 - No community update; `docs/community/description.yml` stays `0.9.2`.
+
+## Published assets
+
+Release-assets workflow run `27481887569`: **completed / success**. The
+`v0.11.1` GitHub Release carries exactly:
+
+- `duckdb-salesforce-0.11.1-linux-x64.tar.gz`
+- `duckdb-salesforce-0.11.1-windows-x64.zip`
+
+Tag `v0.11.1` → `a6f8c20`. Community catalog unchanged (`0.9.2`).
