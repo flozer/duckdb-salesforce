@@ -4,6 +4,7 @@
 #include "salesforce_storage.hpp"
 #include "salesforce_describe.hpp"
 #include "salesforce_query.hpp"
+#include "salesforce_metadata_engine.hpp"
 #include "salesforce_report.hpp"
 #include "salesforce_value.hpp"
 #include "salesforce_soql.hpp"
@@ -83,6 +84,8 @@ static void LoadInternal(ExtensionLoader &loader) {
     loader.RegisterFunction(GetSalesforceReportFunction());
     // Report Bridge (§16) Phase D — best-effort candidate SOQL reconstruction.
     loader.RegisterFunction(GetSalesforceReportSoqlFunction());
+    // Metadata Engine v2 (§17) Phase A — TEST/foundation cache probe.
+    loader.RegisterFunction(GetSalesforceMetadataProbeFunction());
 
     // salesforce_relationships() — LAST-RESOLUTION relationship diagnostics
     // (#v1.0): one `config` row (sf_relationships mode, effective depth,

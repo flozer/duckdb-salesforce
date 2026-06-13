@@ -1,0 +1,99 @@
+# name: test/sql/salesforce_metadata_engine.test
+# description: v1.6 §17 Phase A — shared per-catalog metadata engine cache (mocked)
+# group: [salesforce]
+#
+# Exercised through the TEST-only salesforce_metadata_probe(catalog, object),
+# which drives the engine (GetGlobalObjects + GetObjectDescribe + IsQueryable).
+# Cache behavior is asserted via the describe-call counters: a miss issues one
+# Salesforce call, a hit issues none, refresh invalidates, and a fresh ATTACH
+# gets a fresh engine.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account__c","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account__c","fields":[{"name":"Name","type":"string","filterable":true},{"name":"Amount__c","type":"double","filterable":true}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- first probe: cache MISS -> one global + one object describe ---------------
+query III
+SELECT n_objects, n_fields, queryable FROM salesforce_metadata_probe('sf', 'Account__c');
+----
+1	2	true
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# --- second probe: cache HIT -> no new Salesforce calls -----------------------
+query III
+SELECT n_objects, n_fields, queryable FROM salesforce_metadata_probe('sf', 'Account__c');
+----
+1	2	true
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# --- refresh that object -> next probe re-fetches its describe ----------------
+statement ok
+SELECT catalog, scope, object FROM salesforce_refresh_metadata('sf', 'Account__c');
+
+query III
+SELECT n_objects, n_fields, queryable FROM salesforce_metadata_probe('sf', 'Account__c');
+----
+1	2	true
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
+
+# global list survives a per-object refresh (still cached)
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# --- per-catalog isolation: a fresh ATTACH gets a fresh engine ----------------
+statement ok
+DETACH sf;
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query III
+SELECT n_objects, n_fields, queryable FROM salesforce_metadata_probe('sf', 'Account__c');
+----
+1	2	true
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# --- NULL args rejected -------------------------------------------------------
+statement error
+SELECT * FROM salesforce_metadata_probe(NULL, 'Account__c');
+----
+non-NULL
+
+statement ok
+DETACH sf;

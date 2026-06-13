@@ -14,6 +14,7 @@
 // limitation): SHOW TABLES reflects only objects resolved this session.
 
 #include "salesforce_storage.hpp"
+#include "salesforce_metadata_engine.hpp"
 #include "salesforce_config.hpp"
 #include "salesforce_auth.hpp"
 #include "salesforce_http.hpp"
@@ -520,6 +521,22 @@ public:
         if (main_schema_) {
             main_schema_->RefreshMetadata(object);
         }
+        if (metadata_engine_) {
+            if (object.empty()) {
+                metadata_engine_->RefreshAll();
+            } else {
+                metadata_engine_->Refresh(object);
+            }
+        }
+    }
+
+    // Metadata Engine v2 (§17): shared read-only metadata cache for Report Bridge
+    // and the metadata diagnostic. Lazily created; one per catalog (org).
+    SalesforceMetadataEngine &GetMetadataEngine() {
+        if (!metadata_engine_) {
+            metadata_engine_ = make_uniq<SalesforceMetadataEngine>(config_, token_);
+        }
+        return *metadata_engine_;
     }
 
     // Raw describe JSON for an object, cached per ATTACH (#v1.3 §14).
@@ -597,6 +614,7 @@ private:
     SalesforceConfig config_;
     SalesforceTokenSet token_;
     unique_ptr<SalesforceSchemaEntry> main_schema_;
+    unique_ptr<SalesforceMetadataEngine> metadata_engine_;
 };
 
 // ---------------------------------------------------------------------------
@@ -687,6 +705,25 @@ void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias
     auto &sf = catalog->Cast<SalesforceCatalog>();
     cfg = sf.GetConfig();
     token = sf.GetToken();
+}
+
+SalesforceMetadataEngine &GetSalesforceCatalogMetadataEngine(ClientContext &context,
+                                                             const string &alias) {
+    Catalog *catalog = nullptr;
+    try {
+        catalog = &Catalog::GetCatalog(context, alias);
+    } catch (...) {
+        catalog = nullptr;
+    }
+    if (!catalog) {
+        throw BinderException("no attached catalog named '%s' — ATTACH a Salesforce org "
+                              "first, then pass its alias.",
+                              alias);
+    }
+    if (catalog->GetCatalogType() != "salesforce") {
+        throw BinderException("catalog '%s' is not a Salesforce catalog.", alias);
+    }
+    return catalog->Cast<SalesforceCatalog>().GetMetadataEngine();
 }
 
 // ---------------------------------------------------------------------------
