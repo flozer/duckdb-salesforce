@@ -1,0 +1,94 @@
+# name: test/sql/salesforce_metadata_engine.test
+# description: v1.6 §17 Phase A — shared per-catalog metadata engine cache (mocked)
+# group: [salesforce]
+#
+# Exercised through the read-only salesforce_metadata_fields(catalog, object),
+# which sources fields via the shared engine. Cache behavior is asserted via the
+# describe-call counter: a miss issues one Describe, a hit issues none, refresh
+# invalidates, and a fresh ATTACH gets a fresh engine.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account__c","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account__c","fields":[{"name":"Name","type":"string","filterable":true,"sortable":true},{"name":"Amount__c","type":"double","filterable":true,"sortable":true},{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true,"sortable":false}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- first call: cache MISS -> one Describe; rows + columns correct -----------
+query IT
+SELECT field_name, relationship_name FROM salesforce_metadata_fields('sf', 'Account__c') ORDER BY field_name;
+----
+AccountId	Account
+Amount__c	NULL
+Name	NULL
+
+query I
+SELECT type = 'string' AND filterable FROM salesforce_metadata_fields('sf', 'Account__c') WHERE field_name = 'Name';
+----
+true
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# --- second call: cache HIT -> no new Describe --------------------------------
+query I
+SELECT count(*) FROM salesforce_metadata_fields('sf', 'Account__c');
+----
+3
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# --- refresh that object -> next call re-fetches its describe -----------------
+statement ok
+SELECT catalog, scope, object FROM salesforce_refresh_metadata('sf', 'Account__c');
+
+query I
+SELECT count(*) FROM salesforce_metadata_fields('sf', 'Account__c');
+----
+3
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+2
+
+# --- per-catalog isolation: a fresh ATTACH gets a fresh engine ----------------
+statement ok
+DETACH sf;
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query I
+SELECT count(*) FROM salesforce_metadata_fields('sf', 'Account__c');
+----
+3
+
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# --- NULL args rejected -------------------------------------------------------
+statement error
+SELECT * FROM salesforce_metadata_fields(NULL, 'Account__c');
+----
+non-NULL
+
+statement ok
+DETACH sf;
