@@ -1,0 +1,86 @@
+# name: test/sql/salesforce_metadata_objects.test
+# description: v1.6 §17 Phase D — salesforce_metadata_objects(catalog) diagnostic (mocked)
+# group: [salesforce]
+#
+# One row per global sObject with the real `queryable` flag (both true and false
+# exposed). Sourced via the shared engine's global_infos_ cache; GetGlobalObjects
+# (queryable-only) is derived from the same cache, so scan / report_soql are
+# unchanged. Cache behavior asserted via the global-describe counter.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account__c","queryable":true},{"name":"Foo__c","queryable":false}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- mixed queryable flags: both rows present, flags correct ------------------
+query TI
+SELECT object_name, queryable FROM salesforce_metadata_objects('sf') ORDER BY object_name;
+----
+Account__c	true
+Foo__c	false
+
+# --- first call already issued exactly one Describe-Global --------------------
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# --- second call: cache HIT -> no new Describe-Global ------------------------
+query I
+SELECT count(*) FROM salesforce_metadata_objects('sf');
+----
+2
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# --- refresh invalidates -> next call re-fetches global describe -------------
+statement ok
+SELECT catalog, scope FROM salesforce_refresh_metadata('sf');
+
+query I
+SELECT count(*) FROM salesforce_metadata_objects('sf');
+----
+2
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+2
+
+# --- per-catalog isolation: a fresh ATTACH gets a fresh engine ---------------
+statement ok
+DETACH sf;
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query I
+SELECT count(*) FROM salesforce_metadata_objects('sf');
+----
+2
+
+query I
+SELECT calls FROM salesforce_global_describe_calls();
+----
+1
+
+# --- NULL catalog rejected ---------------------------------------------------
+statement error
+SELECT * FROM salesforce_metadata_objects(NULL);
+----
+non-NULL
+
+statement ok
+DETACH sf;
