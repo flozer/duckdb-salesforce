@@ -246,6 +246,76 @@ FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
+# === Phase 2: report token -> field API name =================================
+# Base resolves via builtin map (ContactList -> Contact, strong source).
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"FirstName","type":"string","filterable":true},{"name":"LastName","type":"string","filterable":true},{"name":"Email","type":"string","filterable":true},{"name":"Phone","type":"phone","filterable":false}]}';
+
+# --- FIRST_NAME / LAST_NAME -> FirstName / LastName ---------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["FIRST_NAME","LAST_NAME"],"reportFilters":[]}}';
+
+query I
+SELECT translatable
+   AND contains(soql, 'SELECT FirstName, LastName')
+   AND contains(soql, 'FROM Contact')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- filter token EMAIL -> Email (filterable) -> WHERE Email = 'x' -------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["EMAIL"],"reportFilters":[{"column":"EMAIL","operator":"equals","value":"x"}]}}';
+
+query I
+SELECT translatable AND contains(soql, 'Email = ''x''')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- unknown token -> not translatable ----------------------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["WEIRD_TOKEN"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'WEIRD_TOKEN')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- token resolves but filter field not filterable -> not translatable -------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["FIRST_NAME"],"reportFilters":[{"column":"PHONE","operator":"equals","value":"5"}]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'not filterable')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- relationship token ACCOUNT.NAME on base Contact -> Phase 3 (blocked) ------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["ACCOUNT.NAME"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'ACCOUNT.NAME')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- same-base prefix Contact.FIRST_NAME -> resolves to FirstName -------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Contact.FIRST_NAME"],"reportFilters":[]}}';
+
+query I
+SELECT translatable AND contains(soql, 'SELECT FirstName') AND contains(soql, 'FROM Contact')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
 # --- NULL args rejected -------------------------------------------------------
 statement error
 SELECT * FROM salesforce_report_soql(NULL, '00O1');

@@ -493,6 +493,44 @@ static string BuiltinReportTypeObject(const string &report_type) {
     return "";
 }
 
+// Small, fixture-backed map for common report column tokens whose API name is
+// not recoverable by simple normalization. The mapped target must still exist on
+// the sObject Describe. Returns "" for unknown tokens. Case-insensitive key.
+static string BuiltinReportToken(const string &token) {
+    static const std::pair<const char *, const char *> kMap[] = {
+        {"ID", "Id"},          {"NAME", "Name"},        {"FIRST_NAME", "FirstName"},
+        {"LAST_NAME", "LastName"}, {"EMAIL", "Email"},  {"PHONE", "Phone"},
+        {"CREATED_DATE", "CreatedDate"},
+        // LAST_UPDATE -> LastModifiedDate intentionally omitted: not fixture-backed.
+        // Add only with a real report fixture proving the token (conservative map).
+    };
+    for (auto &m : kMap) {
+        if (StringUtil::CIEquals(token, m.first)) {
+            return m.second;
+        }
+    }
+    return "";
+}
+
+// Normalize an UPPER_SNAKE report token to PascalCase (FIRST_NAME -> FirstName,
+// CREATED_DATE -> CreatedDate, EMAIL -> Email). Each '_'-part: first char upper,
+// rest lower. Used only as a candidate that must then exist on the Describe.
+static string NormalizeSnakeToken(const string &token) {
+    string out;
+    bool start = true;
+    for (char c : token) {
+        if (c == '_') {
+            start = true;
+            continue;
+        }
+        char up = (c >= 'a' && c <= 'z') ? static_cast<char>(c - 32) : c;
+        char lo = (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
+        out.push_back(start ? up : lo);
+        start = false;
+    }
+    return out;
+}
+
 // Weak fallback: the single dotted prefix shared by report column / filter
 // tokens (e.g. "Account.Name" -> "Account"). Returns "" when there is no dotted
 // token or when prefixes are mixed/ambiguous (more than one distinct prefix).
@@ -623,6 +661,7 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     // validated below. No silent partial SOQL.
     string base;
     std::unordered_map<string, bool> field_filterable; // lower(name) -> filterable
+    std::unordered_map<string, string> field_realname; // lower(name) -> real API name
     bool object_validated = false;
     if (bind->translatable) {
         if (candidates.empty()) {
@@ -664,7 +703,9 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                     caveats.push_back("base object resolved from " + label + ": '" + rt +
                                       "' -> '" + base + "'");
                     for (auto &fld : session.Describe(base).fields) {
-                        field_filterable[StringUtil::Lower(fld.name)] = fld.filterable;
+                        string key = StringUtil::Lower(fld.name);
+                        field_filterable[key] = fld.filterable;
+                        field_realname[key] = fld.name;
                     }
                     object_validated = true;
                     // column_prefix is a diagnostic hint only: a shared "Account."
@@ -690,20 +731,42 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     // strip the "<base>." prefix, require a bare safe identifier that exists on
     // the sObject. Relationship traversal (Rel.Field) and pseudo columns do not
     // resolve -> translatable=false.
-    auto resolve_field = [&](const string &name, string &out) -> bool {
-        string f = name;
-        string pfx = base + ".";
-        if (f.rfind(pfx, 0) == 0) {
-            f = f.substr(pfx.size());
+    // Resolve a report token to a REAL field API name on the base sObject.
+    // Phase 2: token -> field via as-is (case-insensitive), small builtin token
+    // map, or UPPER_SNAKE->PascalCase normalization — each candidate must EXIST
+    // on the Describe (out = the real API name). A dotted token only resolves
+    // when its prefix IS the base object (same-base); any other prefix is a
+    // relationship -> unresolved (Phase 3). Never guesses a name not in Describe.
+    auto resolve_field = [&](const string &token, string &out) -> bool {
+        string f = token;
+        auto dot = f.find('.');
+        if (dot != string::npos) {
+            if (!StringUtil::CIEquals(f.substr(0, dot), base)) {
+                return false; // relationship traversal -> Phase 3
+            }
+            f = f.substr(dot + 1);
+            if (f.empty() || f.find('.') != string::npos) {
+                return false; // multi-hop relationship
+            }
         }
-        if (f.empty() || f.find('.') != string::npos || !IsSafeIdentifier(f)) {
+        if (f.empty()) {
             return false;
         }
-        if (!field_filterable.count(StringUtil::Lower(f))) {
-            return false;
+        vector<string> cands;
+        cands.push_back(f); // as-is (matched case-insensitively below)
+        string mapped = BuiltinReportToken(f);
+        if (!mapped.empty()) {
+            cands.push_back(mapped);
         }
-        out = f;
-        return true;
+        cands.push_back(NormalizeSnakeToken(f));
+        for (auto &c : cands) {
+            auto it = field_realname.find(StringUtil::Lower(c));
+            if (it != field_realname.end()) {
+                out = it->second; // real API name from the Describe
+                return true;
+            }
+        }
+        return false;
     };
 
     vector<string> soql_fields;
