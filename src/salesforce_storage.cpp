@@ -89,6 +89,7 @@ public:
         data->fields = fields_;
         data->column_names = column_names_;
         data->column_types = column_types_;
+        data->catalog_alias = ParentCatalog().GetName(); // #v1.6 query_explain
         bind_data = std::move(data);
         return GetSalesforceScanFunction();
     }

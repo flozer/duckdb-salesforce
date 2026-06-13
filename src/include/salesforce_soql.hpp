@@ -29,9 +29,19 @@ string BuildSelectSoql(const string &object, const vector<string> &select_fields
 // simply left residual.
 // `projection_to_field` maps a filter's column-ref index (projection-relative)
 // to the index of the field in `fields`.
+//
+// Optional `out_info` (diagnostic-only): if non-null, filled with one entry per
+// INPUT conjunct (in input order) describing whether it was translated into the
+// SOQL WHERE and whether the translation was exact. Pure observation — does not
+// change pushdown behavior. Used by salesforce_query_explain().
+struct PushdownConjunctInfo {
+    bool translated = false; // a SOQL clause was emitted for this conjunct
+    bool exact = false;      // exact match (removed from residual set); else prefilter
+};
 void PushdownToSoql(const vector<SalesforceField> &fields,
                     const vector<idx_t> &projection_to_field, string &out_where,
-                    vector<unique_ptr<Expression>> &filters);
+                    vector<unique_ptr<Expression>> &filters,
+                    vector<PushdownConjunctInfo> *out_info = nullptr);
 
 // Diagnostic: record / read the most recent SOQL a scan generated. Used by the
 // salesforce_last_soql() table function so tests can assert the pushdown.

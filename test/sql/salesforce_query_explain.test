@@ -1,0 +1,119 @@
+# name: test/sql/salesforce_query_explain.test
+# description: v1.6 — salesforce_query_explain() last-scan, metadata-annotated,
+#              diagnostic-only (zero scan/pushdown behavior change)
+# group: [salesforce]
+#
+# Per-field/per-filter explanation of the LAST catalog scan, annotated via the
+# shared Metadata Engine v2. Captures only what the scan already classified
+# (projection, pushed filters, residual filters) + the catalog alias. Reason set
+# (closed, Phase 1): pushed_to_soql, projected, not_filterable,
+# unsupported_operator, complex_expression, unresolved_field, metadata_unavailable.
+# LIMIT is NOT diagnosable (not exposed to the table function) — no row for it.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Note is NOT filterable; AccountId is a single-hop reference to Account.
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true,"sortable":true},{"name":"Name","type":"string","filterable":true,"sortable":true},{"name":"Note","type":"string","filterable":false,"sortable":false},{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true,"sortable":true}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"RestRow"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- pushed filter: role=filter, pushed=true, reason=pushed_to_soql -----------
+query I
+SELECT Name FROM sf.Account WHERE Name = 'Acme';
+----
+RestRow
+
+query I
+SELECT object_name = 'Account' AND field_name = 'Name' AND role = 'filter'
+   AND pushed AND NOT residual AND reason = 'pushed_to_soql'
+   AND resolved AND filterable
+FROM salesforce_query_explain()
+WHERE role = 'filter';
+----
+true
+
+# projection row for the same scan: role=projection, reason=projected
+query I
+SELECT field_name = 'Name' AND role = 'projection' AND pushed
+   AND reason = 'projected' AND resolved AND filterable AND sortable
+FROM salesforce_query_explain()
+WHERE role = 'projection';
+----
+true
+
+# query_cost() still works alongside (unchanged shape)
+query I
+SELECT pushed_filters = 1 AND residual_filters = 0 FROM salesforce_query_cost();
+----
+true
+
+# --- residual filter on a non-filterable field: reason=not_filterable ---------
+query I
+SELECT count(*) FROM sf.Account WHERE Note = 'x';
+----
+0
+
+query I
+SELECT field_name = 'Note' AND role = 'filter' AND NOT pushed AND residual
+   AND reason = 'not_filterable' AND resolved AND NOT filterable
+FROM salesforce_query_explain()
+WHERE role = 'filter';
+----
+true
+
+# --- complex expression (OR): field_name NULL, reason=complex_expression ------
+query I
+SELECT count(*) FROM sf.Account WHERE Name = 'a' OR Note = 'b';
+----
+0
+
+query I
+SELECT field_name IS NULL AND role = 'filter' AND residual
+   AND reason = 'complex_expression'
+FROM salesforce_query_explain()
+WHERE role = 'filter';
+----
+true
+
+# --- relationship annotation: reference field carries relationship_name + targets
+# (the mock record has no AccountId value -> NULL; the projection is still captured)
+query I
+SELECT AccountId FROM sf.Account;
+----
+NULL
+
+query I
+SELECT field_name = 'AccountId' AND role = 'projection' AND reason = 'projected'
+   AND relationship_name = 'Account' AND reference_to = ['Account'] AND resolved
+FROM salesforce_query_explain()
+WHERE role = 'projection' AND field_name = 'AccountId';
+----
+true
+
+# --- metadata unavailable: catalog detached after scan -> degrade, no error ---
+query I
+SELECT Name FROM sf.Account WHERE Name = 'Acme';
+----
+RestRow
+
+statement ok
+DETACH sf;
+
+# engine lookup fails (catalog gone) -> resolved=false, reason=metadata_unavailable;
+# the function still returns rows without error.
+query I
+SELECT bool_and(NOT resolved AND reason = 'metadata_unavailable')
+FROM salesforce_query_explain();
+----
+true

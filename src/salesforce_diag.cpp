@@ -33,6 +33,8 @@ struct ScanCost {
     bool quota_consulted = false; // false -> quota_* NULL
     int64_t quota_remaining = -1;
     bool quota_allowed = false;
+    string catalog_alias;                 // #v1.6 explain: owning ATTACH alias
+    vector<DiagExplainItem> explain_items; // #v1.6 explain: projection + filters
 };
 
 std::mutex g_lock;
@@ -184,6 +186,21 @@ void DiagRecordScan(const string &object, const string &soql, const string &tran
     g_cost.pages_fetched = pages_init;
     g_cost.count_pushdown = count_pushdown;
     g_cost.query_mode = query_mode;
+}
+
+void DiagSetExplain(const string &catalog_alias, vector<DiagExplainItem> items) {
+    std::lock_guard<std::mutex> g(g_lock);
+    g_cost.catalog_alias = catalog_alias;
+    g_cost.explain_items = std::move(items);
+}
+
+DiagExplainSnapshot DiagGetExplain() {
+    std::lock_guard<std::mutex> g(g_lock);
+    DiagExplainSnapshot snap;
+    snap.object = g_cost.object;
+    snap.catalog_alias = g_cost.catalog_alias;
+    snap.items = g_cost.explain_items;
+    return snap;
 }
 
 void DiagSetPages(int64_t pages) {

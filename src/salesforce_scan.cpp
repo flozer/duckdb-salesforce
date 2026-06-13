@@ -23,7 +23,12 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/planner/expression.hpp"
+#include "duckdb/planner/expression/bound_columnref_expression.hpp"
+#include "duckdb/planner/expression_iterator.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
+
+#include <functional>
+#include <set>
 
 namespace duckdb {
 
@@ -38,6 +43,9 @@ unique_ptr<FunctionData> SalesforceScanBindData::Copy() const {
     r->pushed_where = pushed_where;
     r->pushed_filter_count = pushed_filter_count;
     r->residual_filter_count = residual_filter_count;
+    r->catalog_alias = catalog_alias;
+    r->explain_filters = explain_filters;
+    r->explain_captured = explain_captured;
     return std::move(r);
 }
 
@@ -459,6 +467,27 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
                    reported_pages, gstate->count_only,
                    gstate->query_all ? "queryAll" : "query");
 
+    // Explain capture (#v1.6, diagnostic-only): one projection item per projected
+    // field + the per-filter items captured during pushdown. Written AFTER
+    // DiagRecordScan (which reset the snapshot). Never read by the scan path.
+    {
+        vector<DiagExplainItem> explain;
+        explain.reserve(select_fields.size() + bind.explain_filters.size());
+        for (auto &name : select_fields) {
+            DiagExplainItem it;
+            it.role = "projection";
+            it.field = name;
+            it.field_known = true;
+            it.pushed = true;     // included in the SOQL SELECT
+            it.residual = false;  // projection is never "residual"
+            explain.push_back(std::move(it));
+        }
+        for (auto &it : bind.explain_filters) {
+            explain.push_back(it);
+        }
+        DiagSetExplain(bind.catalog_alias, std::move(explain));
+    }
+
     if (gstate->count_only) {
         return std::move(gstate); // no records to fetch; ScanFunction emits the count
     }
@@ -759,6 +788,40 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
 // Predicate pushdown: translate the safe subset of the conjunctive filter list
 // into a SOQL WHERE on the bind data; DuckDB keeps the rest as a residual
 // Filter operator. (#9)
+// Explain capture (#v1.6, diagnostic-only): extract the SINGLE field a conjunct
+// references, WITHOUT the filterability gate that FieldFor applies (we want to
+// name a non-filterable field so query_explain can report not_filterable). A
+// top-level conjunction (OR/NOT) or a cross-field predicate (>1 distinct field)
+// has no single field -> returns false (field_name becomes NULL / complex).
+static bool ExplainFieldOf(const Expression &expr, const vector<SalesforceField> &fields,
+                           const vector<idx_t> &projection_to_field, string &out_name) {
+    if (expr.GetExpressionClass() == ExpressionClass::BOUND_CONJUNCTION) {
+        return false; // OR / AND-of-ORs / NOT-wrapped -> complex
+    }
+    std::set<idx_t> field_idxs;
+    std::function<void(const Expression &)> walk = [&](const Expression &e) {
+        if (e.GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
+            auto &c = e.Cast<BoundColumnRefExpression>();
+            idx_t proj = c.binding.column_index;
+            if (proj < projection_to_field.size()) {
+                idx_t fi = projection_to_field[proj];
+                if (fi < fields.size()) {
+                    field_idxs.insert(fi);
+                }
+            }
+            return;
+        }
+        ExpressionIterator::EnumerateChildren(e,
+                                              [&](const Expression &child) { walk(child); });
+    };
+    walk(expr);
+    if (field_idxs.size() != 1) {
+        return false; // zero (constant-only) or cross-field -> complex
+    }
+    out_name = fields[*field_idxs.begin()].name;
+    return true;
+}
+
 static void ScanPushdownComplexFilter(ClientContext &, LogicalGet &get, FunctionData *bind_data,
                                       vector<unique_ptr<Expression>> &filters) {
     if (!bind_data) {
@@ -779,11 +842,37 @@ static void ScanPushdownComplexFilter(ClientContext &, LogicalGet &get, Function
     if (before == 0) {
         return;
     }
+    // Explain capture (write-only): snapshot each INPUT conjunct's field name
+    // (gate-free) before PushdownToSoql mutates the list.
+    vector<string> snap_field(before);
+    vector<bool> snap_known(before, false);
+    for (idx_t i = 0; i < before; i++) {
+        if (filters[i]) {
+            string fn;
+            snap_known[i] = ExplainFieldOf(*filters[i], bind.fields, projection_to_field, fn);
+            snap_field[i] = fn;
+        }
+    }
     string where_part;
-    PushdownToSoql(bind.fields, projection_to_field, where_part, filters);
+    vector<PushdownConjunctInfo> info;
+    PushdownToSoql(bind.fields, projection_to_field, where_part, filters, &info);
     if (!where_part.empty()) {
         bind.pushed_where =
             bind.pushed_where.empty() ? where_part : bind.pushed_where + " AND " + where_part;
+    }
+    // One explain item per INPUT conjunct (info is in input order, same as snap).
+    // Capture only once: the hook may re-fire with a re-presented residual.
+    if (!bind.explain_captured) {
+        for (idx_t i = 0; i < before && i < info.size(); i++) {
+            DiagExplainItem it;
+            it.role = "filter";
+            it.field = snap_field[i];
+            it.field_known = snap_known[i];
+            it.pushed = info[i].translated;                        // emitted into WHERE
+            it.residual = !(info[i].translated && info[i].exact);  // stays for DuckDB
+            bind.explain_filters.push_back(std::move(it));
+        }
+        bind.explain_captured = true;
     }
     // Translated filters were removed; the rest stay residual for DuckDB.
     // Recorded for salesforce_query_cost() (#v0.4 §4).

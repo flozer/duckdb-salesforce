@@ -96,4 +96,11 @@ TableFunction GetSalesforceMetadataFieldsFunction();
 // global sObject (object_name, queryable), sourced through the shared engine.
 TableFunction GetSalesforceMetadataObjectsFunction();
 
+// salesforce_query_explain() — read-only, last-scan diagnostic (#v1.6). One row
+// per projected field / conjunctive filter of the most recent catalog scan,
+// annotated via the shared Metadata Engine (resolved/filterable/sortable/
+// relationship/referenceTo) with a closed reason set. Diagnostic-only: never
+// affects scan execution or salesforce_query_cost().
+TableFunction GetSalesforceQueryExplainFunction();
+
 } // namespace duckdb
