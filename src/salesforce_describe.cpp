@@ -44,6 +44,13 @@ SalesforceDescribe ParseDescribe(const string &json, const string &fallback_obje
         // when sf_relationships='parent'.
         f.relationship_name = sfjson::GetString(obj, "relationshipName");
         f.reference_to = sfjson::GetStringArray(obj, "referenceTo");
+        // Picklist values (#v1.6 §17): minimal parse of picklistValues[*].value.
+        for (auto &pv : sfjson::GetObjectArray(obj, "picklistValues")) {
+            string val = sfjson::GetString(pv, "value");
+            if (!val.empty()) {
+                f.picklist_values.push_back(std::move(val));
+            }
+        }
         d.fields.push_back(std::move(f));
     }
     return d;
