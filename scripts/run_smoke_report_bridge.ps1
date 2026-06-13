@@ -71,7 +71,8 @@ if ($ExtensionPath) {
     $loadStmt = "LOAD '$ExtensionPath';`n"
     $extDesc  = "$ExtensionPath (LOAD, -unsigned)"
 } else {
-    $extDesc = 'statically linked in shell (no community INSTALL)'
+    $localExt = Join-Path $root 'build/release/extension/salesforce/salesforce.duckdb_extension'
+    $extDesc = "statically linked in local shell (NOT community); local artifact: $localExt"
 }
 
 # --- credential preflight (names only, never values) -------------------------
@@ -161,15 +162,15 @@ Write-Host ("report_id   : $ReportId")
 Write-Host ("report_name : $reportNm")
 Write-Host ""
 
-# --- D. sample / oracle -------------------------------------------------------
-Write-Host "[sample] salesforce_report('sf', '$ReportId') LIMIT 5  (reserved __sf_report_* columns appended)" -ForegroundColor Cyan
-$smp = Invoke-Duck "$attach`n.mode line`nSELECT * FROM salesforce_report('sf', '$ReportId') LIMIT 5;"
+# --- D. sample / oracle (PII-safe: count + reserved columns only, no rows) ----
+Write-Host "[sample] salesforce_report('sf', '$ReportId') LIMIT 5  (proving row count + __sf_report_* presence; report data rows NOT printed)" -ForegroundColor Cyan
+$smp = Invoke-Duck "$attach`n.mode line`nSELECT count(*) AS sample_rows, any_value(__sf_report_truncated) AS truncated, any_value(__sf_report_all_data) AS all_data, any_value(__sf_report_max_rows) AS max_rows FROM (SELECT * FROM salesforce_report('sf', '$ReportId') LIMIT 5) t;"
 if ($smp.Failed) { Fail 'salesforce_report' $smp.Out }
 Write-Host $smp.Out
 
-# --- E. candidate SOQL --------------------------------------------------------
+# --- E. candidate SOQL (structured diagnostics; no report data rows) ----------
 Write-Host "[candidate soql] salesforce_report_soql('sf', '$ReportId')  (one row; candidate, not contract)" -ForegroundColor Cyan
-$sq = Invoke-Duck "$attach`n.mode line`nSELECT report_id, report_name, report_type, base_object, columns, filters, soql, translatable, caveats FROM salesforce_report_soql('sf', '$ReportId');"
+$sq = Invoke-Duck "$attach`n.mode line`nSELECT base_object, base_object_resolved_by, translation_status, blocked_by, translatable, soql, unresolved_columns, unresolved_filters, confidence, caveats FROM salesforce_report_soql('sf', '$ReportId');"
 if ($sq.Failed) { Fail 'salesforce_report_soql' $sq.Out }
 Write-Host $sq.Out
 
