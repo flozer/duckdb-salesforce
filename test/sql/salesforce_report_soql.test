@@ -424,6 +424,98 @@ FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
+# === Phase 4: explainability columns =========================================
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"FirstName","type":"string","filterable":true},{"name":"Email","type":"string","filterable":true},{"name":"Phone","type":"phone","filterable":false},{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User","Group"],"filterable":true}]}';
+
+# --- full -> status full, blocked_by none, confidence 1.0 ---------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["FIRST_NAME"],"reportFilters":[]}}';
+
+query I
+SELECT translation_status = 'full' AND blocked_by = 'none'
+   AND base_object_resolved_by = 'builtin_report_type_map'
+   AND confidence = 1.0 AND len(unresolved_columns) = 0 AND len(unresolved_filters) = 0
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- unknown projected field -> blocked_by projected_field --------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["WEIRD"],"reportFilters":[]}}';
+
+query I
+SELECT translation_status = 'none' AND soql IS NULL AND confidence = 0.0
+   AND blocked_by = 'projected_field'
+   AND len(unresolved_columns) = 1 AND unresolved_columns[1] = 'WEIRD'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- unknown filter field -> blocked_by filter_field -------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["FIRST_NAME"],"reportFilters":[{"column":"WEIRD","operator":"equals","value":"x"}]}}';
+
+query I
+SELECT blocked_by = 'filter_field' AND unresolved_filters[1] = 'WEIRD'
+   AND translation_status = 'none'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- non-filterable WHERE -> blocked_by filterability ------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["FIRST_NAME"],"reportFilters":[{"column":"PHONE","operator":"equals","value":"5"}]}}';
+
+query I
+SELECT blocked_by = 'filterability' AND translation_status = 'none'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- polymorphic relationship -> blocked_by relationship ---------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Owner.Name"],"reportFilters":[]}}';
+
+query I
+SELECT blocked_by = 'relationship' AND unresolved_columns[1] = 'Owner.Name'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- summary report -> blocked_by report_shape -------------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"SUMMARY","detailColumns":["FIRST_NAME"],"reportFilters":[]}}';
+
+query I
+SELECT blocked_by = 'report_shape' AND translation_status = 'none'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- boolean filter OR -> blocked_by boolean_filter --------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["FIRST_NAME"],"reportBooleanFilter":"1 OR 2","reportFilters":[{"column":"FIRST_NAME","operator":"equals","value":"a"},{"column":"FIRST_NAME","operator":"equals","value":"b"}]}}';
+
+query I
+SELECT blocked_by = 'boolean_filter' AND translation_status = 'none'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- cross filter -> blocked_by cross_filter ---------------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["FIRST_NAME"],"reportFilters":[],"crossFilters":[{"primaryEntityField":"Contact","relatedEntity":"Case","operator":"with"}]}}';
+
+query I
+SELECT blocked_by = 'cross_filter' AND translation_status = 'none'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
 # --- NULL args rejected -------------------------------------------------------
 statement error
 SELECT * FROM salesforce_report_soql(NULL, '00O1');

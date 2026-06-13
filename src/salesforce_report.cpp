@@ -458,6 +458,11 @@ struct ReportSoqlBindData : public FunctionData {
     string soql;
     bool translatable = false;
     string caveats;
+    // Phase 4 explainability.
+    string base_object_resolved_by = "unresolved";
+    string blocked_by; // closed set; finalized at end of bind
+    vector<string> unresolved_columns;
+    vector<string> unresolved_filters;
 
     unique_ptr<FunctionData> Copy() const override {
         return make_uniq<ReportSoqlBindData>(*this);
@@ -628,15 +633,37 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     bool wildcard_caveat = false;
     bind->translatable = true;
 
-    if (!StringUtil::CIEquals(format, "TABULAR")) {
+    // Phase 4: record the FIRST blocker by precedence (lower rank wins),
+    // independent of code execution order.
+    auto block_rank = [](const string &r) -> int {
+        if (r == "report_shape") return 1;
+        if (r == "cross_filter") return 2;
+        if (r == "base_object") return 3;
+        if (r == "projected_field") return 4;
+        if (r == "relationship") return 5;
+        if (r == "filter_field") return 6;
+        if (r == "filterability") return 7;
+        if (r == "operator") return 8;
+        if (r == "literal") return 9;
+        if (r == "boolean_filter") return 10;
+        return 99;
+    };
+    auto set_block = [&](const string &reason) {
         bind->translatable = false;
+        if (bind->blocked_by.empty() || block_rank(reason) < block_rank(bind->blocked_by)) {
+            bind->blocked_by = reason;
+        }
+    };
+
+    if (!StringUtil::CIEquals(format, "TABULAR")) {
+        set_block("report_shape");
         caveats.push_back("report format '" + format +
                           "' is not translatable in this cut (summary/matrix and "
                           "grouped/aggregated reports are unsupported)");
     }
     // Cross filters (semi-/anti-join) are out of this cut.
     if (!sfjson::GetObjectArray(metadata, "crossFilters").empty()) {
-        bind->translatable = false;
+        set_block("cross_filter");
         caveats.push_back("report has cross filters (semi-/anti-join) which are not "
                           "supported in this cut");
     }
@@ -694,7 +721,7 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     bool object_validated = false;
     if (bind->translatable) {
         if (candidates.empty()) {
-            bind->translatable = false;
+            set_block("base_object");
             caveats.push_back("could not derive a base object from report type '" + rt +
                               "'");
         } else {
@@ -720,13 +747,15 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                     }
                 }
                 if (base.empty()) {
-                    bind->translatable = false;
+                    set_block("base_object");
                     caveats.push_back("base object could not be resolved to a queryable "
                                       "object in Describe Global (report type '" + rt +
                                       "')");
                 } else {
                     bind->base_object = base;
                     string by_s = by;
+                    bind->base_object_resolved_by =
+                        (by_s == "column_prefix") ? "column_prefix_hint" : by_s;
                     string label = (by_s == "custom_entity_suffix")
                                        ? "CustomEntity suffix (custom_entity_suffix)"
                                    : (by_s == "builtin_report_type_map")
@@ -750,13 +779,13 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                     // It can fill base_object/provenance but must NOT enable
                     // translatable — better an honest false than a wrong root.
                     if (by_s == "column_prefix") {
-                        bind->translatable = false;
+                        set_block("base_object");
                         caveats.push_back("base object inferred from column prefix only; "
                                           "not enough to guarantee the report root object");
                     }
                 }
             } catch (...) {
-                bind->translatable = false;
+                set_block("base_object");
                 caveats.push_back("could not validate the base object against the org "
                                   "describe");
             }
@@ -769,7 +798,9 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     // false (caller -> translatable=false) for unknown tokens, multi-hop,
     // polymorphic (referenceTo != 1), unknown relationshipName, or a missing
     // related object/field. Never invents joins.
-    auto resolve_field = [&](const string &token, string &out, bool &out_filterable) -> bool {
+    auto resolve_field = [&](const string &token, string &out, bool &out_filterable,
+                             bool &out_rel) -> bool {
+        out_rel = false;
         auto dot = token.find('.');
         if (dot == string::npos) {
             string real;
@@ -782,6 +813,9 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
         }
         string prefix = token.substr(0, dot);
         string rest = token.substr(dot + 1);
+        // A dotted token with a non-base prefix is a relationship attempt; flag it
+        // so the caller can classify the block as 'relationship' on failure.
+        out_rel = !StringUtil::CIEquals(prefix, base);
         if (rest.find('.') != string::npos) {
             return false; // multi-hop (e.g. Account.Owner.Name) -> later phase
         }
@@ -832,18 +866,19 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     if (object_validated) {
         for (auto &c : bind->columns) {
             string field;
-            bool filt = false;
-            if (!resolve_field(c, field, filt)) {
-                bind->translatable = false;
+            bool filt = false, was_rel = false;
+            if (!resolve_field(c, field, filt, was_rel)) {
+                set_block(was_rel ? "relationship" : "projected_field");
+                bind->unresolved_columns.push_back(c);
                 caveats.push_back("column '" + c + "' does not resolve to a field on '" +
                                   base + "'");
                 continue;
             }
             soql_fields.push_back(field);
         }
-        if (soql_fields.empty()) {
-            bind->translatable = false;
-            caveats.push_back("no projectable columns resolve on '" + base + "'");
+        if (soql_fields.empty() && bind->columns.empty()) {
+            set_block("projected_field");
+            caveats.push_back("report has no projectable columns");
         }
     }
 
@@ -852,7 +887,7 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
         string soql_op;
         bool is_like = false;
         if (!SafeOperator(f.op, soql_op, is_like)) {
-            bind->translatable = false;
+            set_block("operator");
             caveats.push_back("unsupported filter operator '" + f.op + "'");
             continue;
         }
@@ -860,9 +895,10 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
             continue; // object not validated -> already untranslatable
         }
         string field;
-        bool filt = false;
-        if (!resolve_field(f.field, field, filt)) {
-            bind->translatable = false;
+        bool filt = false, was_rel = false;
+        if (!resolve_field(f.field, field, filt, was_rel)) {
+            set_block(was_rel ? "relationship" : "filter_field");
+            bind->unresolved_filters.push_back(f.field);
             caveats.push_back("filter field '" + f.field +
                               "' does not resolve to a field on '" + base + "'");
             continue;
@@ -871,7 +907,7 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
         // candidate SOQL would fail at Salesforce. Projection only needs it to
         // exist; for relationship fields this is the related object's flag.
         if (!filt) {
-            bind->translatable = false;
+            set_block("filterability");
             caveats.push_back("filter field '" + f.field + "' is not filterable on '" +
                               base + "'");
             continue;
@@ -883,7 +919,7 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
         } else if (IsNumericLiteral(f.value)) {
             clauses.push_back(field + " " + soql_op + " " + f.value);
         } else if (IsAmbiguousLiteral(f.value)) {
-            bind->translatable = false;
+            set_block("literal");
             caveats.push_back("filter value '" + f.value +
                               "' (date/boolean/null) is not auto-translated; write "
                               "the SOQL literal manually");
@@ -894,7 +930,7 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
 
     string bool_filter = sfjson::GetString(metadata, "reportBooleanFilter");
     if (!BooleanFilterAndOnly(bool_filter, bind->filters.size())) {
-        bind->translatable = false;
+        set_block("boolean_filter");
         caveats.push_back("report filter logic '" + bool_filter +
                           "' uses OR/NOT/grouping (or an out-of-range index) that "
                           "is not supported in this cut");
@@ -917,14 +953,23 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                           "salesforce_report() sample before scaling");
     }
     bind->caveats = StringUtil::Join(caveats, "; ");
+    // Phase 4: finalize explainability. translatable -> full / none-blocked.
+    if (bind->translatable) {
+        bind->blocked_by = "none";
+    } else if (bind->blocked_by.empty()) {
+        bind->blocked_by = "none"; // defensive; a false result always set a block
+    }
 
     child_list_t<LogicalType> filter_struct;
     filter_struct.push_back({"field", LogicalType::VARCHAR});
     filter_struct.push_back({"op", LogicalType::VARCHAR});
     filter_struct.push_back({"value", LogicalType::VARCHAR});
 
-    names = {"report_id",  "report_name", "report_type", "base_object", "columns",
-             "filters",    "soql",        "translatable", "caveats"};
+    names = {"report_id",  "report_name",  "report_type", "base_object",
+             "columns",    "filters",      "soql",        "translatable",
+             "caveats",    "base_object_resolved_by",      "translation_status",
+             "blocked_by", "unresolved_columns",           "unresolved_filters",
+             "confidence"};
     return_types = {LogicalType::VARCHAR,
                     LogicalType::VARCHAR,
                     LogicalType::VARCHAR,
@@ -933,7 +978,13 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                     LogicalType::LIST(LogicalType::STRUCT(filter_struct)),
                     LogicalType::VARCHAR,
                     LogicalType::BOOLEAN,
-                    LogicalType::VARCHAR};
+                    LogicalType::VARCHAR,
+                    LogicalType::VARCHAR,                       // base_object_resolved_by
+                    LogicalType::VARCHAR,                       // translation_status
+                    LogicalType::VARCHAR,                       // blocked_by
+                    LogicalType::LIST(LogicalType::VARCHAR),    // unresolved_columns
+                    LogicalType::LIST(LogicalType::VARCHAR),    // unresolved_filters
+                    LogicalType::DOUBLE};                       // confidence
     return std::move(bind);
 }
 
@@ -999,6 +1050,26 @@ static void ReportSoqlFunction(ClientContext &, TableFunctionInput &data, DataCh
     }
     FlatVector::GetData<bool>(output.data[7])[0] = bd.translatable;
     str(8, bd.caveats);
+
+    // Phase 4 explainability columns.
+    str(9, bd.base_object_resolved_by);
+    str(10, bd.translatable ? "full" : "none");
+    str(11, bd.blocked_by);
+    auto emit_list = [&](idx_t col, const vector<string> &items) {
+        auto &lvec = output.data[col];
+        idx_t n = items.size();
+        ListVector::Reserve(lvec, n);
+        auto &child = ListVector::GetEntry(lvec);
+        auto child_data = FlatVector::GetData<string_t>(child);
+        for (idx_t k = 0; k < n; k++) {
+            child_data[k] = StringVector::AddString(child, items[k]);
+        }
+        ListVector::SetListSize(lvec, n);
+        FlatVector::GetData<list_entry_t>(lvec)[0] = list_entry_t(0, n);
+    };
+    emit_list(12, bd.unresolved_columns);
+    emit_list(13, bd.unresolved_filters);
+    FlatVector::GetData<double>(output.data[14])[0] = bd.translatable ? 1.0 : 0.0;
 
     gs.emitted = true;
     output.SetCardinality(1);
