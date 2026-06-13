@@ -531,6 +531,29 @@ static string NormalizeSnakeToken(const string &token) {
     return out;
 }
 
+// Match a report token to a real field API name present in `realname`
+// (lower(name) -> real name): try as-is (case-insensitive), the builtin token
+// map, then UPPER_SNAKE->PascalCase. Out is the real API name. False if none
+// exists on the describe.
+static bool MatchFieldName(const std::unordered_map<string, string> &realname,
+                           const string &token, string &out) {
+    vector<string> cands;
+    cands.push_back(token);
+    string mapped = BuiltinReportToken(token);
+    if (!mapped.empty()) {
+        cands.push_back(mapped);
+    }
+    cands.push_back(NormalizeSnakeToken(token));
+    for (auto &c : cands) {
+        auto it = realname.find(StringUtil::Lower(c));
+        if (it != realname.end()) {
+            out = it->second;
+            return true;
+        }
+    }
+    return false;
+}
+
 // Weak fallback: the single dotted prefix shared by report column / filter
 // tokens (e.g. "Account.Name" -> "Account"). Returns "" when there is no dotted
 // token or when prefixes are mixed/ambiguous (more than one distinct prefix).
@@ -662,6 +685,12 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
     string base;
     std::unordered_map<string, bool> field_filterable; // lower(name) -> filterable
     std::unordered_map<string, string> field_realname; // lower(name) -> real API name
+    // Phase 3: base relationships + queryable set + related-object field caches.
+    std::unordered_map<string, std::pair<string, vector<string>>> base_relationships;
+    // ^ lower(relationshipName) -> {real relationshipName, referenceTo}
+    std::unordered_set<string> queryable_lower;        // lower(name) of queryable objects
+    std::unordered_map<string, std::unordered_map<string, string>> rel_realname;  // lower(obj)->(lower->real)
+    std::unordered_map<string, std::unordered_map<string, bool>> rel_filterable;  // lower(obj)->(lower->filterable)
     bool object_validated = false;
     if (bind->translatable) {
         if (candidates.empty()) {
@@ -671,6 +700,9 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
         } else {
             try {
                 auto queryable = session.GlobalDescribe(); // one call, cached below
+                for (auto &n : queryable) {
+                    queryable_lower.insert(StringUtil::Lower(n));
+                }
                 const char *by = nullptr;
                 for (auto &c : candidates) {
                     if (!IsSafeIdentifier(c.obj)) {
@@ -706,6 +738,10 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                         string key = StringUtil::Lower(fld.name);
                         field_filterable[key] = fld.filterable;
                         field_realname[key] = fld.name;
+                        if (!fld.relationship_name.empty()) {
+                            base_relationships[StringUtil::Lower(fld.relationship_name)] = {
+                                fld.relationship_name, fld.reference_to};
+                        }
                     }
                     object_validated = true;
                     // column_prefix is a diagnostic hint only: a shared "Account."
@@ -727,53 +763,77 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
         }
     }
 
-    // Resolve a report column/filter token to a DIRECT field of the base object:
-    // strip the "<base>." prefix, require a bare safe identifier that exists on
-    // the sObject. Relationship traversal (Rel.Field) and pseudo columns do not
-    // resolve -> translatable=false.
-    // Resolve a report token to a REAL field API name on the base sObject.
-    // Phase 2: token -> field via as-is (case-insensitive), small builtin token
-    // map, or UPPER_SNAKE->PascalCase normalization — each candidate must EXIST
-    // on the Describe (out = the real API name). A dotted token only resolves
-    // when its prefix IS the base object (same-base); any other prefix is a
-    // relationship -> unresolved (Phase 3). Never guesses a name not in Describe.
-    auto resolve_field = [&](const string &token, string &out) -> bool {
-        string f = token;
-        auto dot = f.find('.');
-        if (dot != string::npos) {
-            if (!StringUtil::CIEquals(f.substr(0, dot), base)) {
-                return false; // relationship traversal -> Phase 3
+    // Resolve a report token to a real field on the base object, or to a safe
+    // SINGLE-HOP relationship field. out = the SOQL field (bare or "Rel.Field");
+    // out_filterable = whether it is filterable on its (related) object. Returns
+    // false (caller -> translatable=false) for unknown tokens, multi-hop,
+    // polymorphic (referenceTo != 1), unknown relationshipName, or a missing
+    // related object/field. Never invents joins.
+    auto resolve_field = [&](const string &token, string &out, bool &out_filterable) -> bool {
+        auto dot = token.find('.');
+        if (dot == string::npos) {
+            string real;
+            if (!MatchFieldName(field_realname, token, real)) {
+                return false;
             }
-            f = f.substr(dot + 1);
-            if (f.empty() || f.find('.') != string::npos) {
-                return false; // multi-hop relationship
+            out = real;
+            out_filterable = field_filterable[StringUtil::Lower(real)];
+            return true;
+        }
+        string prefix = token.substr(0, dot);
+        string rest = token.substr(dot + 1);
+        if (rest.find('.') != string::npos) {
+            return false; // multi-hop (e.g. Account.Owner.Name) -> later phase
+        }
+        if (StringUtil::CIEquals(prefix, base)) {
+            // same-base prefix (Contact.FIRST_NAME on base Contact): resolve rest.
+            string real;
+            if (!MatchFieldName(field_realname, rest, real)) {
+                return false;
+            }
+            out = real;
+            out_filterable = field_filterable[StringUtil::Lower(real)];
+            return true;
+        }
+        // Single-hop relationship: prefix must be a relationshipName on the base,
+        // non-polymorphic, related object queryable, final field present.
+        auto rel = base_relationships.find(StringUtil::Lower(prefix));
+        if (rel == base_relationships.end()) {
+            return false; // not a relationship on the base (prefix is NOT an object)
+        }
+        const vector<string> &refs = rel->second.second;
+        if (refs.size() != 1) {
+            return false; // polymorphic or no target
+        }
+        const string &target = refs[0];
+        if (!queryable_lower.count(StringUtil::Lower(target))) {
+            return false; // related object not queryable
+        }
+        string tkey = StringUtil::Lower(target);
+        if (!rel_realname.count(tkey)) {
+            auto &rn = rel_realname[tkey];
+            auto &rf = rel_filterable[tkey];
+            for (auto &fld : session.Describe(target).fields) {
+                string k = StringUtil::Lower(fld.name);
+                rn[k] = fld.name;
+                rf[k] = fld.filterable;
             }
         }
-        if (f.empty()) {
-            return false;
+        string real;
+        if (!MatchFieldName(rel_realname[tkey], rest, real)) {
+            return false; // final field absent on the related object
         }
-        vector<string> cands;
-        cands.push_back(f); // as-is (matched case-insensitively below)
-        string mapped = BuiltinReportToken(f);
-        if (!mapped.empty()) {
-            cands.push_back(mapped);
-        }
-        cands.push_back(NormalizeSnakeToken(f));
-        for (auto &c : cands) {
-            auto it = field_realname.find(StringUtil::Lower(c));
-            if (it != field_realname.end()) {
-                out = it->second; // real API name from the Describe
-                return true;
-            }
-        }
-        return false;
+        out = rel->second.first + "." + real; // realRelationshipName.realField
+        out_filterable = rel_filterable[tkey][StringUtil::Lower(real)];
+        return true;
     };
 
     vector<string> soql_fields;
     if (object_validated) {
         for (auto &c : bind->columns) {
             string field;
-            if (!resolve_field(c, field)) {
+            bool filt = false;
+            if (!resolve_field(c, field, filt)) {
                 bind->translatable = false;
                 caveats.push_back("column '" + c + "' does not resolve to a field on '" +
                                   base + "'");
@@ -800,15 +860,17 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
             continue; // object not validated -> already untranslatable
         }
         string field;
-        if (!resolve_field(f.field, field)) {
+        bool filt = false;
+        if (!resolve_field(f.field, field, filt)) {
             bind->translatable = false;
             caveats.push_back("filter field '" + f.field +
                               "' does not resolve to a field on '" + base + "'");
             continue;
         }
-        // A WHERE field must be filterable, or the candidate SOQL would fail at
-        // Salesforce. (Projection only needs the field to exist.)
-        if (!field_filterable[StringUtil::Lower(field)]) {
+        // A WHERE field must be filterable on its (related) object, or the
+        // candidate SOQL would fail at Salesforce. Projection only needs it to
+        // exist; for relationship fields this is the related object's flag.
+        if (!filt) {
             bind->translatable = false;
             caveats.push_back("filter field '" + f.field + "' is not filterable on '" +
                               base + "'");

@@ -316,6 +316,95 @@ FROM salesforce_report_soql('sf', '00O1');
 ----
 true
 
+# === Phase 3: single-hop relationship fields =================================
+# Describe bodies are sequenced with "|~|": first call = base (Contact), second
+# call = related object. Global describe lists base + related as queryable.
+
+# --- Account.Name on base Contact -> SELECT Account.Name FROM Contact ----------
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true},{"name":"Account","queryable":true},{"name":"Parent__c","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true}]}|~|{"name":"Account","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Account.Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable AND contains(soql, 'SELECT Account.Name') AND contains(soql, 'FROM Contact')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- filter Account.Name (related field filterable) -> WHERE Account.Name ------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Account.Name"],"reportFilters":[{"column":"Account.Name","operator":"equals","value":"Acme"}]}}';
+
+query I
+SELECT translatable AND contains(soql, 'Account.Name = ''Acme''')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- relationshipName not found on base -> blocked ----------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Foo.Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'Foo.Name')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- polymorphic relationship (referenceTo > 1) -> blocked --------------------
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User","Group"],"filterable":true}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Owner.Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'Owner.Name')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- related field absent on related describe -> blocked ----------------------
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true}]}|~|{"name":"Account","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Account.Ghost__c"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'Account.Ghost__c')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- multi-hop Account.Owner.Name -> blocked ----------------------------------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Account.Owner.Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable = false AND soql IS NULL AND contains(caveats, 'Account.Owner.Name')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# --- custom Parent__r.Name (single validated lookup) -> allowed ---------------
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"CustomParentId","type":"reference","relationshipName":"Parent__r","referenceTo":["Parent__c"],"filterable":true}]}|~|{"name":"Parent__c","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["Parent__r.Name"],"reportFilters":[]}}';
+
+query I
+SELECT translatable AND contains(soql, 'SELECT Parent__r.Name') AND contains(soql, 'FROM Contact')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
 # --- NULL args rejected -------------------------------------------------------
 statement error
 SELECT * FROM salesforce_report_soql(NULL, '00O1');
