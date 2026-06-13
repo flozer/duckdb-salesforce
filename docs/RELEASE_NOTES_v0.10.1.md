@@ -53,6 +53,10 @@ remains `v0.9.2` — this is an own-repo release only; community is **not** upda
 - Offline mock suite green (full `*salesforce*`: 2112 assertions, 0 fail; live
   tests maintainer-gated/skipped in CI).
 - Live maintainer smoke (PII-free): `docs/smoke/report-bridge-v0.10.1.md`.
+- Release assets: workflow run `27449753390` (tag `v0.10.1` = `6deab9d`)
+  completed **success**; GitHub Release `v0.10.1` published with
+  `duckdb-salesforce-0.10.1-linux-x64.tar.gz` and
+  `duckdb-salesforce-0.10.1-windows-x64.zip`.
 
 ## Gates
 
