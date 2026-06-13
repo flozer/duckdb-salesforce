@@ -1,11 +1,10 @@
-# duckdb-salesforce v0.11.0 — DRAFT
+# duckdb-salesforce v0.11.0
 
-> **DRAFT — not tagged/released.** Own-repo release on top of `v0.10.1`
-> (`6deab9d`). Scope: the v1.6 Report Bridge metadata + explainability track
-> (Phases 1–4) for `salesforce_report_soql()`. No new SQL functions; the change
-> is richer, describe-validated resolution plus diagnostic columns. The approved
-> `duckdb/community-extensions` baseline remains `v0.9.2` — community is **not**
-> updated.
+Own-repo release on top of `v0.10.1` (`6deab9d`). Scope: the v1.6 Report Bridge
+metadata + explainability track (Phases 1–4) for `salesforce_report_soql()`. No
+new SQL functions; the change is richer, describe-validated resolution plus
+diagnostic columns. The approved `duckdb/community-extensions` baseline remains
+`v0.9.2` — community is **not** updated.
 
 ## Highlights
 
@@ -61,5 +60,5 @@ fully describe-validated steps, and explains itself:
 ## Gates
 
 - Tag/GitHub Release and Linux/Windows assets are produced by the release-assets
-  workflow on the `v0.11.0` tag (cut after smoke/CI review).
+  workflow on the `v0.11.0` tag.
 - No community update; `docs/community/description.yml` stays `0.9.2`.
