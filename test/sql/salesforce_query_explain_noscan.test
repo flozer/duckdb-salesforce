@@ -1,0 +1,12 @@
+# name: test/sql/salesforce_query_explain_noscan.test
+# description: v1.6 — salesforce_query_explain() returns ZERO rows when no scan
+#              has run (never fabricates count/transport meta rows)
+# group: [salesforce]
+
+require salesforce
+
+# No ATTACH, no scan in this fresh database: last-scan diagnostic is empty.
+query I
+SELECT count(*) FROM salesforce_query_explain();
+----
+0

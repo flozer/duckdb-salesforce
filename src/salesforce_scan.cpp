@@ -467,19 +467,32 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
                    reported_pages, gstate->count_only,
                    gstate->query_all ? "queryAll" : "query");
 
-    // Explain capture (#v1.6, diagnostic-only): one projection item per projected
-    // field + the per-filter items captured during pushdown. Written AFTER
-    // DiagRecordScan (which reset the snapshot). Never read by the scan path.
+    // Explain capture (#v1.6, diagnostic-only). Written AFTER DiagRecordScan
+    // (which reset the snapshot); never read by the scan path. One item per
+    // projected DuckDB column — a direct field is a `projection` row; a parent
+    // STRUCT (#v0.6 §7) is a traversed `relationship` row (its targets carried
+    // directly, since the synthesised STRUCT is not in the raw describe). The
+    // per-filter items were captured during pushdown. count/transport meta rows
+    // are synthesised downstream from the ScanCost snapshot.
     {
         vector<DiagExplainItem> explain;
-        explain.reserve(select_fields.size() + bind.explain_filters.size());
-        for (auto &name : select_fields) {
+        for (auto col : input.column_ids) {
+            if (col >= bind.fields.size()) {
+                continue; // virtual/rowid (e.g. COUNT(*)) -> no projection row
+            }
+            const auto &f = bind.fields[col];
             DiagExplainItem it;
-            it.role = "projection";
-            it.field = name;
             it.field_known = true;
-            it.pushed = true;     // included in the SOQL SELECT
-            it.residual = false;  // projection is never "residual"
+            if (f.is_relationship) {
+                it.role = "relationship";
+                it.field = f.relationship_name;
+                it.relationship_name = f.relationship_name;
+                it.reference_to = f.reference_to;
+            } else {
+                it.role = "projection";
+                it.field = f.name;
+                it.pushed = true;    // included in the SOQL SELECT
+            }
             explain.push_back(std::move(it));
         }
         for (auto &it : bind.explain_filters) {
