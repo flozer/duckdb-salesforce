@@ -16,8 +16,14 @@ extensions/salesforce/description.yml
 
 That file is [`description.yml`](description.yml) in this folder, copied verbatim
 to the path above. Nothing else is added there — the community CI clones
-`flozer/duckdb-salesforce` at `repo.ref` (`v0.8.1`) and builds + signs from our
-own `Makefile` / `extension_config.cmake` / `vcpkg.json`.
+`flozer/duckdb-salesforce` at the descriptor's `repo.ref` and builds + signs from
+our own `Makefile` / `extension_config.cmake` / `vcpkg.json`.
+
+**Current community baseline: `v0.9.2`** (the descriptor's staged `repo.ref` /
+`version`). The next submission ref is **GO-gated** — it will be bumped (to the
+then-current release) only when the maintainer approves a submission. Nothing
+newer is submitted; `v0.12.0` is the latest own-repo release, not a community
+submission.
 
 ## Submission steps (for when GO is given — NOT done yet)
 
