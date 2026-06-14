@@ -440,6 +440,22 @@ unique_ptr<FunctionData> ExplainBind(ClientContext &context, TableFunctionBindIn
     auto bind = make_uniq<ExplainBindData>();
     DiagExplainSnapshot snap = DiagGetExplain();
 
+    // Schema is fixed regardless of whether a scan has run.
+    names = {"object_name", "field_name",        "role",         "resolved",
+             "filterable",  "sortable",          "relationship_name", "reference_to",
+             "pushed",      "residual",          "reason",       "guidance"};
+    return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
+                    LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::BOOLEAN,
+                    LogicalType::VARCHAR, LogicalType::LIST(LogicalType::VARCHAR),
+                    LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::VARCHAR,
+                    LogicalType::VARCHAR};
+
+    // Last-scan diagnostic: if NO scan has run (empty snapshot), return zero rows
+    // — never fabricate count/transport meta rows from default state.
+    if (snap.object.empty() && snap.items.empty()) {
+        return std::move(bind);
+    }
+
     // Resolve the owning catalog's describe through the shared engine. Any
     // failure (no alias, catalog detached, engine error) degrades every row to
     // metadata_unavailable — never throws.
@@ -556,8 +572,9 @@ unique_ptr<FunctionData> ExplainBind(ClientContext &context, TableFunctionBindIn
         c.guidance = ExplainGuidance(c.reason);
         bind->rows.push_back(std::move(c));
     }
-    // transport: always one row (rest|bulk) with reason/queryAll/est_rows detail.
-    {
+    // transport: one row (rest|bulk) with reason/queryAll/est_rows detail. Only
+    // when the snapshot carries a real transport — never assume 'rest'.
+    if (!snap.transport.empty()) {
         ExplainRow t;
         t.object = snap.object;
         t.role = "transport";
@@ -576,14 +593,6 @@ unique_ptr<FunctionData> ExplainBind(ClientContext &context, TableFunctionBindIn
         bind->rows.push_back(std::move(t));
     }
 
-    names = {"object_name", "field_name",        "role",         "resolved",
-             "filterable",  "sortable",          "relationship_name", "reference_to",
-             "pushed",      "residual",          "reason",       "guidance"};
-    return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
-                    LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::BOOLEAN,
-                    LogicalType::VARCHAR, LogicalType::LIST(LogicalType::VARCHAR),
-                    LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::VARCHAR,
-                    LogicalType::VARCHAR};
     return std::move(bind);
 }
 

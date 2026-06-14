@@ -188,6 +188,11 @@ void DiagRecordScan(const string &object, const string &soql, const string &tran
     g_cost.query_mode = query_mode;
 }
 
+void DiagReset() {
+    std::lock_guard<std::mutex> g(g_lock);
+    g_cost = ScanCost{};
+}
+
 void DiagSetExplain(const string &catalog_alias, vector<DiagExplainItem> items) {
     std::lock_guard<std::mutex> g(g_lock);
     g_cost.catalog_alias = catalog_alias;

@@ -57,6 +57,11 @@ void DiagSetExplain(const string &catalog_alias, vector<DiagExplainItem> items);
 // Read the last scan's explain snapshot (object filled by DiagRecordScan).
 DiagExplainSnapshot DiagGetExplain();
 
+// Reset the last-scan snapshot to empty. Called when the extension loads into a
+// database instance so the "last scan" diagnostic is scoped to that session
+// (query_explain returns zero rows until a real scan runs).
+void DiagReset();
+
 // REST page counter mirror (kept in sync with salesforce_last_scan_pages()).
 void DiagSetPages(int64_t pages);
 

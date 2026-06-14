@@ -22,6 +22,11 @@
 namespace duckdb {
 
 static void LoadInternal(ExtensionLoader &loader) {
+    // Scope the last-scan diagnostics (query_cost / query_explain) to this
+    // database instance: clear any stale snapshot so query_explain() returns
+    // zero rows until a real scan runs (#v1.6 — no fabricated meta rows).
+    DiagReset();
+
     // Register the StorageExtension so DuckDB recognises
     //   ATTACH 'salesforce://…' AS sf (TYPE salesforce);
     // as a known storage type. v0.1 scaffold: the attach callback throws a
