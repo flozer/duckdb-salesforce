@@ -774,6 +774,84 @@ A typical workflow is to run your query, then inspect
 `salesforce_query_cost()` to confirm the transport, the pushed vs. residual
 filters, and the `guidance` column for tuning hints.
 
+### Browsing metadata (objects and fields)
+
+Two read-only metadata diagnostics, sourced through the shared Metadata Engine
+(one de-duped Describe Global + per-object Describe per catalog), let you explore
+the org schema without leaving DuckDB:
+
+```sql
+-- What can I query here?
+SELECT object_name FROM salesforce_metadata_objects('sf')
+WHERE queryable ORDER BY object_name;
+
+-- What are the fields of Account, and which can be filtered server-side?
+SELECT field_name, type, filterable, sortable, relationship_name, reference_to, picklist_values
+FROM salesforce_metadata_fields('sf', 'Account')
+ORDER BY field_name;
+```
+
+`filterable` is the key column for tuning: a `WHERE` on a non-filterable field
+cannot be pushed to Salesforce and is applied residually in DuckDB. The cache is
+invalidated by `salesforce_refresh_metadata()` (see below).
+
+### Explaining a scan field-by-field
+
+`salesforce_query_cost()` summarizes a scan in one row; `salesforce_query_explain()`
+breaks the **same last scan** down field by field, so you can see exactly which
+predicate was pushed to Salesforce and which was left for DuckDB:
+
+```sql
+SELECT count(*) FROM sf.Account WHERE Industry = 'Technology';
+
+SELECT object_name, field_name, role, pushed, residual, reason
+FROM salesforce_query_explain()
+ORDER BY role, field_name;
+```
+
+Read the result by `role`:
+
+- **`filter` rows** — `pushed=true, reason='pushed_to_soql'` means Salesforce
+  filtered server-side (good). `residual=true` with `reason='not_filterable'`
+  means the field is not filterable, so DuckDB filtered **after** a full remote
+  scan — an over-fetch worth avoiding. `complex_expression` (an `OR`/`NOT`/
+  cross-field predicate, `field_name` NULL) and `unsupported_operator` are also
+  residual.
+- **`projection` rows** — one per selected field (`reason='projected'`); a
+  reference field also shows `relationship_name` + `reference_to`.
+- **`relationship` rows** — one per parent relationship the scan actually
+  traversed (`reason='relationship_traversed'`).
+- **`count` row** — `count_pushdown` (served by `SELECT COUNT()`, no records
+  fetched) or `count_not_pushed`.
+- **`transport` row** — `transport_rest` or `transport_bulk`; the `guidance`
+  column carries the reason, `queryAll`, and `est_rows`.
+
+Comparing the two diagnostics:
+
+```sql
+-- one-row summary
+SELECT object, transport, pushed_filters, residual_filters, where_pushed, count_pushdown
+FROM salesforce_query_cost();
+
+-- per-field breakdown of the SAME scan
+SELECT field_name, role, pushed, residual, reason FROM salesforce_query_explain();
+```
+
+Notes:
+
+- **Last-scan, no parameters.** `salesforce_query_explain()` reflects the most
+  recent scan in the session and takes no arguments. **Before any scan it returns
+  zero rows** (it never invents a default row).
+- **`metadata_unavailable`.** If the catalog was detached (or metadata is
+  otherwise unavailable), the engine-annotated rows degrade to
+  `reason='metadata_unavailable'` with `resolved=false`; the `count`/`transport`
+  rows still appear. The function never errors.
+- **`LIMIT` is not shown.** In this DuckDB build the table function never receives
+  the query `LIMIT` (DuckDB applies it above the scan), so it is not diagnosable
+  and is omitted rather than guessed.
+- **Diagnostic-only.** Neither function changes how scans run; they explain, they
+  do not speed up. Scan behavior is unchanged.
+
 ### Inspecting relationship expansion
 
 `salesforce_relationships()` is a separate diagnostic that reports what

@@ -897,6 +897,99 @@ SELECT * FROM sf.Account WHERE Industry = 'Technology';
 SELECT * FROM salesforce_query_cost();
 ```
 
+### `salesforce_query_explain()`
+
+#### What it does
+
+Explains the **last scan** field-by-field: one row per projected field and per
+conjunctive filter, plus meta rows for relationship traversal, count pushdown,
+and transport. Where `salesforce_query_cost()` is a single summary row,
+`salesforce_query_explain()` is the per-field breakdown — it tells you, field by
+field, **whether Salesforce filtered server-side (`pushed`) or DuckDB filtered
+locally after a full remote scan (`residual`)**. A `residual` filter row is the
+warning sign of over-fetch.
+
+It is **read-only and diagnostic-only**: it reflects a snapshot the scan records
+and changes nothing about execution. It is **not** a performance feature — it
+explains, it does not speed up.
+
+#### How it works
+
+No arguments. Returns one row per item of the last scan. Output columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `object_name` | VARCHAR | sObject scanned |
+| `field_name` | VARCHAR | Field; NULL for a complex predicate or a meta row |
+| `role` | VARCHAR | `projection` \| `filter` \| `relationship` \| `count` \| `transport` |
+| `resolved` | BOOLEAN | Field resolved in metadata (NULL on `count`/`transport` rows) |
+| `filterable` | BOOLEAN | Describe flag (NULL if unresolved / meta row) |
+| `sortable` | BOOLEAN | Describe flag (NULL if unresolved / meta row) |
+| `relationship_name` | VARCHAR | Single-hop relationship name when applicable |
+| `reference_to` | LIST(VARCHAR) | Relationship target object(s); empty otherwise |
+| `pushed` | BOOLEAN | Pushed into SOQL (SELECT for projection, WHERE for filter) |
+| `residual` | BOOLEAN | Re-applied by DuckDB after the scan |
+| `reason` | VARCHAR | Closed reason token (see below) |
+| `guidance` | VARCHAR | Short, actionable hint |
+
+**Roles:** `projection` (a selected field), `filter` (a WHERE conjunct),
+`relationship` (a parent relationship the scan actually traversed), `count` (one
+row reporting count-pushdown state), `transport` (one row reporting REST/Bulk).
+
+**Reasons (closed set):**
+
+| Reason | Meaning |
+|---|---|
+| `pushed_to_soql` | Filter translated into the SOQL WHERE (server-side) |
+| `projected` | Column included in the SOQL SELECT |
+| `not_filterable` | Field is not `filterable`; DuckDB filters residually (over-fetch) |
+| `unsupported_operator` | Operator/predicate shape SOQL cannot express; residual |
+| `complex_expression` | OR/NOT/cross-field/nested predicate kept residual (field NULL) |
+| `unresolved_field` | Field not found in object metadata |
+| `metadata_unavailable` | Catalog/engine unavailable; annotation degraded (no error) |
+| `relationship_traversed` | A single-hop parent relationship was expanded |
+| `count_pushdown` | Row count served by `SELECT COUNT()` (no records fetched) |
+| `count_not_pushed` | Not a count-only scan |
+| `transport_rest` | REST transport was used |
+| `transport_bulk` | Bulk API 2.0 transport was used |
+
+#### Last-scan, no parameters, no-scan behavior
+
+- It reports the **most recent scan in this session** (process-scoped, like
+  `salesforce_query_cost()`). It takes **no parameters** — explaining an
+  arbitrary query is out of scope (it would require planning a query without
+  running it).
+- **Before any scan it returns zero rows** — it never fabricates a default
+  `transport`/`count` row.
+- Metadata annotation uses the shared Metadata Engine (see
+  `salesforce_metadata_fields()`); if the owning catalog is detached or metadata
+  is otherwise unavailable, the engine-annotated rows degrade to
+  `reason = metadata_unavailable` (the `count`/`transport` rows still appear). It
+  never throws.
+
+#### Not diagnosable: `LIMIT`
+
+`LIMIT` does not appear in `salesforce_query_explain()`. In this DuckDB build the
+table function is never given the query `LIMIT` — DuckDB applies it above the
+scan — so there is no scan state to report it from. It is intentionally omitted
+rather than guessed.
+
+#### Why use it
+
+`salesforce_query_cost()` tells you *how much* was pushed; `query_explain()` tells
+you *which fields* and *why*. Use it to confirm a predicate reached Salesforce
+(`pushed_to_soql`) instead of dragging the whole object across the wire
+(`not_filterable` / `complex_expression` residual rows).
+
+#### Daily use
+
+```sql
+SELECT count(*) FROM sf.Account WHERE Industry = 'Technology';
+SELECT object_name, field_name, role, pushed, residual, reason
+FROM salesforce_query_explain()
+ORDER BY role, field_name;
+```
+
 ### `salesforce_relationships()`
 
 #### What it does
@@ -1214,6 +1307,71 @@ FROM salesforce_query(
   client_secret := 'SECRET',
   refresh_token := 'TOKEN'
 );
+```
+
+### `salesforce_metadata_objects(catalog)`
+
+#### What it does
+
+Lists every global sObject of the attached org with its `queryable` flag. A
+read-only metadata diagnostic for analysts — "what can I query here?".
+
+#### How it works
+
+Returns one row per sObject. Sourced through the shared **Metadata Engine** (one
+de-duped Describe Global per catalog), so repeated calls do not re-fetch until
+`salesforce_refresh_metadata()` invalidates the cache.
+
+| Column | Type | Notes |
+|---|---|---|
+| `object_name` | VARCHAR | sObject API name |
+| `queryable` | BOOLEAN | Real Describe-Global flag (both `true` and `false` appear) |
+
+#### Daily use
+
+```sql
+SELECT object_name FROM salesforce_metadata_objects('sf') WHERE queryable ORDER BY object_name;
+```
+
+### `salesforce_metadata_fields(catalog, object)`
+
+#### What it does
+
+Lists the fields of one sObject with the metadata that drives pushdown and
+relationship decisions — type, `filterable`, `sortable`, relationship name and
+target, and picklist values. Read-only.
+
+#### How it works
+
+Returns one row per field, sourced through the shared Metadata Engine (one
+per-object Describe, cached per catalog).
+
+| Column | Type | Notes |
+|---|---|---|
+| `object_name` | VARCHAR | The sObject |
+| `field_name` | VARCHAR | Field API name |
+| `type` | VARCHAR | Salesforce field type |
+| `filterable` | BOOLEAN | Can be used in a pushed SOQL `WHERE` |
+| `sortable` | BOOLEAN | Can be used in a pushed `ORDER BY` |
+| `relationship_name` | VARCHAR | Parent relationship name (NULL if not a reference) |
+| `reference_to` | LIST(VARCHAR) | Relationship target object(s); polymorphic targets listed, not resolved; empty when not a reference |
+| `picklist_values` | LIST(VARCHAR) | Allowed picklist values; empty for non-picklist fields |
+
+A field with no relationship targets / no picklist values yields an **empty
+list**, never NULL.
+
+#### Why use it
+
+`filterable` tells you whether a `WHERE` on that field will be pushed to
+Salesforce or applied residually in DuckDB — exactly the distinction
+`salesforce_query_explain()` reports per query.
+
+#### Daily use
+
+```sql
+SELECT field_name, type, filterable, reference_to
+FROM salesforce_metadata_fields('sf', 'Account')
+ORDER BY field_name;
 ```
 
 ### `salesforce_refresh_metadata(catalog [, object])`

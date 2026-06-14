@@ -64,9 +64,10 @@ materialization, files, and downstream analytics stay in DuckDB.
 | Bulk scans | Bulk API 2.0 query, lazy result streaming, sequential/parallel PK chunking, quota guard. |
 | Transport selection | `sf_force_transport = 'rest' \| 'bulk' \| 'auto'` with diagnostics explaining choices. |
 | Relationships | Parent and grandparent traversal as nested `STRUCT`, with skip/expand diagnostics. |
-| Metadata helpers | Refresh schema cache, inspect picklist values, record types, relationship expansion, query cost. |
+| Metadata Engine v2 | Shared per-catalog read-only metadata cache; `salesforce_metadata_objects()` / `salesforce_metadata_fields()` for analysts; `salesforce_refresh_metadata()` invalidation. |
 | Aggregates | Transparent `COUNT(*)` pushdown and explicit `salesforce_aggregate()` with optional `GROUP BY`. |
 | Diagnostics | Last SOQL, transport, quota, query cost, page counts, relationship decisions. |
+| Query explainability | `salesforce_query_explain()` — read-only, last-scan, field-by-field view of pushed vs. residual filters, projection, relationship, count, and transport (diagnostic-only; no scan behavior change). |
 | Testing | Offline mock suite plus validated live smoke; CI covers Linux, Windows, and macOS arm64. |
 
 ## Quick Start
@@ -206,9 +207,16 @@ FROM salesforce_relationships();
 
 ## Metadata
 
-Salesforce describe metadata is available without using the Metadata API.
+Salesforce describe metadata is available without using the Metadata API. A
+shared per-catalog read-only Metadata Engine backs both the diagnostics and
+Report Bridge.
 
 ```sql
+-- Browse the org schema
+SELECT object_name FROM salesforce_metadata_objects('sf') WHERE queryable;
+SELECT field_name, type, filterable, reference_to, picklist_values
+FROM salesforce_metadata_fields('sf', 'Account');
+
 SELECT * FROM salesforce_picklist_values('sf', 'Account', 'Industry')
 WHERE active;
 
@@ -252,6 +260,8 @@ Release: **v0.9.1**.
 | Explicit server-side aggregates + `GROUP BY` | Done |
 | Picklist and record type metadata helpers | Done |
 | Manual metadata cache refresh | Done |
+| Metadata Engine v2 + `metadata_objects` / `metadata_fields` | Done |
+| Query explainability (`salesforce_query_explain()`) | Done |
 | Linux + Windows + macOS arm64 CI | Done |
 | Transparent `COUNT(field)` / `MIN` / `MAX` pushdown | Deferred: requires optimizer rewrite |
 | Salesforce writes / Metadata API deploy | Out of scope |
