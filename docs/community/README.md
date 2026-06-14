@@ -55,6 +55,11 @@ See [PR_READINESS.md](PR_READINESS.md) for the pre-PR checklist and
 [../PRE_COMMUNITY_CHECKLIST.md](../PRE_COMMUNITY_CHECKLIST.md) for the full audit,
 both reframed for the v0.12.1 update.
 
+> **⛔ Currently PARKED** on an upstream, community-wide Windows CI break (DuckDB
+> v1.5.3 `fmt` × new MSVC) — **not our code**. Full cause, links, and resume
+> criteria: [UPSTREAM_WINDOWS_CI_BLOCKER.md](UPSTREAM_WINDOWS_CI_BLOCKER.md).
+> Own-repo latest is **v0.12.1** (clean candidate); community baseline **v0.9.2**.
+
 ## Guardrails (C.5)
 
 - No update PR, fork branch, or push to `duckdb/community-extensions` without

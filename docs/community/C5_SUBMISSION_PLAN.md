@@ -18,7 +18,7 @@
 > pursued — it cannot fix community's own CI.
 
 > **This is a plan, not an action.** Nothing here has been done for the update.
-> No fork branch, no PR, no comment in `duckdb/community-extensions` for v0.12.0.
+> No fork branch, no PR, no comment in `duckdb/community-extensions` for v0.12.1.
 > Execute only after an explicit maintainer **C.5 GO**, and only after a final
 > human confirm of the exact PR contents.
 >
@@ -26,7 +26,7 @@
 > extension is already accepted and live in community at **v0.9.2** via
 > [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037)
 > (title *Add salesforce extension*, **MERGED 2026-06-09**). This plan bumps that
-> already-merged descriptor **0.9.2 → 0.12.0**.
+> already-merged descriptor **0.9.2 → 0.12.1**.
 
 ## Current community state
 
