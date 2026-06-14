@@ -5,6 +5,7 @@
 // duplicated helpers below are removed then).
 
 #include "salesforce_metadata_engine.hpp"
+#include "salesforce_diag.hpp" // DiagGetExplain (query_explain)
 #include "salesforce_http.hpp"
 #include "salesforce_session.hpp"
 #include "salesforce_soql.hpp" // DEBUG/TEST describe-call counters
@@ -359,6 +360,244 @@ void MetaObjectsFunction(ClientContext &, TableFunctionInput &data, DataChunk &o
     output.SetCardinality(row);
 }
 
+// --- salesforce_query_explain() ----------------------------------------------
+//
+// Read-only, last-scan diagnostic. One row per projected field / conjunctive
+// filter captured by the most recent catalog scan (DiagGetExplain), annotated
+// via the shared Metadata Engine. Diagnostic-only: it reads the scan's
+// write-only explain snapshot and never affects execution or query_cost().
+
+struct ExplainRow {
+    string object;
+    string field;
+    bool field_null = false;
+    string role;
+    bool resolved = false;
+    bool filterable = false;
+    bool filterable_null = true;
+    bool sortable = false;
+    bool sortable_null = true;
+    string relationship_name;
+    bool relationship_null = true;
+    vector<string> reference_to;
+    bool pushed = false;
+    bool residual = false;
+    string reason;
+    string guidance;
+};
+
+struct ExplainBindData : public FunctionData {
+    vector<ExplainRow> rows;
+    unique_ptr<FunctionData> Copy() const override {
+        return make_uniq<ExplainBindData>(*this);
+    }
+    bool Equals(const FunctionData &) const override {
+        return false;
+    }
+};
+
+struct ExplainGlobalState : public GlobalTableFunctionState {
+    idx_t cursor = 0;
+    idx_t MaxThreads() const override {
+        return 1;
+    }
+};
+
+static const char *ExplainGuidance(const string &reason) {
+    if (reason == "pushed_to_soql") {
+        return "filtered server-side via SOQL";
+    }
+    if (reason == "projected") {
+        return "selected from Salesforce";
+    }
+    if (reason == "not_filterable") {
+        return "field not filterable; DuckDB filters residually (over-fetch)";
+    }
+    if (reason == "unsupported_operator") {
+        return "operator not expressible in SOQL; applied residually by DuckDB";
+    }
+    if (reason == "complex_expression") {
+        return "complex predicate (OR/NOT/cross-field); applied residually by DuckDB";
+    }
+    if (reason == "unresolved_field") {
+        return "field not found in object metadata";
+    }
+    return "metadata unavailable (catalog detached or engine error); annotation skipped";
+}
+
+unique_ptr<FunctionData> ExplainBind(ClientContext &context, TableFunctionBindInput &,
+                                     vector<LogicalType> &return_types, vector<string> &names) {
+    auto bind = make_uniq<ExplainBindData>();
+    DiagExplainSnapshot snap = DiagGetExplain();
+
+    // Resolve the owning catalog's describe through the shared engine. Any
+    // failure (no alias, catalog detached, engine error) degrades every row to
+    // metadata_unavailable — never throws.
+    const SalesforceDescribe *desc = nullptr;
+    bool meta_ok = false;
+    if (!snap.catalog_alias.empty() && !snap.object.empty()) {
+        try {
+            auto &eng = GetSalesforceCatalogMetadataEngine(context, snap.catalog_alias);
+            desc = &eng.GetObjectDescribe(context, snap.object);
+            meta_ok = true;
+        } catch (...) {
+            meta_ok = false;
+        }
+    }
+
+    for (auto &item : snap.items) {
+        ExplainRow row;
+        row.object = snap.object;
+        row.pushed = item.pushed;
+        row.residual = item.residual;
+
+        if (!meta_ok) {
+            // Degrade: keep field text if known, but no metadata annotation.
+            row.field = item.field;
+            row.field_null = !item.field_known;
+            row.role = item.role;
+            row.resolved = false;
+            row.reason = "metadata_unavailable";
+            row.guidance = ExplainGuidance(row.reason);
+            bind->rows.push_back(std::move(row));
+            continue;
+        }
+
+        row.role = item.role;
+        // Complex filter with no single field -> NULL field, complex_expression.
+        if (!item.field_known) {
+            row.field_null = true;
+            row.resolved = false;
+            row.reason = "complex_expression";
+            row.guidance = ExplainGuidance(row.reason);
+            bind->rows.push_back(std::move(row));
+            continue;
+        }
+
+        row.field = item.field;
+        const SalesforceField *fld = nullptr;
+        for (auto &f : desc->fields) {
+            if (StringUtil::CIEquals(f.name, item.field)) {
+                fld = &f;
+                break;
+            }
+        }
+        if (!fld) {
+            row.resolved = false;
+            row.reason = "unresolved_field";
+            row.guidance = ExplainGuidance(row.reason);
+            bind->rows.push_back(std::move(row));
+            continue;
+        }
+
+        row.resolved = true;
+        row.filterable = fld->filterable;
+        row.filterable_null = false;
+        row.sortable = fld->sortable;
+        row.sortable_null = false;
+        if (!fld->relationship_name.empty()) {
+            row.relationship_name = fld->relationship_name;
+            row.relationship_null = false;
+        }
+        row.reference_to = fld->reference_to;
+
+        if (item.role == "projection") {
+            row.reason = "projected";
+        } else if (item.pushed) {
+            row.reason = "pushed_to_soql"; // exact-pushed or prefilter (also residual)
+        } else if (!fld->filterable) {
+            row.reason = "not_filterable";
+        } else {
+            row.reason = "unsupported_operator";
+        }
+        row.guidance = ExplainGuidance(row.reason);
+        bind->rows.push_back(std::move(row));
+    }
+
+    names = {"object_name", "field_name",        "role",         "resolved",
+             "filterable",  "sortable",          "relationship_name", "reference_to",
+             "pushed",      "residual",          "reason",       "guidance"};
+    return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
+                    LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::BOOLEAN,
+                    LogicalType::VARCHAR, LogicalType::LIST(LogicalType::VARCHAR),
+                    LogicalType::BOOLEAN, LogicalType::BOOLEAN, LogicalType::VARCHAR,
+                    LogicalType::VARCHAR};
+    return std::move(bind);
+}
+
+unique_ptr<GlobalTableFunctionState> ExplainInit(ClientContext &, TableFunctionInitInput &) {
+    return make_uniq<ExplainGlobalState>();
+}
+
+void ExplainFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &bd = data.bind_data->Cast<ExplainBindData>();
+    auto &gs = data.global_state->Cast<ExplainGlobalState>();
+    idx_t start = gs.cursor;
+    idx_t row = 0;
+    auto set_bool_or_null = [&](idx_t col, idx_t r, bool is_null, bool v) {
+        if (is_null) {
+            FlatVector::SetNull(output.data[col], r, true);
+        } else {
+            FlatVector::GetData<bool>(output.data[col])[r] = v;
+        }
+    };
+    while (row < STANDARD_VECTOR_SIZE && gs.cursor < bd.rows.size()) {
+        const auto &rw = bd.rows[gs.cursor];
+        FlatVector::GetData<string_t>(output.data[0])[row] =
+            StringVector::AddString(output.data[0], rw.object);
+        if (rw.field_null) {
+            FlatVector::SetNull(output.data[1], row, true);
+        } else {
+            FlatVector::GetData<string_t>(output.data[1])[row] =
+                StringVector::AddString(output.data[1], rw.field);
+        }
+        FlatVector::GetData<string_t>(output.data[2])[row] =
+            StringVector::AddString(output.data[2], rw.role);
+        FlatVector::GetData<bool>(output.data[3])[row] = rw.resolved;
+        set_bool_or_null(4, row, rw.filterable_null, rw.filterable);
+        set_bool_or_null(5, row, rw.sortable_null, rw.sortable);
+        if (rw.relationship_null) {
+            FlatVector::SetNull(output.data[6], row, true);
+        } else {
+            FlatVector::GetData<string_t>(output.data[6])[row] =
+                StringVector::AddString(output.data[6], rw.relationship_name);
+        }
+        FlatVector::GetData<bool>(output.data[8])[row] = rw.pushed;
+        FlatVector::GetData<bool>(output.data[9])[row] = rw.residual;
+        FlatVector::GetData<string_t>(output.data[10])[row] =
+            StringVector::AddString(output.data[10], rw.reason);
+        FlatVector::GetData<string_t>(output.data[11])[row] =
+            StringVector::AddString(output.data[11], rw.guidance);
+        gs.cursor++;
+        row++;
+    }
+
+    // reference_to LIST<VARCHAR> (col 7): empty list when not a relationship.
+    {
+        auto &lvec = output.data[7];
+        idx_t total = 0;
+        for (idx_t r = 0; r < row; r++) {
+            total += bd.rows[start + r].reference_to.size();
+        }
+        ListVector::Reserve(lvec, total);
+        auto &child = ListVector::GetEntry(lvec);
+        auto child_data = FlatVector::GetData<string_t>(child);
+        auto entries = FlatVector::GetData<list_entry_t>(lvec);
+        idx_t off = 0;
+        for (idx_t r = 0; r < row; r++) {
+            const auto &vals = bd.rows[start + r].reference_to;
+            entries[r].offset = off;
+            entries[r].length = vals.size();
+            for (auto &v : vals) {
+                child_data[off++] = StringVector::AddString(child, v);
+            }
+        }
+        ListVector::SetListSize(lvec, off);
+    }
+
+    output.SetCardinality(row);
+}
+
 } // namespace
 
 TableFunction GetSalesforceMetadataFieldsFunction() {
@@ -370,6 +609,10 @@ TableFunction GetSalesforceMetadataFieldsFunction() {
 TableFunction GetSalesforceMetadataObjectsFunction() {
     return TableFunction("salesforce_metadata_objects", {LogicalType::VARCHAR}, MetaObjectsFunction,
                          MetaObjectsBind, MetaObjectsInit);
+}
+
+TableFunction GetSalesforceQueryExplainFunction() {
+    return TableFunction("salesforce_query_explain", {}, ExplainFunction, ExplainBind, ExplainInit);
 }
 
 } // namespace duckdb

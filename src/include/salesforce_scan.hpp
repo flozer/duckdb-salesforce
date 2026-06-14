@@ -5,6 +5,7 @@
 #include "salesforce_auth.hpp"
 #include "salesforce_config.hpp"
 #include "salesforce_describe.hpp"
+#include "salesforce_diag.hpp" // DiagExplainItem (explain capture)
 
 namespace duckdb {
 
@@ -25,6 +26,13 @@ struct SalesforceScanBindData : public FunctionData {
     // pushed to SOQL vs left residual for DuckDB. Set by pushdown_complex_filter.
     int64_t pushed_filter_count = 0;
     int64_t residual_filter_count = 0;
+    // Owning ATTACH alias + per-filter explain capture (#v1.6 query_explain).
+    // Diagnostic-only: written by pushdown, never read by the scan path.
+    string catalog_alias;
+    vector<DiagExplainItem> explain_filters;
+    // The pushdown hook may fire more than once with a re-presented residual
+    // filter; capture the explain items only on the first non-empty call.
+    bool explain_captured = false;
 
     unique_ptr<FunctionData> Copy() const override;
     bool Equals(const FunctionData &other) const override;

@@ -20,6 +20,33 @@ void DiagRecordScan(const string &object, const string &soql, const string &tran
                     const string &where_pushed, bool bulk, int64_t pages_init, bool count_pushdown,
                     const string &query_mode);
 
+// --- scan EXPLAIN capture (#v1.6 metadata-driven scan diagnostics) -----------
+// Write-only, diagnostic-only mirror of what the last scan ALREADY classified:
+// one item per projected field and per conjunctive filter. The scan path never
+// reads these back, so they cannot affect execution. salesforce_query_explain()
+// annotates them via the shared Metadata Engine.
+struct DiagExplainItem {
+    string role;       // "projection" | "filter"
+    string field;      // resolved field name ("" when field_known=false)
+    bool field_known = false; // false => no single field (complex expr) -> NULL
+    bool pushed = false;   // emitted into SOQL (SELECT for projection / WHERE for filter)
+    bool residual = false; // filter re-applied by DuckDB (false for projection)
+};
+
+// Snapshot of the last scan's explain capture (object + catalog alias + items).
+struct DiagExplainSnapshot {
+    string object;
+    string catalog_alias; // empty => unknown -> annotation degrades
+    vector<DiagExplainItem> items;
+};
+
+// Record the explain capture for the current scan. Called at InitGlobal AFTER
+// DiagRecordScan (which resets the snapshot), so it is not wiped.
+void DiagSetExplain(const string &catalog_alias, vector<DiagExplainItem> items);
+
+// Read the last scan's explain snapshot (object filled by DiagRecordScan).
+DiagExplainSnapshot DiagGetExplain();
+
 // REST page counter mirror (kept in sync with salesforce_last_scan_pages()).
 void DiagSetPages(int64_t pages);
 

@@ -318,7 +318,8 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
 
 void PushdownToSoql(const vector<SalesforceField> &fields,
                     const vector<idx_t> &projection_to_field, string &out_where,
-                    vector<unique_ptr<Expression>> &filters) {
+                    vector<unique_ptr<Expression>> &filters,
+                    vector<PushdownConjunctInfo> *out_info) {
     out_where.clear();
     // Per conjunct: was it translated, and is it EXACT (safe to remove from the
     // residual set) or a superset prefilter (must stay residual)?
@@ -342,7 +343,18 @@ void PushdownToSoql(const vector<SalesforceField> &fields,
         where += clauses[i];
     }
     if (where.size() > kMaxWhereChars) {
-        return; // guard: over-long -> push nothing, leave ALL residual
+        // guard: over-long -> push nothing, leave ALL residual. The diagnostic
+        // must reflect reality: nothing was pushed.
+        if (out_info) {
+            out_info->assign(filters.size(), PushdownConjunctInfo{});
+        }
+        return;
+    }
+    if (out_info) {
+        out_info->resize(filters.size());
+        for (idx_t i = 0; i < filters.size(); i++) {
+            (*out_info)[i] = PushdownConjunctInfo{translated[i], exact[i]};
+        }
     }
     out_where = where;
     // Remove ONLY exact-translated conjuncts; superset prefilters (IN/LIKE/OR)
