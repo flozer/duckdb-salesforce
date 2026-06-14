@@ -1,4 +1,10 @@
-# Pre-Community Checklist — v0.12.0 UPDATE
+# Pre-Community Checklist — v0.12.1 UPDATE
+
+> **Submission ref: `v0.12.1`** (supersedes `v0.12.0`, whose tag carried stale
+> `vcpkg.json` version metadata; `v0.12.1` is a provenance-only release, no
+> runtime change — `docs/RELEASE_NOTES_v0.12.1.md`). A few lines below cite
+> `v0.12.0` artifacts (live smoke, release) as auxiliary evidence of the
+> identical code.
 
 > **This document does NOT authorize a community publication.** Per gate **C.5**,
 > changing `duckdb/community-extensions` (PR / push there) happens **only after
@@ -8,44 +14,45 @@
 > **Update, not first submission.** `salesforce` is already live in community at
 > **v0.9.2** (merged via
 > [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037),
-> **MERGED 2026-06-09**). The boxes below track the proposed bump to **v0.12.0**.
-> The v0.12.0 descriptor values live in the review draft
-> `docs/community/description.v0.12.0.draft.yml`; the real
+> **MERGED 2026-06-09**). The boxes below track the proposed bump to **v0.12.1**.
+> The v0.12.1 descriptor values live in the review draft
+> `docs/community/description.v0.12.1.draft.yml`; the real
 > `docs/community/description.yml` stays `0.9.2` until C.5 GO.
 
 The goal: before a human decides to publish the update, the connector must be
-**repeatable, auditable, and distributable** at `v0.12.0`. Tick every box first.
+**repeatable, auditable, and distributable** at `v0.12.1`. Tick every box first.
 
-## Build & test — mandatory before any v0.12.0 community push
+## Build & test — mandatory before any v0.12.1 community push
 
-All unchecked until run at the `v0.12.0` ref. None of these publish/submit
+All unchecked until run at the `v0.12.1` ref. None of these publish/submit
 anything to `duckdb/community-extensions`.
 
 - [x] Offline (mock) test suite green on **all** `test/sql/*.test` — **2540
-      assertions, 0 fail** at v0.12.0 (8 live tests gated/skipped).
-- [ ] **Fresh matrix CI green at `v0.12.0`** — Main Distribution Pipeline:
+      assertions, 0 fail** at v0.12.1 (8 live tests gated/skipped).
+- [ ] **Fresh matrix CI green at `v0.12.1`** — Main Distribution Pipeline:
       **Linux + Windows (baseline) + macOS arm64 (extra) × DuckDB v1.5.2, v1.5.3**,
       mock-only, no `SF_LIVE_*`. *(Last green matrix run `27136017797` was at
       `v0.9.2`.)*
-- [ ] **Local build at v0.12.0** — MSVC (VS BuildTools cmake/ninja, vcpkg
+- [ ] **Local build at v0.12.1** — MSVC (VS BuildTools cmake/ninja, vcpkg
       `x64-windows-static` OpenSSL), clean from a fresh
       `git submodule update --init --recursive`.
-- [ ] **Windows / RTools (MinGW) build at v0.12.0** — `x64-mingw-static`
+- [ ] **Windows / RTools (MinGW) build at v0.12.1** — `x64-mingw-static`
       OpenSSL 3 via `scripts/build_rtools_local.ps1`.
-- [ ] **LOAD test of the published v0.12.0 artifact** — `salesforce.duckdb_extension`
+- [ ] **LOAD test of the published v0.12.1 artifact** — `salesforce.duckdb_extension`
       from the release archive loads and the new functions resolve
       (`salesforce_metadata_objects`, `salesforce_metadata_fields`,
       `salesforce_query_explain`, Report Bridge).
-- [ ] **Anonymous shallow clone of `v0.12.0`** resolves the tag/commit.
+- [ ] **Anonymous shallow clone of `v0.12.1`** resolves the tag/commit.
 - [ ] No compiler warnings treated as errors / no portability `#ifdef` gaps.
 
 ## Live validation (maintainer-only, never in CI)
 
-- [x] Manual live smoke (PII-free) at v0.12.0 — metadata diagnostics +
+- [x] Manual live smoke (PII-free) — metadata diagnostics +
       `salesforce_query_cost()` + `salesforce_query_explain()` against a real org,
       recorded secret-free in `docs/smoke/metadata-query-explain-v0.12.0.md`.
-      (Earlier features' live smoke recorded in prior `RELEASE_NOTES_*` /
-      `docs/smoke/*` remain valid; connector behavior unchanged.)
+      v0.12.1 has **no connector code change** vs v0.12.0, so this applies
+      unchanged. (Earlier features' live smoke in prior `RELEASE_NOTES_*` /
+      `docs/smoke/*` also remain valid.)
 - [x] CI **never** contacts Salesforce and **never** requires secrets
       (no `SF_LIVE_*`); `*_live.test` skip without a live org.
 
@@ -59,8 +66,8 @@ anything to `duckdb/community-extensions`.
 
 ## Metadata & legal (required by community-extensions)
 
-- [x] `description.yml` live in community at `v0.9.2` (merged #2037). v0.12.0
-      update staged as a review draft (`description.v0.12.0.draft.yml`); the real
+- [x] `description.yml` live in community at `v0.9.2` (merged #2037). v0.12.1
+      update staged as a review draft (`description.v0.12.1.draft.yml`); the real
       descriptor is bumped only at C.5 GO.
 - [x] LICENSE present and compatible (MIT).
 - [x] `SECURITY.md` present (vuln reporting, TLS-on, no-secret-logging).
@@ -87,13 +94,13 @@ anything to `duckdb/community-extensions`.
 
 ## Sign-off
 
-- [ ] Maintainer reviews this checklist, the v0.12.0 release notes, and the
-      descriptor draft (`docs/community/description.v0.12.0.draft.yml`).
+- [ ] Maintainer reviews this checklist, the v0.12.1 release notes, and the
+      descriptor draft (`docs/community/description.v0.12.1.draft.yml`).
 - [ ] **Explicit human GO (C.5)** recorded to promote the draft to the real
-      `docs/community/description.yml` and open the v0.12.0 **update** PR.
+      `docs/community/description.yml` and open the v0.12.1 **update** PR.
 
 Until the final box is checked by a human, the real descriptor stays `0.9.2`
-(live community baseline via #2037) and the v0.12.0 values live only in the
+(live community baseline via #2037) and the v0.12.1 values live only in the
 draft.
 
 ---
