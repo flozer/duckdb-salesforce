@@ -1,32 +1,52 @@
-# Pre-Community Submission Checklist
+# Pre-Community Checklist — v0.12.0 UPDATE
 
-> **This document does NOT authorize a community submission.** Per gate **C.5**,
-> publishing to `duckdb/community-extensions` (PR / push / release there) happens
-> **only after explicit human approval** by the maintainer, once everything
-> below is true. Nothing in this repo's automation touches
-> `duckdb/community-extensions`.
+> **This document does NOT authorize a community publication.** Per gate **C.5**,
+> changing `duckdb/community-extensions` (PR / push there) happens **only after
+> explicit human approval** by the maintainer, once everything below is true.
+> Nothing in this repo's automation touches `duckdb/community-extensions`.
+>
+> **Update, not first submission.** `salesforce` is already live in community at
+> **v0.9.2** (merged via
+> [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037),
+> **MERGED 2026-06-09**). The boxes below track the proposed bump to **v0.12.0**.
+> The v0.12.0 descriptor values live in the review draft
+> `docs/community/description.v0.12.0.draft.yml`; the real
+> `docs/community/description.yml` stays `0.9.2` until C.5 GO.
 
-The goal: before a human decides to submit, the connector must be **repeatable,
-auditable, and distributable**. Tick every box first.
+The goal: before a human decides to publish the update, the connector must be
+**repeatable, auditable, and distributable** at `v0.12.0`. Tick every box first.
 
-## Build & test
+## Build & test — mandatory before any v0.12.0 community push
 
-- [ ] Offline (mock) test suite green on **all** `test/sql/*.test`.
-- [ ] CI green on the platform matrix: **Linux + Windows (required baseline) +
-      macOS arm64 (extra) × DuckDB v1.5.2, v1.5.3**. Salesforce thus covers the
-      duckdb-firebird platform parity (linux_amd64 + windows_amd64) **plus**
-      `osx_arm64`. `osx_amd64`/arm-linux/musl/wasm/mingw excluded for now.
-- [ ] First **Linux** build proven (Ubuntu CI job) — was not provable in the
-      maintainer's local box; CI is the proof.
-- [ ] Clean build from a fresh `git submodule update --init --recursive`.
+All unchecked until run at the `v0.12.0` ref. None of these publish/submit
+anything to `duckdb/community-extensions`.
+
+- [x] Offline (mock) test suite green on **all** `test/sql/*.test` — **2540
+      assertions, 0 fail** at v0.12.0 (8 live tests gated/skipped).
+- [ ] **Fresh matrix CI green at `v0.12.0`** — Main Distribution Pipeline:
+      **Linux + Windows (baseline) + macOS arm64 (extra) × DuckDB v1.5.2, v1.5.3**,
+      mock-only, no `SF_LIVE_*`. *(Last green matrix run `27136017797` was at
+      `v0.9.2`.)*
+- [ ] **Local build at v0.12.0** — MSVC (VS BuildTools cmake/ninja, vcpkg
+      `x64-windows-static` OpenSSL), clean from a fresh
+      `git submodule update --init --recursive`.
+- [ ] **Windows / RTools (MinGW) build at v0.12.0** — `x64-mingw-static`
+      OpenSSL 3 via `scripts/build_rtools_local.ps1`.
+- [ ] **LOAD test of the published v0.12.0 artifact** — `salesforce.duckdb_extension`
+      from the release archive loads and the new functions resolve
+      (`salesforce_metadata_objects`, `salesforce_metadata_fields`,
+      `salesforce_query_explain`, Report Bridge).
+- [ ] **Anonymous shallow clone of `v0.12.0`** resolves the tag/commit.
 - [ ] No compiler warnings treated as errors / no portability `#ifdef` gaps.
 
 ## Live validation (maintainer-only, never in CI)
 
-- [ ] Manual live smoke against a maintainer-authorized org for the release's
-      features (REST, Bulk, auto, quota, COUNT, relationships, Tooling, PK
-      chunking) — recorded **secret-free** in the matching `RELEASE_NOTES_*`.
-- [ ] CI **never** contacts Salesforce and **never** requires secrets
+- [x] Manual live smoke (PII-free) at v0.12.0 — metadata diagnostics +
+      `salesforce_query_cost()` + `salesforce_query_explain()` against a real org,
+      recorded secret-free in `docs/smoke/metadata-query-explain-v0.12.0.md`.
+      (Earlier features' live smoke recorded in prior `RELEASE_NOTES_*` /
+      `docs/smoke/*` remain valid; connector behavior unchanged.)
+- [x] CI **never** contacts Salesforce and **never** requires secrets
       (no `SF_LIVE_*`); `*_live.test` skip without a live org.
 
 ## Packaging / release review
@@ -39,9 +59,9 @@ auditable, and distributable**. Tick every box first.
 
 ## Metadata & legal (required by community-extensions)
 
-- [x] `description.yml` drafted (`docs/community/description.yml`) — name,
-      description, version, maintainers, repo, license, language. (Staged, not
-      submitted.)
+- [x] `description.yml` live in community at `v0.9.2` (merged #2037). v0.12.0
+      update staged as a review draft (`description.v0.12.0.draft.yml`); the real
+      descriptor is bumped only at C.5 GO.
 - [x] LICENSE present and compatible (MIT).
 - [x] `SECURITY.md` present (vuln reporting, TLS-on, no-secret-logging).
 - [x] No secrets, tokens, org identifiers, or customer data in the repo/CI.
@@ -67,15 +87,23 @@ auditable, and distributable**. Tick every box first.
 
 ## Sign-off
 
-- [ ] Maintainer reviews this checklist and the latest release notes.
-- [ ] **Explicit human GO** recorded to submit to `duckdb/community-extensions`.
+- [ ] Maintainer reviews this checklist, the v0.12.0 release notes, and the
+      descriptor draft (`docs/community/description.v0.12.0.draft.yml`).
+- [ ] **Explicit human GO (C.5)** recorded to promote the draft to the real
+      `docs/community/description.yml` and open the v0.12.0 **update** PR.
 
-Until the final box is checked by a human, the extension stays **local /
-`flozer`-only**.
+Until the final box is checked by a human, the real descriptor stays `0.9.2`
+(live community baseline via #2037) and the v0.12.0 values live only in the
+draft.
 
 ---
 
 ## Audit results (v0.8 community-prep, flozer-only — no submission)
+
+> **Historical note:** this v0.8 prep was not submitted; the later v0.9.2 first
+> submission was merged in
+> [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037).
+> The section below is kept verbatim for provenance.
 
 Done as a local audit. **No PR/push/branch on `duckdb/community-extensions`.**
 
