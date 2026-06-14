@@ -6,6 +6,16 @@
 > `docs/RELEASE_NOTES_v0.12.1.md`). Below, `repo.ref` / `version` are `v0.12.1`;
 > `v0.12.0` mentions are auxiliary/historical evidence of the identical code.
 
+> **⛔ PARKED (2026-06-14) — upstream, community-wide CI break.** Do not open the
+> update PR yet: `duckdb/community-extensions` Windows CI currently fails for ALL
+> extensions — it rebuilds DuckDB v1.5.3 from source on `windows-latest`
+> (MSVC 14.51, which removed `stdext::checked_array_iterator`) while DuckDB's
+> bundled `fmt` (`format.h:326`) still uses it. Not our code. Refs:
+> `duckdb/duckdb#22704`, `duckdb/community-extensions#2061`. Unblocks when DuckDB
+> ships the fmt fix in a tag > v1.5.3 (and community bumps its pin) or community
+> pins the Windows toolchain; then re-run our matrix at `v0.12.1`, confirm
+> Windows green, and proceed. See `PR_READINESS.md`. No local workaround is
+> pursued — it cannot fix community's own CI.
 
 > **This is a plan, not an action.** Nothing here has been done for the update.
 > No fork branch, no PR, no comment in `duckdb/community-extensions` for v0.12.0.

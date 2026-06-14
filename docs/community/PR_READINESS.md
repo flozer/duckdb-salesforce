@@ -3,6 +3,30 @@
 Final gate before opening a `duckdb/community-extensions` **update** PR. **No PR
 and no real-descriptor change until the maintainer's explicit GO (C.5).**
 
+> ## ⛔ PARKED — blocked by an UPSTREAM, community-wide CI break (not our code)
+>
+> As of **2026-06-14**, `duckdb/community-extensions` Windows CI fails for **all**
+> extensions. It rebuilds **DuckDB v1.5.3 from source** on `windows-latest`
+> (now windows-2025 / MSVC Build Tools **14.51**), which **removed
+> `stdext::checked_array_iterator`**, while DuckDB v1.5.3's bundled
+> `third_party/fmt/include/fmt/format.h:326` still references it (mis-guarded
+> `#ifdef _SECURE_SCL`). Compile dies in DuckDB before our extension is touched.
+>
+> - DuckDB `main` already removed the offending code, **but no tag > v1.5.3
+>   exists yet**.
+> - Refs: DuckDB issue `duckdb/duckdb#22704`; community issue
+>   `duckdb/community-extensions#2061`.
+> - **Our side is clean:** extension code compiles on new MSVC; published
+>   v0.12.1 assets build (release-assets pins `windows-2022`) + LOAD; full mock
+>   suite 2540/0; linux + osx_arm64 CI green; RTools/MinGW green.
+>
+> **Unblock criteria (any one):** DuckDB publishes v1.5.4 / v1.6.0 with the fmt
+> fix and community bumps its pin; **or** community points its DuckDB ref at a
+> fixed `main` commit; **or** community pins the Windows runner/toolset.
+> **Then:** re-dispatch our matrix at `v0.12.1`, confirm Windows green, and only
+> then proceed to the C.5 update PR. No local workaround (`/U_SECURE_SCL`,
+> vendored fmt patch, runner pin) is pursued — none would fix community's own CI.
+
 > **Submission ref: `v0.12.1`** (supersedes `v0.12.0`, whose tag carried stale
 > `vcpkg.json` version metadata — see `docs/RELEASE_NOTES_v0.12.1.md`; no runtime
 > change). `v0.12.0` mentions below are auxiliary/historical evidence of the
@@ -34,16 +58,26 @@ and no real-descriptor change until the maintainer's explicit GO (C.5).**
 
 ## Repo / build
 
-- [ ] `v0.12.1` tag exists — the intended update commit (clean provenance tag at
-      `main`); release assets published via `release-assets.yml`. *(v0.12.0 tag
-      `309d9ca` + its assets are auxiliary — identical code, stale vcpkg metadata.)*
+- [x] `v0.12.1` tag exists (`b5e769d`) — clean provenance tag at `main`; release
+      assets published via `release-assets.yml` (linux-x64 + windows-x64 both
+      green; windows built on pinned `windows-2022`). *(v0.12.0 tag `309d9ca` +
+      its assets are auxiliary — identical code, stale vcpkg metadata.)*
 - [x] Internal version consistency at the v0.12.1 ref: `vcpkg.json`
       `version-string` `0.12.1`, README badge `v0.12.1`.
 - [x] Offline suite green at the ref: **2540 assertions, 0 fail** (local).
-- [ ] **Fresh matrix CI green at `v0.12.1`** — Main Distribution Pipeline
-      (`linux_amd64`, `windows_amd64`, `osx_arm64` × DuckDB v1.5.2/v1.5.3),
-      mock-only, no `SF_LIVE_*`. *(Last green matrix run `27136017797` was at
-      `v0.9.2`; a v0.12.1 run is REQUIRED. It does not publish/submit anything.)*
+- [x] Anonymous shallow clone of `v0.12.1` resolves `b5e769d`; `vcpkg` `0.12.1`;
+      draft descriptor `version`/`ref` `0.12.1`.
+- [x] LOAD of the published v0.12.1 windows-x64 artifact into stock DuckDB
+      v1.5.3 — key functions resolve (`salesforce_query_explain`,
+      `salesforce_metadata_objects`/`_fields`, `salesforce_report_soql`).
+- [x] RTools/MinGW build green — links `salesforce.duckdb_extension` + unittest;
+      direct binary run **2540/0/8**. (The build-script `fail=1` is a harness
+      false-negative on `..._noscan.test`, which itself passes;
+      `windows_amd64_mingw` is an excluded community platform — secondary proof.)
+- [ ] ⛔ **Fresh matrix CI green at `v0.12.1`** — **BLOCKED upstream** (see banner):
+      `linux_amd64` + `osx_arm64` green; **`windows_amd64` fails in DuckDB's own
+      `fmt` build** (community-wide; `duckdb#22704` / `community-extensions#2061`).
+      Unblocks when DuckDB > v1.5.3 lands or community pins the toolchain.
 - [x] `vcpkg.json` declares the only dependency (OpenSSL); community CI resolves it.
 - [x] `Makefile` + `extension_config.cmake` drive the standard build.
 - [x] Submodules (`duckdb`, `extension-ci-tools`) pinned.
