@@ -1,102 +1,108 @@
-# C.5 community submission plan (PREPARED — NOT EXECUTED)
+# C.5 community UPDATE plan — v0.9.2 → v0.12.0 (PREPARED — NOT EXECUTED)
 
-> **This is a plan, not an action.** Nothing here has been done. No fork, no
-> branch, no PR, no comment in `duckdb/community-extensions`. Execute only after
-> an explicit maintainer **C.5 GO**, and only after a final human confirm of the
-> exact PR contents. Submission ref: **`v0.9.2`**.
+> **This is a plan, not an action.** Nothing here has been done for the update.
+> No fork branch, no PR, no comment in `duckdb/community-extensions` for v0.12.0.
+> Execute only after an explicit maintainer **C.5 GO**, and only after a final
+> human confirm of the exact PR contents.
+>
+> **Context — this is an UPDATE, not a first submission.** The `salesforce`
+> extension is already accepted and live in community at **v0.9.2** via
+> [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037)
+> (title *Add salesforce extension*, **MERGED 2026-06-09**). This plan bumps that
+> already-merged descriptor **0.9.2 → 0.12.0**.
 
-## Preconditions
+## Current community state
 
-- [x] `v0.9.2` tagged on `flozer`, tree self-consistent (descriptor `repo.ref`
-      `v0.9.2`, `vcpkg.json` version-string `0.9.2`). v0.9.2 is an operational
-      distribution release — functionally identical to `v0.9.1` (no connector
-      code change); it only adds the release-assets workflow + packaging.
-- [x] Offline suite green at the ref (34 files / 921 assertions).
-- [x] Remote CI green at the submission ref — run **27136017797** at `v0.9.2`,
-      all 6 platform×version jobs (`linux_amd64`, `windows_amd64`,
-      `osx_arm64` × DuckDB `v1.5.2`, `v1.5.3`), mock-only, no `SF_LIVE_*`.
-      Earlier same-matrix run **27026331956** also passed before the operational
-      `v0.9.2` packaging tag.
-- [x] Light live smoke validated at `v0.9.1` (see `docs/RELEASE_NOTES_v0.9.1.md`);
-      applies unchanged to `v0.9.2`.
-- [x] Release assets published for `v0.9.2` via `release-assets.yml` (Linux x64
-      tar.gz + Windows x64 zip) — see `docs/RELEASE_NOTES_v0.9.2.md`.
-- [x] **Repository visibility:** `flozer/duckdb-salesforce` is public. Firebird
-      failed community CI once because the source repo was private and `repo.ref`
-      could not be cloned; this preflight is now closed here.
-- [x] **Public clone/tag preflight:** verified:
+- **Live community baseline:** `salesforce` @ `v0.9.2` (merged via #2037).
+  Installable today: `INSTALL salesforce FROM community; LOAD salesforce;`.
+- **Proposed update ref:** `v0.12.0` (own-repo tag `309d9ca`, release assets
+  published, docs EN/PT complete).
+- **Real descriptor unchanged:** `docs/community/description.yml` still declares
+  `version: 0.9.2` / `repo.ref: v0.9.2`. The v0.12.0 values live only in the
+  review draft `docs/community/description.v0.12.0.draft.yml` until C.5 GO.
 
-      ```sh
-      git -c credential.helper= ls-remote --tags https://github.com/flozer/duckdb-salesforce.git v0.9.2
-      git clone --depth=1 --branch v0.9.2 https://github.com/flozer/duckdb-salesforce.git
-      ```
+## Preconditions for the update (status)
 
-      The anonymous shallow clone resolves to commit `9c58fb1` at tag `v0.9.2`.
+- [x] `v0.12.0` tagged on `flozer` (`309d9ca`); release assets published
+      (linux-x64 + windows-x64), run `27484667321` success.
+- [x] Internal version consistency: `vcpkg.json` `version-string` `0.12.0`,
+      README badge `v0.12.0` (commit `525188f`).
+- [x] Offline mock suite green at v0.12.0: **2540 assertions, 0 fail** (8 live
+      tests maintainer-gated/skipped).
+- [x] Live maintainer smoke (PII-free) at v0.12.0 — metadata diagnostics +
+      `query_cost` + `query_explain` (`docs/smoke/metadata-query-explain-v0.12.0.md`).
+- [ ] **Fresh matrix CI green at the `v0.12.0` ref** — Main Distribution Pipeline
+      (`linux_amd64`, `windows_amd64`, `osx_arm64` × DuckDB v1.5.2/v1.5.3),
+      mock-only, no `SF_LIVE_*`. *(Last green matrix run `27136017797` was at
+      `v0.9.2`; a v0.12.0 run is REQUIRED before the update PR — this CI does not
+      publish/submit anything.)*
+- [ ] **Public shallow-clone of `v0.12.0`** re-verified (anonymous).
+- [ ] **Descriptor draft reviewed** (`description.v0.12.0.draft.yml`).
+- [ ] **Maintainer C.5 GO** for the update publication.
 
-- [ ] **Maintainer C.5 GO**.
+## What gets changed (ONLY on GO)
 
-## What gets copied
+Exactly one file in a fork of `duckdb/community-extensions`, **edited** (the path
+already exists from #2037):
 
-Exactly one file, unchanged, into a fork of `duckdb/community-extensions`:
+- `extensions/salesforce/description.yml` ← contents of
+  `docs/community/description.v0.12.0.draft.yml` (after it is promoted to the
+  real `docs/community/description.yml`).
 
-- `docs/community/description.yml`  →  `extensions/salesforce/description.yml`
-
-No source, no tests, no other docs are copied. The community CI checks out
-`flozer/duckdb-salesforce` at `repo.ref: v0.9.2` and builds + signs from there.
+No source, no tests, no other docs are copied. Community CI checks out
+`flozer/duckdb-salesforce` at `repo.ref: v0.12.0` and rebuilds + re-signs.
 
 ## Steps to execute (ONLY on GO — listed, not run)
 
-1. Final-review `docs/community/description.yml` exactly as it will be copied.
-2. Fork `duckdb/community-extensions` (or use an existing fork) under the
-   maintainer's GitHub account.
-3. Branch, e.g. `add-salesforce`.
-4. Add `extensions/salesforce/description.yml` = a verbatim copy of
-   `docs/community/description.yml` from `flozer` at `v0.9.2`.
-5. Commit (`Add salesforce extension`), push the branch to the fork.
+1. Promote the reviewed draft to the real `docs/community/description.yml`
+   (`version: 0.12.0`, `repo.ref: v0.12.0`, updated description) — a separate,
+   GO-gated commit on `flozer`.
+2. Fork / update fork of `duckdb/community-extensions`.
+3. Branch, e.g. `update-salesforce-0.12.0`.
+4. Edit `extensions/salesforce/description.yml` = verbatim copy of the promoted
+   `docs/community/description.yml`.
+5. Commit (`Update salesforce extension to 0.12.0`), push the branch to the fork.
 6. Open a PR into `duckdb/community-extensions:main` with the body below.
 7. Respond to community-CI / reviewer feedback. Do not merge (maintainers do).
 
 ## PR body (draft)
 
-> **Extension:** `salesforce` — read-only access to Salesforce orgs as DuckDB
-> SQL tables over the official REST and Bulk APIs.
+> **Extension:** `salesforce` (update) — read-only Salesforce access as DuckDB
+> SQL tables over REST + Bulk. Already in community at `v0.9.2` (#2037); this
+> bumps it to `v0.12.0`.
 >
-> **Repo / ref:** `flozer/duckdb-salesforce` @ `v0.9.2` (annotated tag).
+> **Repo / ref:** `flozer/duckdb-salesforce` @ `v0.12.0` (annotated tag).
 > **License:** MIT. **Dependency:** OpenSSL (via `vcpkg.json`).
 > **Platforms:** `linux_amd64`, `windows_amd64` (baseline) + `osx_arm64`
 > (extra). Excluded: `osx_amd64`, arm-linux, musl, wasm, mingw, windows_arm64.
 >
-> **What it does:** native `ATTACH` of an org as a read-only catalog; REST
-> `/query` + `queryAll`, Bulk API 2.0 (lazy streaming, PK chunking, auto
-> transport); projection/predicate/`COUNT(*)` pushdown; explicit
-> `salesforce_aggregate()` with `GROUP BY`; parent/grandparent relationship
-> STRUCTs; metadata helpers (`salesforce_refresh_metadata`,
-> `salesforce_picklist_values`, `salesforce_record_types`); diagnostics. OAuth
-> refresh-token or JWT bearer; credentials from options / env / SFDX URL;
-> read-only (all writes throw); TLS verification always on.
+> **New since v0.9.2:** a shared read-only Metadata Engine with metadata
+> diagnostics (`salesforce_metadata_objects`, `salesforce_metadata_fields`); a
+> Report Bridge (`salesforce_reports`, `salesforce_report`, describe-validated
+> `salesforce_report_soql` with explainability columns); scan explainability
+> (`salesforce_query_cost`, `salesforce_query_explain`); and Bulk-backfill
+> predicate guardrails. All read-only; no scan-behavior change vs prior diag.
 >
-> **Evidence:** offline mock suite 34 files / 921 assertions green; CI run
-> 27136017797 green on all 6 platform×version jobs at `v0.9.2`; a light live smoke against a
-> real org validated the metadata functions + REST/Bulk scan consistency. The
-> source repo/tag is public-clone validated.
+> **Evidence:** offline mock suite 2540 assertions green; matrix CI green at
+> `v0.12.0` (run TBD — fill at submission); live PII-free smoke validated the
+> metadata + explain functions against a real org. Source repo/tag public-clone
+> validated.
 >
-> **Known caveats (declared):**
+> **Known caveats (declared, unchanged):**
 > - macOS live TLS not validated in CI (OpenSSL-via-vcpkg does not read the
->   Keychain); `SSL_CERT_FILE` workaround documented + an actionable error hint.
->   A zero-config Keychain trust store is a planned follow-up.
-> - JWT bearer is offline-covered (real RS256 over a test key + mock token) but
->   not live-validated against a pre-authorized Connected App.
-> - Blob/base64 body fields are not byte-readable (Bulk CSV rejects them; REST
->   returns a URL reference) — documented, guarded, by design.
-> - CI runner emits Node.js 20 action-deprecation warnings (non-blocking).
+>   Keychain); `SSL_CERT_FILE` workaround documented + actionable error hint.
+> - JWT bearer offline-covered (real RS256 over a test key + mock token), not
+>   live-validated against a pre-authorized Connected App.
+> - Blob/base64 body fields not byte-readable (documented, guarded, by design).
+> - CI runner emits Node.js action-deprecation warnings (non-blocking).
 
 ## Caveats to declare (summary)
 
 macOS live TLS (workaround documented) · JWT not live-validated · blob bodies
-not byte-readable (by design) · Node20 action warnings · excluded platforms.
+not byte-readable (by design) · Node action warnings · excluded platforms.
 
 ## Guardrails
 
-No PR is opened, no fork created, and nothing is pushed to any
-`duckdb/community-extensions`-related repo until the maintainer says GO and
-confirms this exact plan. This file lives in `flozer` only.
+No PR is opened, no fork branch is pushed, and the real
+`docs/community/description.yml` is not changed until the maintainer says GO and
+confirms this exact plan. The v0.12.0 values live in the draft file only.

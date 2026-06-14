@@ -1,53 +1,60 @@
-# Community-extensions submission package (STAGED — not submitted)
+# Community-extensions package (LIVE at v0.9.2 — v0.12.0 update STAGED)
 
-This folder stages everything needed to submit `duckdb-salesforce` to
-[`duckdb/community-extensions`](https://github.com/duckdb/community-extensions).
-**Nothing here has been submitted.** Opening the PR is **human-gated (gate
-C.5)** and requires the maintainer's explicit GO.
+This folder holds the `duckdb/community-extensions` descriptor for
+`duckdb-salesforce`.
 
-## What the PR would contain
-
-A community submission adds **one file** to a fork of
-`duckdb/community-extensions`:
-
-```
-extensions/salesforce/description.yml
-```
-
-That file is [`description.yml`](description.yml) in this folder, copied verbatim
-to the path above. Nothing else is added there — the community CI clones
-`flozer/duckdb-salesforce` at the descriptor's `repo.ref` and builds + signs from
-our own `Makefile` / `extension_config.cmake` / `vcpkg.json`.
-
-**Current community baseline: `v0.9.2`** (the descriptor's staged `repo.ref` /
-`version`). The next submission ref is **GO-gated** — it will be bumped (to the
-then-current release) only when the maintainer approves a submission. Nothing
-newer is submitted; `v0.12.0` is the latest own-repo release, not a community
-submission.
-
-## Submission steps (for when GO is given — NOT done yet)
-
-1. Fork `duckdb/community-extensions`.
-2. Add `extensions/salesforce/description.yml` (= this folder's `description.yml`).
-3. Open a PR against `duckdb/community-extensions:main`.
-4. Their CI builds + signs for each non-excluded platform from `repo.ref`.
-
-After acceptance, users install with:
+**The extension is already accepted and live in community at `v0.9.2`** — merged
+via [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037)
+(*Add salesforce extension*, MERGED 2026-06-09). Users can install it today:
 
 ```sql
 INSTALL salesforce FROM community;
 LOAD salesforce;
 ```
 
-Until then, build + load locally — see [../INSTALL.md](../INSTALL.md).
+A bump to **`v0.12.0`** is **staged as a review draft** and is **GO-gated (gate
+C.5)** — no update PR has been opened and the real descriptor is unchanged.
+
+## Files
+
+- [`description.yml`](description.yml) — the **live** descriptor (`version: 0.9.2`,
+  `repo.ref: v0.9.2`). This is what community CI builds from today.
+- [`description.v0.12.0.draft.yml`](description.v0.12.0.draft.yml) — the **review
+  draft** for the v0.12.0 update (refreshed feature description, `repo.ref:
+  v0.12.0`). Not promoted to the real descriptor until C.5 GO.
+
+## What the update PR would contain
+
+A community **update** edits **one file** in a fork of
+`duckdb/community-extensions` (the path already exists from #2037):
+
+```
+extensions/salesforce/description.yml
+```
+
+It would receive the contents of the v0.12.0 draft (after the draft is promoted
+to the real `description.yml`). Nothing else changes there — community CI clones
+`flozer/duckdb-salesforce` at the descriptor's `repo.ref` and rebuilds + re-signs
+from our own `Makefile` / `extension_config.cmake` / `vcpkg.json`.
+
+## Update steps (for when GO is given — NOT done yet)
+
+1. Promote the reviewed draft to the real `description.yml` (`version: 0.12.0`,
+   `repo.ref: v0.12.0`) — a GO-gated commit on `flozer`.
+2. Fork / update fork of `duckdb/community-extensions`.
+3. Edit `extensions/salesforce/description.yml` = the promoted descriptor.
+4. Open an **update** PR against `duckdb/community-extensions:main`.
+5. Their CI rebuilds + re-signs for each non-excluded platform from `repo.ref`.
 
 ## Readiness
 
-See [PR_READINESS.md](PR_READINESS.md) for the final pre-PR checklist and
-[../PRE_COMMUNITY_CHECKLIST.md](../PRE_COMMUNITY_CHECKLIST.md) for the full audit.
+See [PR_READINESS.md](PR_READINESS.md) for the pre-PR checklist and
+[../PRE_COMMUNITY_CHECKLIST.md](../PRE_COMMUNITY_CHECKLIST.md) for the full audit,
+both reframed for the v0.12.0 update.
 
 ## Guardrails (C.5)
 
-- No PR, branch, fork, or push to `duckdb/community-extensions` without explicit
-  maintainer GO.
-- Everything here lives in `flozer/duckdb-salesforce` only.
+- No update PR, fork branch, or push to `duckdb/community-extensions` without
+  explicit maintainer GO.
+- The real `description.yml` stays `v0.9.2`; the v0.12.0 values live in the draft
+  until GO.
