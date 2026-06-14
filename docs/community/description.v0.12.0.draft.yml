@@ -3,7 +3,7 @@
 # The live, merged descriptor is docs/community/description.yml (version 0.9.2,
 # already accepted via duckdb/community-extensions#2037). THIS file is a review
 # draft only. Copying it over the real description.yml and opening an update PR
-# is HUMAN-GATED (gate C.5) and has NOT been done.
+# is HUMAN-GATED (gate C.5). The v0.12.0 update publication has NOT been done.
 #
 # Update target: bump the already-merged extension 0.9.2 -> 0.12.0.
 

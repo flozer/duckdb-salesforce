@@ -100,6 +100,11 @@ draft.
 
 ## Audit results (v0.8 community-prep, flozer-only — no submission)
 
+> **Historical note:** this v0.8 prep was not submitted; the later v0.9.2 first
+> submission was merged in
+> [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037).
+> The section below is kept verbatim for provenance.
+
 Done as a local audit. **No PR/push/branch on `duckdb/community-extensions`.**
 
 ### Pass
