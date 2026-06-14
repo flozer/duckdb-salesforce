@@ -242,7 +242,7 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Release: **v0.9.1**.
+Own-repo release: **v0.12.0 candidate**. Community baseline: **v0.9.2**.
 
 | Area | Status |
 |---|---|
