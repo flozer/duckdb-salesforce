@@ -110,10 +110,18 @@ RestRow
 statement ok
 DETACH sf;
 
-# engine lookup fails (catalog gone) -> resolved=false, reason=metadata_unavailable;
-# the function still returns rows without error.
+# engine lookup fails (catalog gone) -> resolved=false, reason=metadata_unavailable
+# for the engine-annotated rows (projection/filter). The count/transport meta
+# rows are sourced from ScanCost (no engine), so they still emit without error.
 query I
 SELECT bool_and(NOT resolved AND reason = 'metadata_unavailable')
-FROM salesforce_query_explain();
+FROM salesforce_query_explain()
+WHERE role IN ('projection', 'filter');
+----
+true
+
+# the function still returns the count/transport meta rows even when degraded
+query I
+SELECT count(*) >= 2 FROM salesforce_query_explain() WHERE role IN ('count', 'transport');
 ----
 true

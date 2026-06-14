@@ -344,6 +344,7 @@ private:
             rel.is_relationship = true;
             rel.name = f.relationship_name;
             rel.relationship_name = f.relationship_name;
+            rel.reference_to = f.reference_to; // parent target (single, non-polymorphic)
             child_list_t<LogicalType> struct_children;
             for (auto &pf : pd->fields) {
                 if (!IsQueryableField(pf)) {

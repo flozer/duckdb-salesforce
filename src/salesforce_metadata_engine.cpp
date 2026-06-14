@@ -373,6 +373,7 @@ struct ExplainRow {
     bool field_null = false;
     string role;
     bool resolved = false;
+    bool resolved_null = false; // true for meta rows (count/transport)
     bool filterable = false;
     bool filterable_null = true;
     bool sortable = false;
@@ -422,6 +423,15 @@ static const char *ExplainGuidance(const string &reason) {
     if (reason == "unresolved_field") {
         return "field not found in object metadata";
     }
+    if (reason == "relationship_traversed") {
+        return "single-hop parent relationship expanded into the SOQL SELECT";
+    }
+    if (reason == "count_pushdown") {
+        return "row count served by SELECT COUNT() — no records fetched";
+    }
+    if (reason == "count_not_pushed") {
+        return "not a count-only scan; records are fetched normally";
+    }
     return "metadata unavailable (catalog detached or engine error); annotation skipped";
 }
 
@@ -450,6 +460,25 @@ unique_ptr<FunctionData> ExplainBind(ClientContext &context, TableFunctionBindIn
         row.object = snap.object;
         row.pushed = item.pushed;
         row.residual = item.residual;
+
+        // Relationship rows are self-contained (targets captured at scan time;
+        // the synthesised parent STRUCT is not in the raw describe). Emit
+        // directly — no engine needed, so unaffected by metadata availability.
+        if (item.role == "relationship") {
+            row.role = "relationship";
+            row.field = item.field;
+            row.field_null = item.field.empty();
+            row.resolved = true; // the relationship was traversed
+            if (!item.relationship_name.empty()) {
+                row.relationship_name = item.relationship_name;
+                row.relationship_null = false;
+            }
+            row.reference_to = item.reference_to;
+            row.reason = "relationship_traversed";
+            row.guidance = ExplainGuidance(row.reason);
+            bind->rows.push_back(std::move(row));
+            continue;
+        }
 
         if (!meta_ok) {
             // Degrade: keep field text if known, but no metadata annotation.
@@ -514,6 +543,39 @@ unique_ptr<FunctionData> ExplainBind(ClientContext &context, TableFunctionBindIn
         bind->rows.push_back(std::move(row));
     }
 
+    // --- meta rows (synthesised from the ScanCost snapshot scalars) ----------
+    // count: always one row reporting whether the scan used COUNT() pushdown.
+    {
+        ExplainRow c;
+        c.object = snap.object;
+        c.role = "count";
+        c.field_null = true;
+        c.resolved_null = true; // not a field resolution
+        c.pushed = snap.count_pushdown;
+        c.reason = snap.count_pushdown ? "count_pushdown" : "count_not_pushed";
+        c.guidance = ExplainGuidance(c.reason);
+        bind->rows.push_back(std::move(c));
+    }
+    // transport: always one row (rest|bulk) with reason/queryAll/est_rows detail.
+    {
+        ExplainRow t;
+        t.object = snap.object;
+        t.role = "transport";
+        t.field_null = true;
+        t.resolved_null = true;
+        t.reason = (snap.transport == "bulk") ? "transport_bulk" : "transport_rest";
+        string g = snap.transport_reason.empty() ? string("transport selected")
+                                                  : snap.transport_reason;
+        if (snap.query_mode == "queryAll") {
+            g += "; queryAll (includes archived/deleted)";
+        }
+        if (snap.est_rows >= 0) {
+            g += "; est_rows=" + std::to_string(snap.est_rows);
+        }
+        t.guidance = std::move(g);
+        bind->rows.push_back(std::move(t));
+    }
+
     names = {"object_name", "field_name",        "role",         "resolved",
              "filterable",  "sortable",          "relationship_name", "reference_to",
              "pushed",      "residual",          "reason",       "guidance"};
@@ -553,7 +615,7 @@ void ExplainFunction(ClientContext &, TableFunctionInput &data, DataChunk &outpu
         }
         FlatVector::GetData<string_t>(output.data[2])[row] =
             StringVector::AddString(output.data[2], rw.role);
-        FlatVector::GetData<bool>(output.data[3])[row] = rw.resolved;
+        set_bool_or_null(3, row, rw.resolved_null, rw.resolved);
         set_bool_or_null(4, row, rw.filterable_null, rw.filterable);
         set_bool_or_null(5, row, rw.sortable_null, rw.sortable);
         if (rw.relationship_null) {
