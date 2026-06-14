@@ -681,8 +681,15 @@ or ETL platform.
 > single referenceTo), and exposes structured explainability columns
 > (`base_object_resolved_by`, `translation_status`, `blocked_by`,
 > `unresolved_columns`, `unresolved_filters`, `confidence`). No partial SOQL.
-> Remaining §17 scope (standalone metadata table functions for analysts; broader
-> scan-planning reuse) stays future.
+> **DELIVERED (v0.11.1): Metadata Engine v2 + analyst metadata diagnostics.** A
+> shared, read-only, per-catalog metadata engine now backs both the Report Bridge
+> and the diagnostics — one de-duped Describe Global (full sObject + queryable
+> flag, queryable-only list derived) + per-object Describe, invalidated by
+> `salesforce_refresh_metadata()`. `salesforce_report_soql()` is migrated onto it
+> (zero output change). Standalone analyst table functions shipped:
+> `salesforce_metadata_objects(catalog)` and `salesforce_metadata_fields(catalog,
+> object)` (with `reference_to` / `picklist_values` LIST columns). Broader
+> scan-planning reuse is covered by §19 (`salesforce_query_explain()`).
 
 The existing connector already uses Describe, Describe Global, Tooling metadata,
 picklist/record-type helpers, and an in-memory metadata cache. The next step is
@@ -754,7 +761,21 @@ Acceptance:
 - Cycles and polymorphic references are detected and reported.
 - No scan behavior changes unless the user opts into relationship expansion.
 
-### 19. Explain SOQL / Explain Salesforce — INCLUDE, NEAR-TERM
+### 19. Explain SOQL / Explain Salesforce — DELIVERED (v0.12.0)
+
+> **DELIVERED (v0.12.0): `salesforce_query_explain()`.** A read-only, last-scan
+> table function (no args) that explains the most recent catalog scan
+> field-by-field, annotated via Metadata Engine v2: one row per projected field /
+> conjunctive filter (`role` = projection|filter) plus meta rows
+> (relationship|count|transport). Columns: object/field/role, resolved,
+> filterable, sortable, relationship_name, reference_to, pushed, residual, a
+> closed `reason` token, and guidance. It distinguishes Salesforce server-side
+> filtering (`pushed`) from DuckDB residual filtering — the over-fetch warning
+> sign. Diagnostic-only: zero scan behavior change, `salesforce_query_cost()`
+> unchanged, returns zero rows when no scan has run, degrades (never throws) when
+> metadata is unavailable. LIMIT is not diagnosable (not exposed to the table
+> function) and is intentionally omitted rather than guessed. Parser-level
+> `EXPLAIN SALESFORCE` syntax stays future.
 
 The connector already exposes `salesforce_query_cost()` and related diagnostics.
 The next useful step is an explicit explain surface that tells users what the
