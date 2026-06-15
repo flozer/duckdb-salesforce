@@ -1,10 +1,12 @@
-# duckdb-salesforce v0.13.0 — DRAFT (candidate, NOT tagged)
+# duckdb-salesforce v0.13.0
 
-> **DRAFT / candidate.** Version `v0.13.0` is provisional and **not tagged**.
-> This collects the work accumulated on `main` since `v0.12.1`. Tagging,
-> release-assets, and any community update are **GO-gated**. The community
-> candidate `v0.12.1` stays **frozen + parked** on the upstream Windows CI
-> blocker (`duckdb/community-extensions#2061`); this draft does not change that.
+> **Own-repo release.** This is an own-repo tag/release only. The **community
+> update stays PARKED** on the upstream Windows CI blocker
+> (`duckdb/community-extensions#2061`) — that blocker affects the
+> community-extensions from-source DuckDB build, **not** this own-repo release
+> (our `release-assets.yml` pins `windows-2022`, which builds + publishes our
+> Windows asset). Community baseline stays `v0.9.2`; the frozen community
+> candidate is still `v0.12.1`. No community submission is made by this release.
 
 Own-repo release on top of `v0.12.1` (`b5e769d`). Scope: Report-Bridge /
 metadata diagnostics improvements. All additions are **read-only, diagnostic-
@@ -58,14 +60,16 @@ mechanism is in place, proven entries land later.
 
 - Offline mock suite green (full `*salesforce*`: 2768 assertions, 0 fail; 8 live
   tests gated/skipped).
-- [x] Live maintainer smoke (PII-free) for `salesforce_relationship_graph()` —
-      `salesforce_relationship_graph('sf','Contact',2)` on a real org exercised
-      all edge statuses (resolved 35 / self_reference 21 / cyclic 4 /
-      polymorphic 4). Evidence: `docs/smoke/relationship-graph-v0.13.0.md`.
-- [ ] Fresh matrix CI at the eventual `v0.13.0` ref (linux + osx green; Windows
-      subject to the same upstream `#2061` blocker — assess at tag time).
+- Live maintainer smoke (PII-free) for `salesforce_relationship_graph()` —
+  `salesforce_relationship_graph('sf','Contact',2)` on a real org exercised all
+  edge statuses (resolved 35 / self_reference 21 / cyclic 4 / polymorphic 4).
+  Evidence: `docs/smoke/relationship-graph-v0.13.0.md`.
+- Matrix CI: `linux_amd64` + `osx_arm64` green; `windows_amd64` is red **only**
+  because of the upstream `#2061` from-source DuckDB build break (DuckDB v1.5.3
+  `fmt` × new MSVC). It does not affect this release's published Windows asset,
+  which `release-assets.yml` builds on `windows-2022`.
 
 ## Gates
 
-- **Not tagged.** Tag/GitHub Release/assets are GO-gated.
-- No community update; `docs/community/description.yml` stays `0.9.2`.
+- No community update; `docs/community/description.yml` stays `0.9.2`. The
+  community candidate `v0.12.1` remains frozen + parked on `#2061`.
