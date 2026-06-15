@@ -73,3 +73,15 @@ mechanism is in place, proven entries land later.
 
 - No community update; `docs/community/description.yml` stays `0.9.2`. The
   community candidate `v0.12.1` remains frozen + parked on `#2061`.
+
+## Published assets
+
+Release-assets workflow run `27550148552`: **completed / success** (2026-06-15).
+The `v0.13.0` GitHub Release carries exactly:
+
+- `duckdb-salesforce-0.13.0-linux-x64.tar.gz`
+- `duckdb-salesforce-0.13.0-windows-x64.zip`
+
+Tag `v0.13.0` → `57a38ff`. **Own-repo release only** — the Windows asset builds
+on `windows-2022`, unaffected by the upstream `#2061` blocker. The community
+update stays parked on `#2061`; community catalog unchanged (`0.9.2`).
