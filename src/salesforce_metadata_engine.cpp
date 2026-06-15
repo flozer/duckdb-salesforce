@@ -669,6 +669,242 @@ void ExplainFunction(ClientContext &, TableFunctionInput &data, DataChunk &outpu
     output.SetCardinality(row);
 }
 
+// --- salesforce_relationship_graph(catalog, object [, max_depth]) ------------
+//
+// Read-only, on-demand parent relationship enumerator (#v1.6 §18). DFS over
+// parent reference fields via the shared engine; one row per edge with an
+// explicit status. Parent-only; depth default 1, clamped to [1,4]. No scan
+// behavior change.
+
+struct RelEdgeRow {
+    string source_object;
+    string relationship_name;
+    string path;
+    int64_t depth_level;
+    string target_object;
+    bool target_null = false;
+    vector<string> reference_to;
+    string direction;         // "parent"
+    string relationship_type; // "reference"
+    string status;
+    string caveat;
+    bool caveat_null = true;
+};
+
+struct RelGraphBindData : public FunctionData {
+    vector<RelEdgeRow> rows;
+    unique_ptr<FunctionData> Copy() const override {
+        return make_uniq<RelGraphBindData>(*this);
+    }
+    bool Equals(const FunctionData &) const override {
+        return false;
+    }
+};
+
+struct RelGraphGlobalState : public GlobalTableFunctionState {
+    idx_t cursor = 0;
+    idx_t MaxThreads() const override {
+        return 1;
+    }
+};
+
+// DFS. `visited` is the ancestor chain incl. `current` (case-insensitive cycle
+// detection). Caller guarantees `current` was describable.
+void RelGraphWalk(ClientContext &context, SalesforceMetadataEngine &eng, const string &current,
+                  const string &path_prefix, int64_t depth, int64_t max_depth,
+                  vector<string> &visited, vector<RelEdgeRow> &rows) {
+    const SalesforceDescribe *desc;
+    try {
+        desc = &eng.GetObjectDescribe(context, current);
+    } catch (...) {
+        return; // defensive: root describability is checked by the caller
+    }
+    for (auto &f : desc->fields) {
+        if (f.relationship_name.empty()) {
+            continue;
+        }
+        RelEdgeRow r;
+        r.source_object = current;
+        r.relationship_name = f.relationship_name;
+        r.path = path_prefix.empty() ? f.relationship_name
+                                     : path_prefix + "." + f.relationship_name;
+        r.depth_level = depth;
+        r.reference_to = f.reference_to;
+        r.direction = "parent";
+        r.relationship_type = "reference";
+
+        if (f.reference_to.size() != 1) {
+            r.status = "polymorphic";
+            r.target_null = true;
+            r.caveat = "multiple referenceTo targets; not traversed";
+            r.caveat_null = false;
+            rows.push_back(std::move(r));
+            continue;
+        }
+        const string &target = f.reference_to[0];
+        if (StringUtil::CIEquals(target, current)) {
+            r.status = "self_reference";
+            r.target_object = target;
+            rows.push_back(std::move(r));
+            continue;
+        }
+        bool cycle = false;
+        for (auto &a : visited) {
+            if (StringUtil::CIEquals(a, target)) {
+                cycle = true;
+                break;
+            }
+        }
+        if (cycle) {
+            r.status = "cyclic";
+            r.target_object = target;
+            r.caveat = "target already on the relationship path";
+            r.caveat_null = false;
+            rows.push_back(std::move(r));
+            continue;
+        }
+        if (!eng.IsQueryable(context, target)) {
+            r.status = "not_queryable";
+            r.target_null = true;
+            r.caveat = "target not queryable in Describe Global";
+            r.caveat_null = false;
+            rows.push_back(std::move(r));
+            continue;
+        }
+        // Resolved single-hop target. Recurse only below max_depth; describing
+        // the target both validates it and feeds the next level.
+        r.target_object = target;
+        if (depth < max_depth) {
+            bool describable = true;
+            try {
+                eng.GetObjectDescribe(context, target);
+            } catch (...) {
+                describable = false;
+            }
+            if (!describable) {
+                r.status = "not_describable";
+                r.caveat = "target Describe failed or unavailable";
+                r.caveat_null = false;
+                rows.push_back(std::move(r));
+                continue;
+            }
+            r.status = "resolved";
+            string child_path = r.path;
+            rows.push_back(std::move(r));
+            visited.push_back(target);
+            RelGraphWalk(context, eng, target, child_path, depth + 1, max_depth, visited, rows);
+            visited.pop_back();
+        } else {
+            r.status = "resolved";
+            rows.push_back(std::move(r));
+        }
+    }
+}
+
+unique_ptr<FunctionData> RelGraphBind(ClientContext &context, TableFunctionBindInput &input,
+                                      vector<LogicalType> &return_types, vector<string> &names) {
+    if (input.inputs.size() < 2 || input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
+        throw BinderException("salesforce_relationship_graph(catalog, object [, max_depth]) "
+                              "requires a non-NULL catalog alias and object name");
+    }
+    int64_t max_depth = 1;
+    if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
+        max_depth = input.inputs[2].GetValue<int64_t>();
+    }
+    if (max_depth < 1) {
+        throw BinderException("salesforce_relationship_graph: max_depth must be >= 1");
+    }
+    if (max_depth > 4) {
+        max_depth = 4; // clamp; deeper traversal is out of scope (#v1.6 §18 cut 1)
+    }
+    string alias = input.inputs[0].ToString();
+    string object = input.inputs[1].ToString();
+
+    auto bind = make_uniq<RelGraphBindData>();
+    auto &eng = GetSalesforceCatalogMetadataEngine(context, alias);
+    try {
+        eng.GetObjectDescribe(context, object); // root must be describable
+    } catch (...) {
+        throw BinderException("salesforce_relationship_graph: object '" + object +
+                              "' could not be described");
+    }
+    vector<string> visited;
+    visited.push_back(object);
+    RelGraphWalk(context, eng, object, "", 1, max_depth, visited, bind->rows);
+
+    names = {"source_object", "relationship_name", "path",   "depth_level", "target_object",
+             "reference_to",  "direction",         "relationship_type", "status", "caveat"};
+    return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
+                    LogicalType::INTEGER, LogicalType::VARCHAR,
+                    LogicalType::LIST(LogicalType::VARCHAR), LogicalType::VARCHAR,
+                    LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
+    return std::move(bind);
+}
+
+unique_ptr<GlobalTableFunctionState> RelGraphInit(ClientContext &, TableFunctionInitInput &) {
+    return make_uniq<RelGraphGlobalState>();
+}
+
+void RelGraphFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+    auto &bd = data.bind_data->Cast<RelGraphBindData>();
+    auto &gs = data.global_state->Cast<RelGraphGlobalState>();
+    idx_t start = gs.cursor;
+    idx_t row = 0;
+    while (row < STANDARD_VECTOR_SIZE && gs.cursor < bd.rows.size()) {
+        const auto &e = bd.rows[gs.cursor];
+        FlatVector::GetData<string_t>(output.data[0])[row] =
+            StringVector::AddString(output.data[0], e.source_object);
+        FlatVector::GetData<string_t>(output.data[1])[row] =
+            StringVector::AddString(output.data[1], e.relationship_name);
+        FlatVector::GetData<string_t>(output.data[2])[row] =
+            StringVector::AddString(output.data[2], e.path);
+        FlatVector::GetData<int32_t>(output.data[3])[row] = static_cast<int32_t>(e.depth_level);
+        if (e.target_null) {
+            FlatVector::SetNull(output.data[4], row, true);
+        } else {
+            FlatVector::GetData<string_t>(output.data[4])[row] =
+                StringVector::AddString(output.data[4], e.target_object);
+        }
+        // col 5 (reference_to LIST) filled after the loop
+        FlatVector::GetData<string_t>(output.data[6])[row] =
+            StringVector::AddString(output.data[6], e.direction);
+        FlatVector::GetData<string_t>(output.data[7])[row] =
+            StringVector::AddString(output.data[7], e.relationship_type);
+        FlatVector::GetData<string_t>(output.data[8])[row] =
+            StringVector::AddString(output.data[8], e.status);
+        if (e.caveat_null) {
+            FlatVector::SetNull(output.data[9], row, true);
+        } else {
+            FlatVector::GetData<string_t>(output.data[9])[row] =
+                StringVector::AddString(output.data[9], e.caveat);
+        }
+        gs.cursor++;
+        row++;
+    }
+    {
+        auto &lvec = output.data[5];
+        idx_t total = 0;
+        for (idx_t r = 0; r < row; r++) {
+            total += bd.rows[start + r].reference_to.size();
+        }
+        ListVector::Reserve(lvec, total);
+        auto &child = ListVector::GetEntry(lvec);
+        auto child_data = FlatVector::GetData<string_t>(child);
+        auto entries = FlatVector::GetData<list_entry_t>(lvec);
+        idx_t off = 0;
+        for (idx_t r = 0; r < row; r++) {
+            auto &vals = bd.rows[start + r].reference_to;
+            entries[r].offset = off;
+            entries[r].length = vals.size();
+            for (auto &v : vals) {
+                child_data[off++] = StringVector::AddString(child, v);
+            }
+        }
+        ListVector::SetListSize(lvec, off);
+    }
+    output.SetCardinality(row);
+}
+
 } // namespace
 
 TableFunction GetSalesforceMetadataFieldsFunction() {
@@ -684,6 +920,15 @@ TableFunction GetSalesforceMetadataObjectsFunction() {
 
 TableFunction GetSalesforceQueryExplainFunction() {
     return TableFunction("salesforce_query_explain", {}, ExplainFunction, ExplainBind, ExplainInit);
+}
+
+TableFunction GetSalesforceRelationshipGraphFunction() {
+    TableFunction fn("salesforce_relationship_graph",
+                     {LogicalType::VARCHAR, LogicalType::VARCHAR}, RelGraphFunction, RelGraphBind,
+                     RelGraphInit);
+    // Optional third arg: max_depth.
+    fn.varargs = LogicalType::INTEGER;
+    return fn;
 }
 
 } // namespace duckdb

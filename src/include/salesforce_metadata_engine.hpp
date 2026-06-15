@@ -96,6 +96,14 @@ TableFunction GetSalesforceMetadataFieldsFunction();
 // global sObject (object_name, queryable), sourced through the shared engine.
 TableFunction GetSalesforceMetadataObjectsFunction();
 
+// salesforce_relationship_graph(catalog, object [, max_depth]) — read-only,
+// on-demand parent relationship enumerator (#v1.6 §18). Walks parent reference
+// fields from REST Describe via the shared engine, one row per edge with an
+// explicit status (resolved | polymorphic | self_reference | cyclic |
+// not_queryable | not_describable). Parent-only; depth default 1, clamped to
+// [1,4]; never changes scan behavior.
+TableFunction GetSalesforceRelationshipGraphFunction();
+
 // salesforce_query_explain() — read-only, last-scan diagnostic (#v1.6). One row
 // per projected field / conjunctive filter of the most recent catalog scan,
 // annotated via the shared Metadata Engine (resolved/filterable/sortable/
