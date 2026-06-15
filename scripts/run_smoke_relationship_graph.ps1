@@ -1,4 +1,5 @@
-# LIVE smoke runner for salesforce_relationship_graph() (ROADMAP v1.6 §18 cut 1).
+# LIVE smoke runner for salesforce_relationship_graph() (ROADMAP v1.6 §18 cut 1/2
+# — parents + opt-in child relationships).
 #
 # Maintainer-gated manual smoke against a REAL org using the locally-built
 # Release shell (build/release/duckdb.exe) — NOT the community extension.
@@ -81,7 +82,7 @@ $attach   = "ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'env
 
 $commit = (& git -C $root rev-parse --short HEAD).Trim()
 $tag    = ((& git -C $root tag --points-at HEAD) -join ',')
-Write-Host "=== Relationship graph live smoke (§18 cut 1) ===" -ForegroundColor Cyan
+Write-Host "=== Relationship graph live smoke (§18 cut 1/2) ===" -ForegroundColor Cyan
 Write-Host ("timestamp  : " + (Get-Date -Format o))
 Write-Host ("git commit : $commit  tag: $tag")
 Write-Host ("shell      : $duck")
