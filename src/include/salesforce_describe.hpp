@@ -27,12 +27,23 @@ struct SalesforceField {
     vector<string> reference_to;  // describe "referenceTo" (target sObjects)
     vector<string> picklist_values; // describe "picklistValues[*].value" (empty if none)
     bool is_relationship = false; // true => synthesised parent STRUCT column
+    // NOTE: child relationships live on SalesforceDescribe (below), not here.
     vector<SalesforceField> children; // parent scalar fields (for is_relationship)
+};
+
+// One child (one-to-many) relationship from describe "childRelationships"
+// (#v1.6 §18 cut 2). `relationship_name` may be empty (null in describe) — such
+// a child is not SOQL-subquery-addressable by name.
+struct SalesforceChildRelationship {
+    string child_object;      // "childSObject"
+    string field;             // "field" — the child's FK back to this object
+    string relationship_name; // "relationshipName" (may be empty)
 };
 
 struct SalesforceDescribe {
     string object_name;
     vector<SalesforceField> fields;
+    vector<SalesforceChildRelationship> child_relationships; // describe "childRelationships"
 };
 
 // Parse an sObject describe JSON response into a SalesforceDescribe. The

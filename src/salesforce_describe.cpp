@@ -53,6 +53,17 @@ SalesforceDescribe ParseDescribe(const string &json, const string &fallback_obje
         }
         d.fields.push_back(std::move(f));
     }
+    // Child relationships (#v1.6 §18 cut 2): additive, read-only. relationshipName
+    // may be absent/null -> kept empty (an unnamed child, not subquery-addressable).
+    for (auto &cr : sfjson::GetObjectArray(json, "childRelationships")) {
+        SalesforceChildRelationship c;
+        c.child_object = sfjson::GetString(cr, "childSObject");
+        c.field = sfjson::GetString(cr, "field");
+        c.relationship_name = sfjson::GetString(cr, "relationshipName");
+        if (!c.child_object.empty()) {
+            d.child_relationships.push_back(std::move(c));
+        }
+    }
     return d;
 }
 

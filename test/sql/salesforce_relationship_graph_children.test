@@ -1,0 +1,81 @@
+# name: test/sql/salesforce_relationship_graph_children.test
+# description: v1.6 §18 cut 2 — opt-in child relationships in
+#              salesforce_relationship_graph(... include_children := true)
+# group: [salesforce]
+#
+# Children are OPT-IN (named include_children, default false -> parent-only,
+# byte-identical to cut 1). When on, the ROOT object's direct child
+# relationships are listed (single level, no recursion): direction='child',
+# relationship_type='childRelationship'. Status: resolved | not_queryable |
+# unnamed_child (null relationshipName -> not SOQL-subquery-addressable).
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Account, Contact, Order, User queryable; Ghost / Attachment NOT.
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true},{"name":"Contact","queryable":true},{"name":"Order","queryable":true},{"name":"User","queryable":true}]}';
+
+# Account: one parent ref (Owner->User) + child relationships, incl. a
+# not-queryable child (Ghost) and an unnamed one (null relationshipName).
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User"],"filterable":true}],"childRelationships":[{"childSObject":"Contact","field":"AccountId","relationshipName":"Contacts"},{"childSObject":"Order","field":"AccountId","relationshipName":"Orders"},{"childSObject":"Ghost","field":"AccountId","relationshipName":"Ghosts"},{"childSObject":"Attachment","field":"ParentId","relationshipName":null}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === default (include_children omitted): parent-only, NO child rows ==========
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account') WHERE direction = 'child';
+----
+0
+
+# parent row still present + unchanged
+query TTT
+SELECT path, target_object, status
+FROM salesforce_relationship_graph('sf', 'Account')
+WHERE direction = 'parent' ORDER BY path;
+----
+Owner	User	resolved
+
+# === include_children := true: root child relationships listed ===============
+query TTTTT
+SELECT path, relationship_name, target_object, status, relationship_type
+FROM salesforce_relationship_graph('sf', 'Account', include_children := true)
+WHERE direction = 'child' ORDER BY path;
+----
+Contacts	Contacts	Contact	resolved	childRelationship
+Ghosts	Ghosts	Ghost	not_queryable	childRelationship
+Orders	Orders	Order	resolved	childRelationship
+child:Attachment	NULL	Attachment	unnamed_child	childRelationship
+
+# resolved child carries its back-reference FK field in reference_to
+query T
+SELECT reference_to FROM salesforce_relationship_graph('sf', 'Account', include_children := true)
+WHERE path = 'Contacts';
+----
+[AccountId]
+
+# parent traversal is unchanged when children are included
+query TTT
+SELECT path, target_object, status
+FROM salesforce_relationship_graph('sf', 'Account', include_children := true)
+WHERE direction = 'parent' ORDER BY path;
+----
+Owner	User	resolved
+
+# children are single-level (depth 1) even with a deeper max_depth
+query I
+SELECT count(*) = 0
+FROM salesforce_relationship_graph('sf', 'Account', 3, include_children := true)
+WHERE direction = 'child' AND depth_level > 1;
+----
+true
+
+statement ok
+DETACH sf;

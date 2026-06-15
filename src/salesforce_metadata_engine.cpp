@@ -832,6 +832,49 @@ unique_ptr<FunctionData> RelGraphBind(ClientContext &context, TableFunctionBindI
     visited.push_back(object);
     RelGraphWalk(context, eng, object, "", 1, max_depth, visited, bind->rows);
 
+    // Opt-in child relationships (#v1.6 §18 cut 2): default OFF keeps the output
+    // byte-identical to the parent-only cut. ROOT object only, single level, no
+    // recursion (child relationships fan out heavily). direction='child'.
+    bool include_children = false;
+    auto ic = input.named_parameters.find("include_children");
+    if (ic != input.named_parameters.end() && !ic->second.IsNull()) {
+        include_children = ic->second.GetValue<bool>();
+    }
+    if (include_children) {
+        const SalesforceDescribe &root = eng.GetObjectDescribe(context, object); // cached
+        for (auto &cr : root.child_relationships) {
+            RelEdgeRow r;
+            r.source_object = object;
+            r.depth_level = 1;
+            r.direction = "child";
+            r.relationship_type = "childRelationship";
+            r.target_object = cr.child_object;
+            if (!cr.field.empty()) {
+                r.reference_to.push_back(cr.field); // child's FK back to this object
+            }
+            if (cr.relationship_name.empty()) {
+                // Unnamed child: not SOQL-subquery-addressable by name. Reported,
+                // relationship_name stays empty -> emitted as NULL.
+                r.path = "child:" + cr.child_object;
+                r.status = "unnamed_child";
+                r.caveat = "child relationship has no relationshipName; not "
+                           "SOQL-subquery-addressable";
+                r.caveat_null = false;
+            } else {
+                r.relationship_name = cr.relationship_name;
+                r.path = cr.relationship_name;
+                if (eng.IsQueryable(context, cr.child_object)) {
+                    r.status = "resolved";
+                } else {
+                    r.status = "not_queryable";
+                    r.caveat = "child object not queryable in Describe Global";
+                    r.caveat_null = false;
+                }
+            }
+            bind->rows.push_back(std::move(r));
+        }
+    }
+
     names = {"source_object", "relationship_name", "path",   "depth_level", "target_object",
              "reference_to",  "direction",         "relationship_type", "status", "caveat"};
     return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
@@ -854,8 +897,12 @@ void RelGraphFunction(ClientContext &, TableFunctionInput &data, DataChunk &outp
         const auto &e = bd.rows[gs.cursor];
         FlatVector::GetData<string_t>(output.data[0])[row] =
             StringVector::AddString(output.data[0], e.source_object);
-        FlatVector::GetData<string_t>(output.data[1])[row] =
-            StringVector::AddString(output.data[1], e.relationship_name);
+        if (e.relationship_name.empty()) {
+            FlatVector::SetNull(output.data[1], row, true); // unnamed child relationship
+        } else {
+            FlatVector::GetData<string_t>(output.data[1])[row] =
+                StringVector::AddString(output.data[1], e.relationship_name);
+        }
         FlatVector::GetData<string_t>(output.data[2])[row] =
             StringVector::AddString(output.data[2], e.path);
         FlatVector::GetData<int32_t>(output.data[3])[row] = static_cast<int32_t>(e.depth_level);
@@ -926,8 +973,10 @@ TableFunction GetSalesforceRelationshipGraphFunction() {
     TableFunction fn("salesforce_relationship_graph",
                      {LogicalType::VARCHAR, LogicalType::VARCHAR}, RelGraphFunction, RelGraphBind,
                      RelGraphInit);
-    // Optional third arg: max_depth.
+    // Optional third positional arg: max_depth.
     fn.varargs = LogicalType::INTEGER;
+    // Opt-in child relationships (#v1.6 §18 cut 2); default false.
+    fn.named_parameters["include_children"] = LogicalType::BOOLEAN;
     return fn;
 }
 
