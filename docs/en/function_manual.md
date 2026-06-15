@@ -1105,6 +1105,63 @@ SELECT Id FROM sf.Account LIMIT 1;
 SELECT * FROM salesforce_relationships();   -- one config row only
 ```
 
+### `salesforce_relationship_graph(catalog, object [, max_depth] [, include_children := false])`
+
+#### What it does
+
+**On-demand** read-only enumerator of an object's relationships, sourced through
+the shared Metadata Engine (REST Describe). One row per edge, each with an
+explicit `status`. Unlike `salesforce_relationships()` (which reflects the
+*last scan's* parent expansion), this walks the graph for **any** object you
+name, independent of `sf_relationships`. Pure metadata; **zero behavior change**.
+
+#### How it works
+
+Parent relationships are walked depth-first up to `max_depth` (default `1`,
+clamped to `[1,4]`). With `include_children := true`, the object's **direct**
+child relationships are also listed (single level, not recursed — child
+relationships fan out heavily). Output columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `source_object` | VARCHAR | the object the edge departs from |
+| `relationship_name` | VARCHAR | `relationshipName`; NULL for an unnamed child |
+| `path` | VARCHAR | dotted path from the root (e.g. `Account.Owner`) |
+| `depth_level` | INTEGER | 1 = direct, 2 = grandparent, … |
+| `target_object` | VARCHAR | resolved related object; NULL if polymorphic / unresolved |
+| `reference_to` | LIST(VARCHAR) | parent target(s); for a child, the child's back-reference FK field |
+| `direction` | VARCHAR | `parent` or `child` |
+| `relationship_type` | VARCHAR | `reference` (parent) or `childRelationship` |
+| `status` | VARCHAR | see below |
+| `caveat` | VARCHAR | short reason; NULL when `resolved` |
+
+`status` (closed set): `resolved`, `polymorphic` (multiple `referenceTo`,
+reported but not traversed), `self_reference` (direct self-parent), `cyclic`
+(target already on the path), `not_queryable` (target not in Describe Global),
+`not_describable` (target Describe failed), `unnamed_child` (a child relationship
+with no `relationshipName` — not SOQL-subquery-addressable; diagnostic, not an
+error).
+
+#### Why use it
+
+Understand how an object connects before writing SOQL/joins: which parents are
+safe single-hops, which are polymorphic or cyclic, and which children exist.
+`include_children` is **opt-in** — omitted, the output is parent-only.
+
+#### Daily use
+
+```sql
+-- parents only (default), two levels deep
+SELECT path, target_object, status
+FROM salesforce_relationship_graph('sf', 'Contact', 2)
+ORDER BY path;
+
+-- include the object's direct child relationships
+SELECT path, target_object, direction, status
+FROM salesforce_relationship_graph('sf', 'Account', include_children := true)
+WHERE direction = 'child';
+```
+
 ### `salesforce_last_soql()`
 
 #### What it does
