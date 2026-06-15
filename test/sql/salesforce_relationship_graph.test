@@ -1,0 +1,129 @@
+# name: test/sql/salesforce_relationship_graph.test
+# description: v1.6 §18 — salesforce_relationship_graph(catalog, object[, max_depth])
+#              on-demand, read-only parent relationship enumerator (mocked)
+# group: [salesforce]
+#
+# Describe-driven via the shared Metadata Engine. Each edge gets an explicit
+# status: resolved | polymorphic | self_reference | cyclic | not_queryable |
+# not_describable. Parent-only, depth-bounded (default 1, clamp [1,4]). No scan
+# behavior change.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Contact, Account, User, Group are queryable; Ghost is NOT.
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true},{"name":"Account","queryable":true},{"name":"User","queryable":true},{"name":"Group","queryable":true}]}';
+
+# Describe sequence (consumed in DFS first-encounter order): Contact, then Account.
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"AccountId","type":"reference","relationshipName":"Account","referenceTo":["Account"],"filterable":true},{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User","Group"],"filterable":true},{"name":"GhostId","type":"reference","relationshipName":"Ghost","referenceTo":["Ghost"],"filterable":true}]}|~|{"name":"Account","fields":[{"name":"ParentId","type":"reference","relationshipName":"Parent","referenceTo":["Account"],"filterable":true},{"name":"PrimaryContactId","type":"reference","relationshipName":"PrimaryContact","referenceTo":["Contact"],"filterable":true}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === depth default (1): direct parents only ==================================
+query TTTIT
+SELECT path, relationship_name, target_object, depth_level, status
+FROM salesforce_relationship_graph('sf', 'Contact')
+ORDER BY path;
+----
+Account	Account	Account	1	resolved
+Ghost	Ghost	NULL	1	not_queryable
+Owner	Owner	NULL	1	polymorphic
+
+# polymorphic edge keeps all targets in reference_to
+query T
+SELECT reference_to FROM salesforce_relationship_graph('sf', 'Contact') WHERE path = 'Owner';
+----
+[User, Group]
+
+# resolved edge target list
+query T
+SELECT reference_to FROM salesforce_relationship_graph('sf', 'Contact') WHERE path = 'Account';
+----
+[Account]
+
+# default depth does NOT describe the parent (no recursion) -> Contact only
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+1
+
+# === depth 2: self_reference + cyclic ========================================
+statement ok
+SELECT catalog, scope FROM salesforce_refresh_metadata('sf');
+
+query TTTIT
+SELECT path, relationship_name, target_object, depth_level, status
+FROM salesforce_relationship_graph('sf', 'Contact', 2)
+ORDER BY path;
+----
+Account	Account	Account	1	resolved
+Account.Parent	Parent	Account	2	self_reference
+Account.PrimaryContact	PrimaryContact	Contact	2	cyclic
+Ghost	Ghost	NULL	1	not_queryable
+Owner	Owner	NULL	1	polymorphic
+
+# Describe counter is cumulative within an ATTACH (reset only at ATTACH, not on
+# refresh): scenario A described Contact (1); after refresh, depth-2 re-describes
+# Contact + Account (+2) = 3. Confirms engine de-dup (Account described once).
+query I
+SELECT calls FROM salesforce_describe_calls();
+----
+3
+
+# === clamp + arg validation ==================================================
+# max_depth > 4 clamps to 4 (no error)
+statement ok
+SELECT * FROM salesforce_relationship_graph('sf', 'Contact', 9);
+
+# max_depth < 1 is an error
+statement error
+SELECT * FROM salesforce_relationship_graph('sf', 'Contact', 0);
+----
+max_depth
+
+# NULL catalog / object rejected
+statement error
+SELECT * FROM salesforce_relationship_graph(NULL, 'Contact');
+----
+non-NULL
+
+statement error
+SELECT * FROM salesforce_relationship_graph('sf', NULL);
+----
+non-NULL
+
+statement ok
+DETACH sf;
+
+# === not_describable: queryable target whose Describe fails ==================
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Lead","queryable":true},{"name":"Vendor","queryable":true}]}';
+
+# Lead -> Vendor (queryable). Vendor describe (2nd call) returns HTTP 500 -> the
+# recursion can't describe it -> not_describable.
+statement ok
+SET sf_mock_describe_status = '200,500';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Lead","fields":[{"name":"VendorId","type":"reference","relationshipName":"Vendor","referenceTo":["Vendor"],"filterable":true}]}|~|{"name":"Vendor","fields":[]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query TTT
+SELECT path, target_object, status
+FROM salesforce_relationship_graph('sf', 'Lead', 2)
+ORDER BY path;
+----
+Vendor	Vendor	not_describable
+
+statement ok
+DETACH sf;

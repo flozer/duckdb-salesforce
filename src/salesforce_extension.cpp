@@ -92,6 +92,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     // Metadata Engine v2 (§17) — read-only field metadata diagnostic.
     loader.RegisterFunction(GetSalesforceMetadataFieldsFunction());
     loader.RegisterFunction(GetSalesforceMetadataObjectsFunction());
+    loader.RegisterFunction(GetSalesforceRelationshipGraphFunction());
     loader.RegisterFunction(GetSalesforceQueryExplainFunction());
 
     // salesforce_relationships() — LAST-RESOLUTION relationship diagnostics
