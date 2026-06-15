@@ -89,6 +89,26 @@ The connector already provides:
 - Public bilingual documentation, contribution docs, MIT license, third-party
   notices, and community descriptor draft.
 
+## Next own-repo release candidate (unreleased on `main`)
+
+Accumulated on `main` since `v0.12.1` (no tag yet; community candidate `v0.12.1`
+stays frozen + parked on the upstream Windows CI blocker
+`duckdb/community-extensions#2061`). Provisional next own-repo tag: **`v0.13.0`**
+(adds a new function → minor bump). Contents:
+
+- **`salesforce_relationship_graph(catalog, object [, max_depth])`** — §18 cut 1,
+  on-demand read-only parent relationship enumerator (explicit per-edge status;
+  depth `[1,4]`). Diagnostic-only.
+- **Compound/address token resolver — mechanism only.** Object-keyed report-side
+  normalizer + Metadata-Engine validation; **the real token map is empty**
+  (entries gated on org fixtures). Not announceable as "ADDRESS2 resolved".
+- **Report-type → base-object builtin map contract clarified** (§16 Phase 1.1
+  cut 1) — fixture-backed, no `reportTypeMetadata` inference.
+
+Release prep (docs/smoke) may proceed; **tagging is GO-gated**. Evidence-gated
+follow-ups (new report-type pairs; real ADDRESS/PHONE token entries; cut 2
+`reportTypeMetadata`) stay blocked until org data lands.
+
 ## v0.9: Salesforce API Coverage
 
 Goal: cover important Salesforce read surfaces that improve the bridge without
