@@ -793,9 +793,13 @@ Acceptance:
 > `reference_to=[back-FK field]`, status `resolved` | `not_queryable` |
 > `unnamed_child` (null `relationshipName` → not SOQL-subquery-addressable;
 > diagnostic, not an error). `childRelationships` parsed additively into Describe.
-> Read-only, metadata-only; no scan/pushdown/Report Bridge change. **Remaining
-> (future):** deep child-of-child graphs, cardinality/junction typing, and
-> feeding Report Bridge once proven safe.
+> Read-only, metadata-only; no scan/pushdown/Report Bridge change. Live smoke
+> **PASS** (real org, `Account` + `include_children`: child resolved /
+> not_queryable / unnamed_child, parents resolved / self_reference / cyclic /
+> polymorphic) — `docs/smoke/relationship-graph-children-v0.14.0.md`. Documented
+> EN/PT (`docs/{en,pt}/function_manual.md`). **Remaining (future):** deep
+> child-of-child graphs, cardinality/junction typing, and feeding Report Bridge
+> once proven safe.
 
 The extension already supports opt-in parent relationship traversal and
 relationship diagnostics. A full relationship graph explorer can help users, but

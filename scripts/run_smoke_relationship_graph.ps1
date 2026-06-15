@@ -1,4 +1,5 @@
-# LIVE smoke runner for salesforce_relationship_graph() (ROADMAP v1.6 §18 cut 1).
+# LIVE smoke runner for salesforce_relationship_graph() (ROADMAP v1.6 §18 cut 1/2
+# — parents + opt-in child relationships).
 #
 # Maintainer-gated manual smoke against a REAL org using the locally-built
 # Release shell (build/release/duckdb.exe) — NOT the community extension.
@@ -8,11 +9,14 @@
 # names, target objects, edge status). No record data is selected or printed.
 #
 # What it runs:
-#   1. pick a queryable object (SF_REL_OBJECT, else first from metadata_objects)
+#   1. pick a queryable object (-Object / SF_REL_OBJECT, else first queryable)
 #   2. salesforce_relationship_graph('sf', <object>, <max_depth>) — parent edges
 #      with status (resolved/polymorphic/self_reference/cyclic/not_queryable/
-#      not_describable)
-#   3. a small status summary (counts per status) — metadata only
+#      not_describable). With -IncludeChildren, also lists the object's direct
+#      child relationships (direction='child'; status incl. unnamed_child).
+#   3. a status summary (counts per direction + status) — metadata only
+#
+# Flags: -Object <name>  -MaxDepth <1..4>  -IncludeChildren
 #
 # Env (required): SF_CLIENT_ID, SF_CLIENT_SECRET, SF_REFRESH_TOKEN
 # Env (optional): SF_LOGIN_URL, SF_API_VERSION, SF_REL_OBJECT, SF_REL_DEPTH,
@@ -23,6 +27,7 @@
 param(
     [string]$Object = $env:SF_REL_OBJECT,
     [int]$MaxDepth = $(if ($env:SF_REL_DEPTH) { [int]$env:SF_REL_DEPTH } else { 2 }),
+    [switch]$IncludeChildren,
     [int]$LimitN = $(if ($env:LIMIT_N) { [int]$env:LIMIT_N } else { 25 }),
     [string]$DuckDbShellPath = $env:DUCKDB_SHELL_PATH,
     [string]$ExtensionPath = $env:SALESFORCE_EXTENSION_PATH
@@ -77,15 +82,19 @@ $attach   = "ATTACH 'salesforce://prod' AS sf (TYPE salesforce, auth_source 'env
 
 $commit = (& git -C $root rev-parse --short HEAD).Trim()
 $tag    = ((& git -C $root tag --points-at HEAD) -join ',')
-Write-Host "=== Relationship graph live smoke (§18 cut 1) ===" -ForegroundColor Cyan
+Write-Host "=== Relationship graph live smoke (§18 cut 1/2) ===" -ForegroundColor Cyan
 Write-Host ("timestamp  : " + (Get-Date -Format o))
 Write-Host ("git commit : $commit  tag: $tag")
 Write-Host ("shell      : $duck")
 Write-Host ("extension  : $extDesc")
 Write-Host ("login_url  : $loginUrl")
 Write-Host ("max_depth  : $MaxDepth")
+Write-Host ("children   : $([bool]$IncludeChildren)  (include_children opt-in)")
 Write-Host "note       : schema metadata only — no record data is read or printed."
 Write-Host ""
+
+# Opt-in child relationships (§18 cut 2). Default off -> parent-only.
+$childArg = if ($IncludeChildren) { ', include_children := true' } else { '' }
 
 function Invoke-Duck([string]$sql) {
     $full = $loadStmt + $sql
@@ -113,14 +122,14 @@ Write-Host ("object     : $Object")
 Write-Host ""
 
 # --- relationship graph (edges + status) -------------------------------------
-Write-Host "[graph] salesforce_relationship_graph('sf', '$Object', $MaxDepth)  (first $LimitN; schema metadata only)" -ForegroundColor Cyan
-$g = Invoke-Duck "$attach`n.mode csv`n.headers on`nSELECT path, relationship_name, target_object, depth_level, status FROM salesforce_relationship_graph('sf', '$Object', $MaxDepth) ORDER BY path LIMIT $LimitN;"
+Write-Host "[graph] salesforce_relationship_graph('sf', '$Object', $MaxDepth$childArg)  (first $LimitN; schema metadata only)" -ForegroundColor Cyan
+$g = Invoke-Duck "$attach`n.mode csv`n.headers on`nSELECT path, relationship_name, target_object, depth_level, direction, status FROM salesforce_relationship_graph('sf', '$Object', $MaxDepth$childArg) ORDER BY direction, path LIMIT $LimitN;"
 if ($g.Failed) { Fail 'salesforce_relationship_graph' $g.Out }
 Write-Host $g.Out
 
-# --- status summary (counts only) --------------------------------------------
-Write-Host "[summary] edge count per status" -ForegroundColor Cyan
-$s = Invoke-Duck "$attach`n.mode line`nSELECT status, count(*) AS edges FROM salesforce_relationship_graph('sf', '$Object', $MaxDepth) GROUP BY status ORDER BY status;"
+# --- status summary (counts only, by direction) ------------------------------
+Write-Host "[summary] edge count per direction + status" -ForegroundColor Cyan
+$s = Invoke-Duck "$attach`n.mode box`nSELECT direction, status, count(*) AS edges FROM salesforce_relationship_graph('sf', '$Object', $MaxDepth$childArg) GROUP BY direction, status ORDER BY direction, status;"
 if ($s.Failed) { Fail 'salesforce_relationship_graph' $s.Out }
 Write-Host $s.Out
 

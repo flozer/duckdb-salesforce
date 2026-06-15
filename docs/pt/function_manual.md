@@ -1085,6 +1085,63 @@ Lendo um resultado típico de `Contact`:
 Com `sf_relationships = 'off'`, a mesma consulta devolve **somente** a linha
 `config` (com `relationships_mode = off`), e nenhuma linha `relationship`.
 
+### `salesforce_relationship_graph(catalog, object [, max_depth] [, include_children := false])`
+
+#### O que faz
+
+Enumerador **sob demanda**, somente leitura, das relações de um objeto, obtido
+pelo Metadata Engine compartilhado (REST Describe). Uma linha por aresta, cada
+uma com um `status` explícito. Diferente de `salesforce_relationships()` (que
+reflete a expansão de pais do *último scan*), esta percorre o grafo de **qualquer**
+objeto que você nomear, independente de `sf_relationships`. Metadata pura; **sem
+mudança de comportamento**.
+
+#### Como funciona
+
+As relações de pai são percorridas em profundidade até `max_depth` (padrão `1`,
+limitado a `[1,4]`). Com `include_children := true`, as relações **filhas
+diretas** do objeto também são listadas (um nível, sem recursão — relações
+filhas se multiplicam muito). Colunas de saída:
+
+| Coluna | Tipo | Notas |
+|---|---|---|
+| `source_object` | VARCHAR | objeto de onde a aresta parte |
+| `relationship_name` | VARCHAR | `relationshipName`; NULL para um filho sem nome |
+| `path` | VARCHAR | caminho pontilhado a partir da raiz (ex.: `Account.Owner`) |
+| `depth_level` | INTEGER | 1 = direto, 2 = avô, … |
+| `target_object` | VARCHAR | objeto relacionado resolvido; NULL se polimórfico / não resolvido |
+| `reference_to` | LIST(VARCHAR) | alvo(s) do pai; para um filho, o campo FK de volta |
+| `direction` | VARCHAR | `parent` ou `child` |
+| `relationship_type` | VARCHAR | `reference` (pai) ou `childRelationship` |
+| `status` | VARCHAR | veja abaixo |
+| `caveat` | VARCHAR | motivo curto; NULL quando `resolved` |
+
+`status` (conjunto fechado): `resolved`, `polymorphic` (múltiplos `referenceTo`,
+reportado mas não percorrido), `self_reference` (auto-pai direto), `cyclic`
+(alvo já no caminho), `not_queryable` (alvo ausente no Describe Global),
+`not_describable` (Describe do alvo falhou), `unnamed_child` (relação filha sem
+`relationshipName` — não endereçável por subconsulta SOQL; diagnóstico, não erro).
+
+#### Por que usar
+
+Entender como um objeto se conecta antes de escrever SOQL/joins: quais pais são
+single-hop seguros, quais são polimórficos ou cíclicos, e quais filhos existem.
+`include_children` é **opt-in** — omitido, a saída é só de pais.
+
+#### Uso diário
+
+```sql
+-- só pais (padrão), dois níveis
+SELECT path, target_object, status
+FROM salesforce_relationship_graph('sf', 'Contact', 2)
+ORDER BY path;
+
+-- inclui as relações filhas diretas do objeto
+SELECT path, target_object, direction, status
+FROM salesforce_relationship_graph('sf', 'Account', include_children := true)
+WHERE direction = 'child';
+```
+
 ### `salesforce_last_soql()`
 
 #### O que faz
