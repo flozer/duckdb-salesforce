@@ -59,6 +59,34 @@ GROUP BY direction ORDER BY direction;
 - Live, on a real Account graph, both parent and child sides are exercised with
   no record data and no secrets.
 
+## Direction filter — live (§18, `direction := 'child'`)
+
+Second maintainer run (commit `a838381`) on the same real `Account`, exercising
+the new `direction` filter:
+`scripts/run_smoke_relationship_graph.ps1 -Object Account -Direction child`.
+
+- header `direction : child`; query used
+  `salesforce_relationship_graph('sf', 'Account', 2, direction := 'child')`;
+- **child-only output — zero `direction=parent` rows** (the filter excludes
+  parents);
+- per-direction/status summary (PII-free, counts only):
+
+```
+┌───────────┬───────────────┬───────┐
+│ direction │    status     │ edges │
+├───────────┼───────────────┼───────┤
+│ child     │ not_queryable │ 7     │
+│ child     │ resolved      │ 131   │
+│ child     │ unnamed_child │ 64    │
+└───────────┴───────────────┴───────┘
+```
+
+For comparison, the same object with `-IncludeChildren` (both sides) added the
+parent rows: `parent` resolved 37 / self_reference 18 / cyclic 8 / polymorphic 6.
+So `direction := 'child'` returns exactly the child subset, no parent noise —
+confirming the filter live. (Real org has 202 child relationships on Account,
+incl. 64 unnamed and 7 non-queryable — all reported, none guessed.)
+
 ## Gates
 
 No tag, no release, no community update. `docs/community/description.yml` stays
