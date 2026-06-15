@@ -797,9 +797,16 @@ Acceptance:
 > **PASS** (real org, `Account` + `include_children`: child resolved /
 > not_queryable / unnamed_child, parents resolved / self_reference / cyclic /
 > polymorphic) — `docs/smoke/relationship-graph-children-v0.14.0.md`. Documented
-> EN/PT (`docs/{en,pt}/function_manual.md`). **Remaining (future):** deep
-> child-of-child graphs, cardinality/junction typing, and feeding Report Bridge
-> once proven safe.
+> EN/PT (`docs/{en,pt}/function_manual.md`).
+>
+> **Direction filter DELIVERED (unreleased on `main`).**
+> `salesforce_relationship_graph(... direction := 'parent'|'child'|'both')`
+> (case-insensitive named param). **Schema unchanged**; **default stays
+> parent-only**; `include_children` kept as a backward-compatible alias;
+> **`direction` wins** on conflict; `direction := 'child'` lists the root's child
+> relationships only. Read-only, metadata-only. EN/PT docs + smoke `-Direction`
+> updated. **Remaining (future):** deep child-of-child graphs,
+> cardinality/junction typing, and feeding Report Bridge once proven safe.
 
 The extension already supports opt-in parent relationship traversal and
 relationship diagnostics. A full relationship graph explorer can help users, but
