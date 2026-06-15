@@ -1,0 +1,126 @@
+# name: test/sql/salesforce_report_base_object.test
+# description: §16 Phase 1.1 — base-object resolution via the builtin report-type
+#              map (fixture-backed), validated by Describe Global (mocked)
+# group: [salesforce]
+#
+# A standard report type's reportType.type is an opaque token, not an sObject API
+# name. It resolves ONLY via the explicit, evidence-backed BuiltinReportTypeObject
+# map, then must be queryable in Describe Global. No new entries are invented;
+# this proves the existing proven pairs + the conservative block paths. Resolving
+# the base only removes the base block — fields/filters still pass the guards.
+# column_prefix stays hint-only (never enables translation).
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true},{"name":"Opportunity","queryable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+# === builtin map: AccountList -> Account (queryable) -> translatable ==========
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Name","type":"string","filterable":true},{"name":"AnnualRevenue","type":"double","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"AccountList"},"reportFormat":"TABULAR","detailColumns":["Name"]}}';
+
+query I
+SELECT translatable AND base_object = 'Account'
+   AND base_object_resolved_by = 'builtin_report_type_map'
+   AND contains(soql, 'FROM Account') AND contains(soql, 'Name')
+   AND translation_status = 'full'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === builtin map: OpportunityList -> Opportunity (queryable) -> translatable ==
+statement ok
+SET sf_mock_describe_body = '{"name":"Opportunity","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"OpportunityList"},"reportFormat":"TABULAR","detailColumns":["Name"]}}';
+
+query I
+SELECT translatable AND base_object = 'Opportunity'
+   AND base_object_resolved_by = 'builtin_report_type_map'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === base resolved but a column is absent -> field guard still blocks ========
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"AccountList"},"reportFormat":"TABULAR","detailColumns":["GhostField"]}}';
+
+query I
+SELECT NOT translatable AND base_object = 'Account'
+   AND blocked_by = 'projected_field'
+   AND list_contains(unresolved_columns, 'GhostField')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === unmapped report type -> base unresolved -> blocked ======================
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"WeirdReportXyz"},"reportFormat":"TABULAR","detailColumns":["Name"]}}';
+
+query I
+SELECT NOT translatable AND blocked_by = 'base_object'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === column_prefix is hint-only: never enables translation ===================
+# Unmapped type, but dotted columns share prefix 'Account' (queryable). The prefix
+# fills provenance but must NOT make the report translatable.
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"WeirdReportXyz"},"reportFormat":"TABULAR","detailColumns":["Account.Name"]}}';
+
+query I
+SELECT NOT translatable AND base_object_resolved_by = 'column_prefix_hint'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === builtin type maps to a NON-queryable object -> blocked ==================
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Opportunity","queryable":true}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"AccountList"},"reportFormat":"TABULAR","detailColumns":["Name"]}}';
+
+query I
+SELECT NOT translatable AND blocked_by = 'base_object'
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+statement ok
+DETACH sf;

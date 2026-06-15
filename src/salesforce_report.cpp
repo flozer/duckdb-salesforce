@@ -485,9 +485,20 @@ struct ReportSoqlGlobalState : public GlobalTableFunctionState {
 // Small, explicit, fixture-backed map for standard report types. Each target is
 // still validated as queryable in Describe Global before use — NOT a broad/auto
 // map. Returns "" for unknown types.
+// Standard report-type -> base sObject map (§16 Phase 1, expanded contract in
+// Phase 1.1). A standard report type's `reportMetadata.reportType.type` is an
+// opaque internal token (not an sObject API name); we translate it only via this
+// explicit, evidence-backed table, then the caller still validates the result
+// with IsQueryable. CONTRACT: every entry is backed by a real report observed
+// against an org (live smoke or captured fixture) — NO entry is added by
+// intuition. A type absent here yields no candidate (base stays unresolved ->
+// the report blocks), never a guess. New pairs land in a separate commit that
+// cites the fixture/evidence.
 static string BuiltinReportTypeObject(const string &report_type) {
     static const std::pair<const char *, const char *> kMap[] = {
+        // evidence: live smoke docs/smoke/report-bridge-v0.11.0.md (real org)
         {"ContactList", "Contact"},
+        // evidence: fixture-backed standard report types (§16 Phase 1)
         {"AccountList", "Account"},
         {"OpportunityList", "Opportunity"},
     };
