@@ -729,6 +729,17 @@ Acceptance:
 
 ### 18. Relationship Resolver v2 — INCLUDE, MID-TERM / INCREMENTAL
 
+> **Cut 1 DELIVERED (unreleased on `main`, post-v0.12.1):**
+> `salesforce_relationship_graph(catalog, object [, max_depth])` — a read-only,
+> on-demand **parent** relationship enumerator sourced through the shared
+> Metadata Engine. One row per edge with an explicit status: `resolved`,
+> `polymorphic` (all `referenceTo` targets reported, not traversed),
+> `self_reference` (direct), `cyclic` (longer path), `not_queryable`,
+> `not_describable`. Depth default 1, clamped `[1,4]`. Diagnostic-only — no scan
+> / pushdown / Report Bridge change; distinct from the last-scan
+> `salesforce_relationships()`. **Remaining (future):** child relationships,
+> cardinality/junction typing, and feeding Report Bridge once proven safe.
+
 The extension already supports opt-in parent relationship traversal and
 relationship diagnostics. A full relationship graph explorer can help users, but
 it must stay a read-only metadata surface and should not become an automatic
