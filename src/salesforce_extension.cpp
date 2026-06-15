@@ -366,6 +366,12 @@ static void LoadInternal(ExtensionLoader &loader) {
     config.AddExtensionOption("sf_mock_report_describe_body",
                               "TEST ONLY. Analytics report /describe JSON body ('|~|').",
                               LogicalType::VARCHAR, Value(""));
+    config.AddExtensionOption(
+        "sf_mock_report_token_map",
+        "TEST ONLY. Inject report compound/address token mappings for the Report "
+        "Bridge normalizer: 'Object:TOKEN=Field;Object:TOKEN2=Field2'. The real "
+        "map is empty; this drives the mechanism in tests without hardcoded entries.",
+        LogicalType::VARCHAR, Value(""));
 }
 
 void SalesforceExtension::Load(ExtensionLoader &loader) {

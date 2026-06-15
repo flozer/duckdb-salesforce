@@ -527,6 +527,62 @@ static string DominantColumnPrefix(const vector<string> &columns,
     return *prefixes.begin();
 }
 
+// Report-Bridge compound/address token normalizer (#v1.6, §16 follow-up).
+// Salesforce report builtin positional tokens (ADDRESS2_CITY, PHONE1, ...) are
+// not sObject field API names. Map a (base_object, token) pair to a CANDIDATE
+// component field API name; the caller then validates the candidate against the
+// Describe via the Metadata Engine (existence + filterability). Object-keyed,
+// never universal. The real map is intentionally EMPTY — entries are added only
+// with real org fixture evidence, in a separate commit. Tests inject controlled
+// mappings via sf_mock_report_token_map. Returns "" when no mapping applies (the
+// caller then leaves the token unresolved → the report blocks; no guessing).
+static string ResolveReportTokenCandidate(ClientContext &context, const string &base,
+                                          const string &token) {
+    // 1. Real, fixture-backed, object-keyed map. EMPTY until org evidence lands.
+    //    Add entries ONLY with a captured report proving (object, token, field).
+    struct TokenEntry {
+        const char *object;
+        const char *token;
+        const char *field;
+    };
+    // EMPTY until org evidence lands (a zero-size C array is ill-formed, so use a
+    // vector). Add entries ONLY with a captured report proving (object, token, field).
+    static const vector<TokenEntry> kReal = {
+        // {"Contact", "ADDRESS2_CITY", "OtherCity"},  // example — needs fixture proof
+    };
+    for (auto &e : kReal) {
+        if (StringUtil::CIEquals(base, e.object) && StringUtil::CIEquals(token, e.token)) {
+            return e.field;
+        }
+    }
+    // 2. TEST-ONLY injection: sf_mock_report_token_map = "Obj:TOKEN=Field;...".
+    Value v;
+    if (!context.TryGetCurrentSetting("sf_mock_report_token_map", v) || v.IsNull()) {
+        return "";
+    }
+    string spec = v.ToString();
+    if (spec.empty()) {
+        return "";
+    }
+    for (auto &entry : StringUtil::Split(spec, ';')) {
+        auto colon = entry.find(':');
+        auto eq = entry.find('=', colon == string::npos ? 0 : colon);
+        if (colon == string::npos || eq == string::npos || eq <= colon + 1) {
+            continue;
+        }
+        string e_obj = entry.substr(0, colon);
+        string e_tok = entry.substr(colon + 1, eq - colon - 1);
+        string e_field = entry.substr(eq + 1);
+        StringUtil::Trim(e_obj);
+        StringUtil::Trim(e_tok);
+        StringUtil::Trim(e_field);
+        if (StringUtil::CIEquals(base, e_obj) && StringUtil::CIEquals(token, e_tok)) {
+            return e_field;
+        }
+    }
+    return "";
+}
+
 static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
                                                TableFunctionBindInput &input,
                                                vector<LogicalType> &return_types,
@@ -724,7 +780,18 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context,
         out_related.clear();
         auto dot = token.find('.');
         if (dot == string::npos) {
-            return engine.ResolveField(context, base, token, out, out_filterable);
+            if (engine.ResolveField(context, base, token, out, out_filterable)) {
+                return true;
+            }
+            // Report builtin compound/address/phone token (e.g. ADDRESS2_CITY,
+            // PHONE1): map (base, token) -> a candidate component field, then
+            // validate the candidate against Describe. Empty real map; no guess.
+            string candidate = ResolveReportTokenCandidate(context, base, token);
+            if (!candidate.empty() &&
+                engine.ResolveField(context, base, candidate, out, out_filterable)) {
+                return true;
+            }
+            return false;
         }
         string prefix = token.substr(0, dot);
         string rest = token.substr(dot + 1);

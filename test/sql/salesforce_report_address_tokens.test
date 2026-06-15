@@ -1,0 +1,127 @@
+# name: test/sql/salesforce_report_address_tokens.test
+# description: §16 follow-up — report compound/address token resolver (mechanism)
+# group: [salesforce]
+#
+# Report builtin positional tokens (ADDRESS2_CITY, PHONE1, ...) are not sObject
+# field API names. A report-side, object-keyed normalizer maps (base, token) ->
+# a candidate component field; the Metadata Engine then VALIDATES the candidate
+# (must exist; filterable for WHERE). No partial translation: an unmapped token,
+# a wrong-object key, or a candidate absent/not-filterable in Describe -> blocked.
+#
+# The real map is EMPTY (entries land only with org fixture evidence). This test
+# drives the mechanism via the test-only injection knob sf_mock_report_token_map
+# ("Object:TOKEN=Field;..."), so we prove the wiring without inventing entries.
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Contact","queryable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+# Contact: OtherCity/OtherStreet filterable; Phone NOT filterable.
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Name","type":"string","filterable":true},{"name":"OtherCity","type":"string","filterable":true},{"name":"OtherStreet","type":"string","filterable":true},{"name":"Phone","type":"phone","filterable":false}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+# === (Contact, ADDRESS2_CITY) -> OtherCity, validated -> translatable =========
+statement ok
+SET sf_mock_report_token_map = 'Contact:ADDRESS2_CITY=OtherCity';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Contact"},"reportFormat":"TABULAR","detailColumns":["ADDRESS2_CITY"]}}';
+
+query I
+SELECT translatable AND base_object = 'Contact'
+   AND contains(soql, 'FROM Contact')
+   AND contains(soql, 'OtherCity')
+   AND translation_status = 'full'
+   AND confidence = 1.0
+   AND len(columns) = 1
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === candidate absent from Describe -> blocked ===============================
+statement ok
+SET sf_mock_report_token_map = 'Contact:ADDRESS2_CITY=GhostCity';
+
+query I
+SELECT NOT translatable AND soql IS NULL
+   AND translation_status = 'none' AND blocked_by = 'projected_field'
+   AND list_contains(unresolved_columns, 'ADDRESS2_CITY')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === wrong object key -> no match -> blocked =================================
+statement ok
+SET sf_mock_report_token_map = 'Account:ADDRESS2_CITY=OtherCity';
+
+query I
+SELECT NOT translatable AND blocked_by = 'projected_field'
+   AND list_contains(unresolved_columns, 'ADDRESS2_CITY')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === unmapped token -> blocked (never guessed) ===============================
+statement ok
+SET sf_mock_report_token_map = '';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Contact"},"reportFormat":"TABULAR","detailColumns":["ADDRESS2_STREET"]}}';
+
+query I
+SELECT NOT translatable AND blocked_by = 'projected_field'
+   AND list_contains(unresolved_columns, 'ADDRESS2_STREET')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === mapped filter token resolves, but the field is not filterable -> blocked =
+# PHONE1 -> Phone (proves the normalizer feeds the filter path too); Phone is not
+# filterable, so the existing filterability gate blocks it (reason 'filterability',
+# NOT 'filter_field' — which would mean the token never resolved).
+statement ok
+SET sf_mock_report_token_map = 'Contact:PHONE1=Phone';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Contact"},"reportFormat":"TABULAR","detailColumns":["Name"],"reportFilters":[{"column":"PHONE1","operator":"equals","value":"x"}]}}';
+
+query I
+SELECT NOT translatable AND translation_status = 'none' AND blocked_by = 'filterability'
+   AND contains(caveats, 'PHONE1')
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === mapped column resolves while a sibling stays valid ======================
+statement ok
+SET sf_mock_report_token_map = 'Contact:ADDRESS2_CITY=OtherCity;Contact:ADDRESS2_STREET=OtherStreet';
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"CustomEntity$Contact"},"reportFormat":"TABULAR","detailColumns":["ADDRESS2_CITY","ADDRESS2_STREET","Name"]}}';
+
+query I
+SELECT translatable AND translation_status = 'full'
+   AND contains(soql, 'OtherCity') AND contains(soql, 'OtherStreet') AND contains(soql, 'Name')
+   AND len(columns) = 3
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+statement ok
+DETACH sf;
