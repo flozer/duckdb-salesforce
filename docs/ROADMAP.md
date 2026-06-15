@@ -588,6 +588,17 @@ engine.
 > Investigate the report `/describe` `reportTypeMetadata` (or related describe
 > metadata) to map report type → actual base sObject when it can be done safely,
 > raising the translatable rate without weakening the safety guards.
+>
+> **Compound/address token resolver — MECHANISM DELIVERED (unreleased on `main`,
+> post-v0.12.1).** Salesforce report builtin positional tokens (`ADDRESS2_CITY`,
+> `PHONE1`, …) are not sObject field API names. A report-side, object-keyed
+> normalizer maps `(base, token)` → a candidate component field, which is then
+> validated against Describe via the Metadata Engine (existence + filterability
+> for WHERE) before it can enter SOQL; WHERE uses the same path. **The real map
+> is empty** — entries are added only with captured org fixture evidence
+> (separate commit). No partial translation: unmapped / wrong-object / absent /
+> non-filterable → the report blocks. **Not yet announceable as "ADDRESS2
+> resolved"** until a proven map exists.
 
 Salesforce reports are useful business-authored definitions, but they are not
 SOQL queries and do not expose an underlying query. This feature should provide a
