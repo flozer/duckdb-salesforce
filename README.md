@@ -8,7 +8,7 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.13.0"><img alt="release v0.13.0" src="https://img.shields.io/badge/release-v0.13.0-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.14.0"><img alt="release v0.14.0" src="https://img.shields.io/badge/release-v0.14.0-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
     <a href="https://github.com/duckdb/community-extensions/pull/2037"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-merged-brightgreen.svg"></a>
   </p>
@@ -242,10 +242,10 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.13.0**. Community baseline: **v0.9.2**. The community
+Own-repo release: **v0.14.0**. Community baseline: **v0.9.2**. The community
 update is **parked** on the upstream Windows CI blocker
 (`duckdb/community-extensions#2061`); `v0.12.1` stays the frozen community
-candidate. v0.13.0 is an own-repo release only (its Windows asset builds on
+candidate. v0.14.0 is an own-repo release only (its Windows asset builds on
 `windows-2022`, unaffected by `#2061`).
 
 | Area | Status |
