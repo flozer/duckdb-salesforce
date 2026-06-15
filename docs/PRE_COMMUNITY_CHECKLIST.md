@@ -42,6 +42,13 @@ anything to `duckdb/community-extensions`.
       from the release archive loads and the new functions resolve
       (`salesforce_metadata_objects`, `salesforce_metadata_fields`,
       `salesforce_query_explain`, Report Bridge).
+- [ ] **Functional artifact smoke, not just compile/LOAD** — after the release
+      artifact loads in stock DuckDB, run at least one real function call per
+      new surface (`salesforce_metadata_objects`, `salesforce_metadata_fields`,
+      `salesforce_query_explain`, Report Bridge). Rationale: a compiled/loaded
+      DuckDB extension can still fail only when a function executes; keep this
+      gate explicit before any community update. Reference:
+      <https://rusty.today/blog/testing-duckdb-wasm-extensions/>.
 - [ ] **Anonymous shallow clone of `v0.12.1`** resolves the tag/commit.
 - [ ] No compiler warnings treated as errors / no portability `#ifdef` gaps.
 
