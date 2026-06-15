@@ -589,6 +589,20 @@ engine.
 > metadata) to map report type → actual base sObject when it can be done safely,
 > raising the translatable rate without weakening the safety guards.
 >
+> **Phase 1.1 cut 1 DELIVERED (unreleased on `main`, post-v0.12.1) — builtin map
+> contract clarified, fixture-backed.** The standard `reportType.type → base
+> sObject` map (`BuiltinReportTypeObject`) is now an explicit **evidence-backed
+> contract**: every entry is proven by a real report (live smoke / captured
+> fixture); a type absent from it yields **no candidate** (base unresolved →
+> block), never a guess. The 3 proven pairs
+> (`ContactList`/`AccountList`/`OpportunityList`) are annotated with provenance;
+> the structure is ready for fixture-backed additions in separate commits. This
+> is **not** general `reportTypeMetadata` resolution. **Gated follow-ups (need
+> org evidence):** new `reportType.type → object` pairs (separate commit +
+> fixture); **cut 2** — `reportTypeMetadata` first-category unique-object
+> resolution — only with a real PII-free `/describe` sample proving it
+> unambiguous. `column_prefix` stays hint-only; no Metadata API.
+>
 > **Compound/address token resolver — MECHANISM DELIVERED (unreleased on `main`,
 > post-v0.12.1).** Salesforce report builtin positional tokens (`ADDRESS2_CITY`,
 > `PHONE1`, …) are not sObject field API names. A report-side, object-keyed
