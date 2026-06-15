@@ -828,19 +828,36 @@ unique_ptr<FunctionData> RelGraphBind(ClientContext &context, TableFunctionBindI
         throw BinderException("salesforce_relationship_graph: object '" + object +
                               "' could not be described");
     }
-    vector<string> visited;
-    visited.push_back(object);
-    RelGraphWalk(context, eng, object, "", 1, max_depth, visited, bind->rows);
-
-    // Opt-in child relationships (#v1.6 §18 cut 2): default OFF keeps the output
-    // byte-identical to the parent-only cut. ROOT object only, single level, no
-    // recursion (child relationships fan out heavily). direction='child'.
+    // Direction filter (#v1.6 §18). Resolution order (backward compatible):
+    //   1. explicit `direction := parent|child|both` wins;
+    //   2. else `include_children := true` -> both;
+    //   3. else -> parent (today's default; never emit children silently).
     bool include_children = false;
     auto ic = input.named_parameters.find("include_children");
     if (ic != input.named_parameters.end() && !ic->second.IsNull()) {
         include_children = ic->second.GetValue<bool>();
     }
-    if (include_children) {
+    string direction = include_children ? "both" : "parent";
+    auto dp = input.named_parameters.find("direction");
+    if (dp != input.named_parameters.end() && !dp->second.IsNull()) {
+        direction = StringUtil::Lower(dp->second.ToString()); // case-insensitive
+        if (direction != "parent" && direction != "child" && direction != "both") {
+            throw BinderException("salesforce_relationship_graph: direction must be "
+                                  "'parent', 'child', or 'both'");
+        }
+    }
+    const bool want_parent = (direction == "parent" || direction == "both");
+    const bool want_child = (direction == "child" || direction == "both");
+
+    if (want_parent) {
+        vector<string> visited;
+        visited.push_back(object);
+        RelGraphWalk(context, eng, object, "", 1, max_depth, visited, bind->rows);
+    }
+
+    // Child relationships (#v1.6 §18 cut 2): ROOT object only, single level, no
+    // recursion (child relationships fan out heavily). direction='child'.
+    if (want_child) {
         const SalesforceDescribe &root = eng.GetObjectDescribe(context, object); // cached
         for (auto &cr : root.child_relationships) {
             RelEdgeRow r;
@@ -977,6 +994,9 @@ TableFunction GetSalesforceRelationshipGraphFunction() {
     fn.varargs = LogicalType::INTEGER;
     // Opt-in child relationships (#v1.6 §18 cut 2); default false.
     fn.named_parameters["include_children"] = LogicalType::BOOLEAN;
+    // Direction filter (#v1.6 §18): 'parent' | 'child' | 'both'. Wins over
+    // include_children; default 'parent'.
+    fn.named_parameters["direction"] = LogicalType::VARCHAR;
     return fn;
 }
 

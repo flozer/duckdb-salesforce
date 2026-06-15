@@ -16,7 +16,7 @@
 #      child relationships (direction='child'; status incl. unnamed_child).
 #   3. a status summary (counts per direction + status) — metadata only
 #
-# Flags: -Object <name>  -MaxDepth <1..4>  -IncludeChildren
+# Flags: -Object <name>  -MaxDepth <1..4>  -IncludeChildren  -Direction parent|child|both
 #
 # Env (required): SF_CLIENT_ID, SF_CLIENT_SECRET, SF_REFRESH_TOKEN
 # Env (optional): SF_LOGIN_URL, SF_API_VERSION, SF_REL_OBJECT, SF_REL_DEPTH,
@@ -28,6 +28,8 @@ param(
     [string]$Object = $env:SF_REL_OBJECT,
     [int]$MaxDepth = $(if ($env:SF_REL_DEPTH) { [int]$env:SF_REL_DEPTH } else { 2 }),
     [switch]$IncludeChildren,
+    [ValidateSet('parent', 'child', 'both')]
+    [string]$Direction,
     [int]$LimitN = $(if ($env:LIMIT_N) { [int]$env:LIMIT_N } else { 25 }),
     [string]$DuckDbShellPath = $env:DUCKDB_SHELL_PATH,
     [string]$ExtensionPath = $env:SALESFORCE_EXTENSION_PATH
@@ -90,11 +92,15 @@ Write-Host ("extension  : $extDesc")
 Write-Host ("login_url  : $loginUrl")
 Write-Host ("max_depth  : $MaxDepth")
 Write-Host ("children   : $([bool]$IncludeChildren)  (include_children opt-in)")
+Write-Host ("direction  : $(if ($Direction) { $Direction } else { '(default)' })")
 Write-Host "note       : schema metadata only — no record data is read or printed."
 Write-Host ""
 
-# Opt-in child relationships (§18 cut 2). Default off -> parent-only.
-$childArg = if ($IncludeChildren) { ', include_children := true' } else { '' }
+# Opt-in child relationships (§18 cut 2) + direction filter (§18). direction
+# wins over include_children when both are given (handled by the function).
+$childArg = ''
+if ($IncludeChildren) { $childArg += ', include_children := true' }
+if ($Direction) { $childArg += ", direction := '$Direction'" }
 
 function Invoke-Duck([string]$sql) {
     $full = $loadStmt + $sql
