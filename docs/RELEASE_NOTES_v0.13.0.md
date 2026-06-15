@@ -58,9 +58,10 @@ mechanism is in place, proven entries land later.
 
 - Offline mock suite green (full `*salesforce*`: 2768 assertions, 0 fail; 8 live
   tests gated/skipped).
-- [ ] Live maintainer smoke (PII-free) for `salesforce_relationship_graph()` —
-      runner `scripts/run_smoke_relationship_graph.ps1`; evidence doc to be added
-      under `docs/smoke/`.
+- [x] Live maintainer smoke (PII-free) for `salesforce_relationship_graph()` —
+      `salesforce_relationship_graph('sf','Contact',2)` on a real org exercised
+      all edge statuses (resolved 35 / self_reference 21 / cyclic 4 /
+      polymorphic 4). Evidence: `docs/smoke/relationship-graph-v0.13.0.md`.
 - [ ] Fresh matrix CI at the eventual `v0.13.0` ref (linux + osx green; Windows
       subject to the same upstream `#2061` blocker — assess at tag time).
 
