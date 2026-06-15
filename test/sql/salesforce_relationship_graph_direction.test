@@ -1,0 +1,93 @@
+# name: test/sql/salesforce_relationship_graph_direction.test
+# description: v1.6 §18 — direction := 'parent'|'child'|'both' filter (mocked)
+# group: [salesforce]
+#
+# direction wins over include_children; else include_children:=true -> both;
+# else parent (today's default). Schema unchanged; read-only; metadata-only.
+# direction is case-insensitive; invalid -> BinderException. max_depth validated
+# normally (it just doesn't affect child-only rows, which are root-level).
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true},{"name":"Contact","queryable":true},{"name":"User","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User"],"filterable":true}],"childRelationships":[{"childSObject":"Contact","field":"AccountId","relationshipName":"Contacts"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === default: parent-only (unchanged) ========================================
+query TI
+SELECT direction, count(*) FROM salesforce_relationship_graph('sf', 'Account')
+GROUP BY direction ORDER BY direction;
+----
+parent	1
+
+# === include_children := true -> both (unchanged) ============================
+query TI
+SELECT direction, count(*) FROM salesforce_relationship_graph('sf', 'Account', include_children := true)
+GROUP BY direction ORDER BY direction;
+----
+child	1
+parent	1
+
+# === direction := 'parent' -> parent-only ====================================
+query TI
+SELECT direction, count(*) FROM salesforce_relationship_graph('sf', 'Account', direction := 'parent')
+GROUP BY direction ORDER BY direction;
+----
+parent	1
+
+# === direction := 'child' -> child-only (no parents) =========================
+query TI
+SELECT direction, count(*) FROM salesforce_relationship_graph('sf', 'Account', direction := 'child')
+GROUP BY direction ORDER BY direction;
+----
+child	1
+
+# === direction := 'both' -> parent + child ===================================
+query TI
+SELECT direction, count(*) FROM salesforce_relationship_graph('sf', 'Account', direction := 'both')
+GROUP BY direction ORDER BY direction;
+----
+child	1
+parent	1
+
+# === precedence: direction wins over include_children ========================
+query TI
+SELECT direction, count(*)
+FROM salesforce_relationship_graph('sf', 'Account', include_children := true, direction := 'parent')
+GROUP BY direction ORDER BY direction;
+----
+parent	1
+
+# === case-insensitive ========================================================
+query I
+SELECT count(*) = 1
+FROM salesforce_relationship_graph('sf', 'Account', direction := 'CHILD')
+WHERE direction = 'child';
+----
+true
+
+# === invalid direction -> error ==============================================
+statement error
+SELECT * FROM salesforce_relationship_graph('sf', 'Account', direction := 'sideways');
+----
+direction
+
+# === direction := 'child' ignores max_depth (children stay single-level) =====
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 4, direction := 'child');
+----
+1
+
+statement ok
+DETACH sf;

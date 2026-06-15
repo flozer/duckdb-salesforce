@@ -1085,7 +1085,7 @@ Lendo um resultado típico de `Contact`:
 Com `sf_relationships = 'off'`, a mesma consulta devolve **somente** a linha
 `config` (com `relationships_mode = off`), e nenhuma linha `relationship`.
 
-### `salesforce_relationship_graph(catalog, object [, max_depth] [, include_children := false])`
+### `salesforce_relationship_graph(catalog, object [, max_depth] [, include_children := false] [, direction := 'parent'])`
 
 #### O que faz
 
@@ -1101,7 +1101,14 @@ mudança de comportamento**.
 As relações de pai são percorridas em profundidade até `max_depth` (padrão `1`,
 limitado a `[1,4]`). Com `include_children := true`, as relações **filhas
 diretas** do objeto também são listadas (um nível, sem recursão — relações
-filhas se multiplicam muito). Colunas de saída:
+filhas se multiplicam muito).
+
+`direction := 'parent' | 'child' | 'both'` filtra quais lados retornam
+(case-insensitive). **Vence** sobre `include_children` quando ambos são
+informados; senão `include_children := true` significa `both` e o padrão é
+`parent`. Use `direction := 'child'` para listar só relações filhas sem o ruído
+dos pais. `max_depth` se aplica à travessia de pais; linhas filhas são sempre de
+nível raiz. Colunas de saída:
 
 | Coluna | Tipo | Notas |
 |---|---|---|

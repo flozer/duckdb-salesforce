@@ -1105,7 +1105,7 @@ SELECT Id FROM sf.Account LIMIT 1;
 SELECT * FROM salesforce_relationships();   -- one config row only
 ```
 
-### `salesforce_relationship_graph(catalog, object [, max_depth] [, include_children := false])`
+### `salesforce_relationship_graph(catalog, object [, max_depth] [, include_children := false] [, direction := 'parent'])`
 
 #### What it does
 
@@ -1120,7 +1120,14 @@ name, independent of `sf_relationships`. Pure metadata; **zero behavior change**
 Parent relationships are walked depth-first up to `max_depth` (default `1`,
 clamped to `[1,4]`). With `include_children := true`, the object's **direct**
 child relationships are also listed (single level, not recursed — child
-relationships fan out heavily). Output columns:
+relationships fan out heavily).
+
+`direction := 'parent' | 'child' | 'both'` filters which sides are returned
+(case-insensitive). It **wins** over `include_children` when both are given;
+otherwise `include_children := true` means `both` and the default is `parent`.
+Use `direction := 'child'` to list only child relationships without parent
+noise. `max_depth` applies to parent traversal; child rows are always
+root-level. Output columns:
 
 | Column | Type | Notes |
 |---|---|---|
