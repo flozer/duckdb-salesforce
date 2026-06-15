@@ -21,7 +21,7 @@
 # Exit: 0 success / BLOCKED-no-object ; 2 setup error ; 3 missing creds ; 4 FAIL.
 
 param(
-    [string]$RelObject = $env:SF_REL_OBJECT,
+    [string]$Object = $env:SF_REL_OBJECT,
     [int]$MaxDepth = $(if ($env:SF_REL_DEPTH) { [int]$env:SF_REL_DEPTH } else { 2 }),
     [int]$LimitN = $(if ($env:LIMIT_N) { [int]$env:LIMIT_N } else { 25 }),
     [string]$DuckDbShellPath = $env:DUCKDB_SHELL_PATH,
@@ -100,27 +100,27 @@ function Fail([string]$step, [string]$out) {
 }
 
 # --- pick object --------------------------------------------------------------
-if (-not $RelObject) {
+if (-not $Object) {
     $d = Invoke-Duck "$attach`n.mode csv`n.headers off`nSELECT object_name FROM salesforce_metadata_objects('sf') WHERE queryable ORDER BY object_name LIMIT 1;"
     if ($d.Failed) { Fail 'salesforce_metadata_objects' $d.Out }
-    $RelObject = (($d.Out -split "`r?`n") | Where-Object { $_ -ne '' } | Select-Object -First 1).Trim('"').Trim()
+    $Object = (($d.Out -split "`r?`n") | Where-Object { $_ -ne '' } | Select-Object -First 1).Trim('"').Trim()
 }
-if (-not $RelObject) {
+if (-not $Object) {
     Write-Host "BLOCKED: no queryable object discovered (org-data block)" -ForegroundColor Yellow
     exit 0
 }
-Write-Host ("object     : $RelObject")
+Write-Host ("object     : $Object")
 Write-Host ""
 
 # --- relationship graph (edges + status) -------------------------------------
-Write-Host "[graph] salesforce_relationship_graph('sf', '$RelObject', $MaxDepth)  (first $LimitN; schema metadata only)" -ForegroundColor Cyan
-$g = Invoke-Duck "$attach`n.mode csv`n.headers on`nSELECT path, relationship_name, target_object, depth_level, status FROM salesforce_relationship_graph('sf', '$RelObject', $MaxDepth) ORDER BY path LIMIT $LimitN;"
+Write-Host "[graph] salesforce_relationship_graph('sf', '$Object', $MaxDepth)  (first $LimitN; schema metadata only)" -ForegroundColor Cyan
+$g = Invoke-Duck "$attach`n.mode csv`n.headers on`nSELECT path, relationship_name, target_object, depth_level, status FROM salesforce_relationship_graph('sf', '$Object', $MaxDepth) ORDER BY path LIMIT $LimitN;"
 if ($g.Failed) { Fail 'salesforce_relationship_graph' $g.Out }
 Write-Host $g.Out
 
 # --- status summary (counts only) --------------------------------------------
 Write-Host "[summary] edge count per status" -ForegroundColor Cyan
-$s = Invoke-Duck "$attach`n.mode line`nSELECT status, count(*) AS edges FROM salesforce_relationship_graph('sf', '$RelObject', $MaxDepth) GROUP BY status ORDER BY status;"
+$s = Invoke-Duck "$attach`n.mode line`nSELECT status, count(*) AS edges FROM salesforce_relationship_graph('sf', '$Object', $MaxDepth) GROUP BY status ORDER BY status;"
 if ($s.Failed) { Fail 'salesforce_relationship_graph' $s.Out }
 Write-Host $s.Out
 
