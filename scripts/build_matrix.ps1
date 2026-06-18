@@ -58,7 +58,7 @@ function Invoke-OfflineTests([string]$buildDir) {
     try {
         Get-ChildItem "$root/test/sql/salesforce_*.test" | Where-Object { $_.Name -notlike '*_live*' } | ForEach-Object {
             $out = (& $unittest "test/sql/$($_.Name)" 2>&1 | Out-String)
-            if ($out -match 'All tests passed \((\d+) assertions') { $pass++; $asserts += [int]$Matches[1] }
+            if ($out -match 'All tests passed \((\d+) assertions?') { $pass++; $asserts += [int]$Matches[1] }
             elseif ($out -match 'Skipped tests') { $skip++ }
             else { $fail++; Write-Host "    FAIL $($_.Name)" }
         }
