@@ -8,9 +8,10 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.14.0"><img alt="release v0.14.0" src="https://img.shields.io/badge/release-v0.14.0-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.14.1"><img alt="release v0.14.1" src="https://img.shields.io/badge/release-v0.14.1-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
-    <a href="https://github.com/duckdb/community-extensions/pull/2037"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-merged-brightgreen.svg"></a>
+    <a href="https://github.com/duckdb/community-extensions/pull/2078"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-merged-brightgreen.svg"></a>
+    <a href="https://duckdb.org/community_extensions/download_metrics"><img alt="DuckDB Community total downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fflozer%2Fduckdb-salesforce%2Fmain%2F.github%2Fbadges%2Fdownloads.json"></a>
   </p>
   <p>
     <a href="docs/en/usage_guide.md">Usage guide</a> |
@@ -29,8 +30,10 @@ using DuckDB as the local OLAP engine for ad hoc analysis, BI staging, Parquet
 exports, lakehouse-style snapshots, and cross-source joins.
 
 `duckdb-salesforce` is the first Salesforce extension published in the DuckDB
-Community Extensions registry, merged via
-[duckdb/community-extensions#2037](https://github.com/duckdb/community-extensions/pull/2037).
+Community Extensions registry, added via
+[duckdb/community-extensions#2037](https://github.com/duckdb/community-extensions/pull/2037)
+and updated to `v0.14.1` via
+[duckdb/community-extensions#2078](https://github.com/duckdb/community-extensions/pull/2078).
 
 The extension is a bridge, not an ETL platform: Salesforce access, transport,
 authentication, metadata, and safe pushdown live here; joins, aggregations,
@@ -50,9 +53,11 @@ materialization, files, and downstream analytics stay in DuckDB.
   modes are surfaced explicitly.
 - **Secret-safe by default** - credentials come from options, environment, SFDX
   auth URL, or JWT key files; tokens, keys, JWTs, and org data are never logged.
-- **Published in DuckDB Community Extensions** - merged through
-  [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037);
-  the pinned `v0.9.2` source ref is public-clone validated and CI green.
+- **Published in DuckDB Community Extensions** - added through
+  [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037)
+  and updated through
+  [`duckdb/community-extensions#2078`](https://github.com/duckdb/community-extensions/pull/2078);
+  the pinned `v0.14.1` source ref is public-clone validated and CI green.
 
 ## Features
 
@@ -242,11 +247,10 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.14.0**. Community baseline: **v0.9.2**. The community
-update is **parked** on the upstream Windows CI blocker
-(`duckdb/community-extensions#2061`); `v0.12.1` stays the frozen community
-candidate. v0.14.0 is an own-repo release only (its Windows asset builds on
-`windows-2022`, unaffected by `#2061`).
+Own-repo release: **v0.14.1**. Community baseline: **v0.14.1**, merged in
+[`duckdb/community-extensions#2078`](https://github.com/duckdb/community-extensions/pull/2078).
+The previous upstream Windows CI blocker was cleared by the DuckDB `v1.5.4`
+community pin; new DuckDB releases still require explicit validation.
 
 | Area | Status |
 |---|---|
@@ -283,12 +287,12 @@ Windows MSVC and RTOOLS/MinGW local validation are documented in
 
 Validated matrix:
 
-| Platform | DuckDB v1.5.2 | DuckDB v1.5.3 |
-|---|---:|---:|
-| Linux x64 | Pass | Pass |
-| Windows x64 | Pass | Pass |
-| macOS arm64 | Pass | Pass |
-| Windows RTOOLS/MinGW local | - | Pass |
+| Platform | DuckDB v1.5.2 | DuckDB v1.5.3 | DuckDB v1.5.4 |
+|---|---:|---:|---:|
+| Linux x64 | Pass | Pass | Pass |
+| Windows x64 | Pass | Pass | Pass |
+| macOS arm64 | Pass | Pass | Pass |
+| Windows RTOOLS/MinGW local | - | Pass | - |
 
 DuckDB extensions are version-locked to the DuckDB release used at build time.
 
@@ -316,7 +320,7 @@ src/include/          public/internal headers
 test/sql/             offline sqllogictest suite
 scripts/              smoke/build helpers
 docs/en/, docs/pt/    public documentation
-docs/community/       community submission package, C.5-gated
+docs/community/       community descriptor and update history
 third_party/httplib/  vendored HTTP client
 ```
 
@@ -330,23 +334,20 @@ third_party/httplib/  vendored HTTP client
 
 ## Community Catalog
 
-This repository is prepared for a DuckDB community extension submission, but no
-publication happens automatically. Per project gate **C.5**, there is no branch,
-push, PR, tag, or release to `duckdb/community-extensions` without explicit
-human approval.
+This repository is published in the DuckDB community catalog. Publication still
+does not happen automatically: future branch, push, PR, tag, or release actions
+against `duckdb/community-extensions` require explicit human approval.
 
-The staged descriptor lives at [docs/community/description.yml](docs/community/description.yml).
+The live descriptor mirror lives at [docs/community/description.yml](docs/community/description.yml).
 Readiness evidence lives at
 [docs/community/PR_READINESS.md](docs/community/PR_READINESS.md).
 
-After community acceptance, the expected signed install path is:
+Signed install path:
 
 ```sql
 INSTALL salesforce FROM community;
 LOAD salesforce;
 ```
-
-Until then, use a local unsigned build.
 
 ## Author
 

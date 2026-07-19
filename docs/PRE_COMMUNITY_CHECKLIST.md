@@ -1,5 +1,10 @@
 # Pre-Community Checklist — v0.12.1 UPDATE
 
+> **Superseded (2026-06-19):** community update `v0.14.1` was merged in
+> [`duckdb/community-extensions#2078`](https://github.com/duckdb/community-extensions/pull/2078).
+> This document is retained as historical planning evidence for the earlier
+> `v0.12.1` attempt and upstream Windows CI blocker.
+
 > **Submission ref: `v0.12.1`** (supersedes `v0.12.0`, whose tag carried stale
 > `vcpkg.json` version metadata; `v0.12.1` is a provenance-only release, no
 > runtime change — `docs/RELEASE_NOTES_v0.12.1.md`). A few lines below cite

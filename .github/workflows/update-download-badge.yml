@@ -1,0 +1,36 @@
+name: Update download badge
+
+on:
+  schedule:
+    # DuckDB publishes the weekly archive around 04:00 UTC.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-download-badge
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Recalculate cumulative downloads
+        run: python scripts/update_download_badge.py
+
+      - name: Commit updated badge payload
+        shell: bash
+        run: |
+          if git diff --quiet -- .github/badges/downloads.json; then
+            echo "Download total unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/downloads.json
+          git commit -m "chore: update community download count"
+          git push

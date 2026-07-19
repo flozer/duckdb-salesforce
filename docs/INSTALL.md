@@ -1,14 +1,21 @@
 # Installing `duckdb-salesforce` (local build)
 
-`duckdb-salesforce` is an out-of-tree DuckDB extension. It is **not** published to
-the DuckDB community-extensions repository (that step is human-gated — see
-[PRE_COMMUNITY_CHECKLIST.md](PRE_COMMUNITY_CHECKLIST.md)). Until then, build it
-locally and load the **unsigned** artifact.
+`duckdb-salesforce` is an out-of-tree DuckDB extension published in the DuckDB
+Community Extensions registry. Install and load the signed build with:
+
+```sql
+INSTALL salesforce FROM community;
+LOAD salesforce;
+```
+
+For development and local testing, build from source and load the **unsigned**
+artifact as described below. Community updates remain human-gated; see
+[PRE_COMMUNITY_CHECKLIST.md](PRE_COMMUNITY_CHECKLIST.md).
 
 ## Supported DuckDB versions
 
 Extensions are **version-locked** to the DuckDB they were built against. This
-extension is built + tested against **DuckDB v1.5.2 and v1.5.3** (the CI matrix).
+extension is built + tested against **DuckDB v1.5.2, v1.5.3, and v1.5.4** (the CI matrix).
 The pinned DuckDB + `extension-ci-tools` commits live in the git submodules; use
 the matching DuckDB build/CLI for the artifact you produce.
 
@@ -42,7 +49,7 @@ Common: `git`, CMake ≥ 3.5, a C++17 compiler, OpenSSL.
   suggestion in the error message.
 
 CI validates build + the offline (mock) test suite on **linux_amd64,
-windows_amd64, and osx_arm64** across DuckDB v1.5.2 and v1.5.3.
+windows_amd64, and osx_arm64** across DuckDB v1.5.2, v1.5.3, and v1.5.4.
 
 ## Build
 
