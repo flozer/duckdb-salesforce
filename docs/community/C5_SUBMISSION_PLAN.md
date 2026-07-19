@@ -1,5 +1,10 @@
 # C.5 community UPDATE plan — v0.9.2 → v0.12.1 (PREPARED — NOT EXECUTED)
 
+> **Superseded (2026-06-19):** community update `v0.14.1` was merged in
+> [`duckdb/community-extensions#2078`](https://github.com/duckdb/community-extensions/pull/2078).
+> This document is retained as historical planning evidence for the earlier
+> `v0.12.1` attempt and upstream Windows CI blocker.
+
 > **Submission ref: `v0.12.1`.** It supersedes `v0.12.0` as the community ref —
 > the `v0.12.0` tag carried a stale `vcpkg.json` `version-string` (`0.11.0`), so
 > `v0.12.1` was cut as a clean, consistent provenance tag (no runtime change; see

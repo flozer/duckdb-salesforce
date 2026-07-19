@@ -1,5 +1,10 @@
 # Community UPDATE PR readiness — v0.9.2 → v0.12.1
 
+> **Superseded (2026-06-19):** community update `v0.14.1` was merged in
+> [`duckdb/community-extensions#2078`](https://github.com/duckdb/community-extensions/pull/2078).
+> This document is retained as historical planning evidence for the earlier
+> `v0.12.1` attempt and upstream Windows CI blocker.
+
 Final gate before opening a `duckdb/community-extensions` **update** PR. **No PR
 and no real-descriptor change until the maintainer's explicit GO (C.5).**
 

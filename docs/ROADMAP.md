@@ -1,15 +1,6 @@
 # duckdb-salesforce Roadmap
 
-Status: post-`v0.10.1` development roadmap. `v0.10.1` is the latest tagged own
-release; `v0.11.0` is in preparation — it adds the v1.6 Report Bridge metadata +
-explainability work (describe-validated base/token/single-hop-relationship
-resolution for `salesforce_report_soql()` + structured diagnostics, Phases 1–4)
-on top of the §16 Report Bridge and the `v0.9.3` datalake / range-pushdown +
-Bulk-backfill hardening. `v0.11.0` is not yet tagged (pending smoke/CI review).
-The approved `duckdb/community-extensions` baseline remains `v0.9.2`; the
-community catalog is NOT updated until a future feature pack is bundled and an
-explicit human GO is given. This file records the strategic direction after the
-connector reached feature maturity, cross-platform CI, and public documentation.
+Status: post-`v0.14.1` roadmap. Own-repo release `v0.14.1` is live and the DuckDB community catalog now pins `v0.14.1` via [`duckdb/community-extensions#2078`](https://github.com/duckdb/community-extensions/pull/2078). This file records the strategic direction after the connector reached feature maturity, cross-platform CI, public documentation, and community publication.
 
 The core mission is to provide the best bridge between Salesforce and DuckDB for
 analytics. The extension should expose Salesforce data safely, efficiently, and
@@ -33,22 +24,13 @@ transformations, Parquet export, and analytical workflows.
 
 ## Post-Community Release Discipline
 
-`v0.9.2` is the approved community baseline. Treat it as a product release, not
-as a development checkpoint.
-
-`v0.10.0` is the current own release: it adds the §16 Report Bridge on top of
-`v0.9.3`. It is a normal product release of this repo and does NOT change the
-community baseline — `duckdb/community-extensions` stays at `v0.9.2` until a
-future feature pack is bundled, release notes and descriptor are aligned, smoke
-evidence is captured, and an explicit human GO is given. Tag/GitHub Release and
-Linux/Windows assets for `v0.10.0` are handled by the release-assets workflow;
-only the community update remains gated.
+`v0.14.1` is the approved community baseline. Treat it as a product release, not as a development checkpoint. Future community updates require a new tag, aligned descriptor, smoke evidence, and explicit maintainer GO.
 
 - Keep `main` stable and releasable.
 - Do roadmap/planning work in a dedicated planning branch.
 - Do implementation work in short-lived feature branches, one risk area at a
   time.
-- Do not reuse or move an already published release tag. `v0.9.2` is immutable;
+- Do not reuse or move an already published release tag. `v0.14.1` is immutable;
   fixes after that baseline need a new tag/version.
 - Prefer additive, opt-in surfaces for new behavior. Keep existing scan,
   authentication, transport selection, and descriptor behavior unchanged unless
@@ -85,16 +67,13 @@ The connector already provides:
   residual-safe behavior.
 - `COUNT(*)` pushdown for safe zero-column scans.
 - Cross-platform CI on `linux_amd64`, `windows_amd64`, and `osx_arm64` for
-  DuckDB `v1.5.2` and `v1.5.3`.
+  DuckDB `v1.5.2`, `v1.5.3`, and `v1.5.4`.
 - Public bilingual documentation, contribution docs, MIT license, third-party
   notices, and community descriptor draft.
 
 ## Next own-repo release candidate (unreleased on `main`)
 
-Accumulated on `main` since `v0.12.1` (no tag yet; community candidate `v0.12.1`
-stays frozen + parked on the upstream Windows CI blocker
-`duckdb/community-extensions#2061`). Provisional next own-repo tag: **`v0.13.0`**
-(adds a new function → minor bump). Contents:
+Older release-candidate notes below are retained as historical planning context. Current live community ref is `v0.14.1`; new work should start from a fresh release plan. Contents:
 
 - **`salesforce_relationship_graph(catalog, object [, max_depth])`** — §18 cut 1,
   on-demand read-only parent relationship enumerator (explicit per-edge status;

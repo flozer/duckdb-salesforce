@@ -25,6 +25,7 @@ venv/
 *.csv
 *.parquet
 *.json
+!.github/badges/downloads.json
 *.json.gz
 *.ndjson
 *.xlsx
