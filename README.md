@@ -357,3 +357,13 @@ LinkedIn [/fernandolozer](https://www.linkedin.com/in/fernandolozer)
 ## License
 
 MIT - see [LICENSE](LICENSE).
+
+---
+
+<div align="center">
+  <h2>Support the project</h2>
+  <p>If DuckDB Salesforce helps your work, you can support its continued development.</p>
+  <a href="https://buymeacoffee.com/fernandolozer">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="50">
+  </a>
+</div>
