@@ -1,6 +1,6 @@
 {
   "name": "duckdb-salesforce",
-  "version-string": "0.14.1",
+  "version-string": "0.14.2",
   "description": "DuckDB extension that exposes Salesforce orgs as SQL tables via the official Salesforce REST/Bulk APIs",
   "dependencies": [
     "openssl"

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to upload assets to (defaults to current ref/tag)"
+        description: "Release tag to build assets for (preflight only -- workflow_dispatch never publishes a release, regardless of this input)"
         required: false
         default: ""
 
@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 env:
-  DUCKDB_VERSION: v1.5.3
+  DUCKDB_VERSION: v1.5.5
 
 jobs:
   linux-x64:
@@ -36,8 +36,8 @@ jobs:
           TAG="${{ inputs.tag != '' && inputs.tag || github.ref_name }}"
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
           # Only force a version when the tag is a real vX.Y.Z; a non-tag ref
-          # (e.g. 'main' on workflow_dispatch) leaves it empty so the package
-          # script keeps its existing descriptor fallback.
+          # (e.g. a branch name on workflow_dispatch) leaves it empty so the
+          # package script keeps its existing descriptor fallback.
           case "$TAG" in
             v*) echo "RELEASE_VERSION=${TAG#v}" >> "$GITHUB_ENV" ;;
             *)  echo "RELEASE_VERSION=" >> "$GITHUB_ENV" ;;
@@ -69,32 +69,26 @@ jobs:
           GEN: ninja
         run: make release
 
+      - name: Validate (LOAD smoke against DuckDB ${{ env.DUCKDB_VERSION }})
+        run: |
+          ./build/release/duckdb -unsigned -c \
+            "LOAD 'build/release/extension/salesforce/salesforce.duckdb_extension'; SELECT 1 AS ok;"
+
       - name: Package
         run: bash scripts/package_dist_linux.sh
 
+      # Temporary workflow artifact only -- no release write in this job.
+      # This job's success/failure is a precondition the `publish` job
+      # depends on; publishing a GitHub Release is that job's sole
+      # responsibility, so a build/package failure here can never result in
+      # a release that's missing the Windows asset (or vice versa).
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
           name: duckdb-salesforce-linux-x64
           path: dist/duckdb-salesforce-*-linux-x64.tar.gz
           if-no-files-found: error
-
-      - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
-        run: |
-          notes_file="docs/RELEASE_NOTES_${RELEASE_TAG}.md"
-          notes_args=(--notes "Automated release assets for ${RELEASE_TAG}.")
-          if [ -f "$notes_file" ]; then
-            notes_args=(--notes-file "$notes_file")
-          fi
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" "${notes_args[@]}" \
-              || gh release view "$RELEASE_TAG" >/dev/null
-          fi
-          gh release upload "$RELEASE_TAG" dist/duckdb-salesforce-*-linux-x64.tar.gz --clobber
+          retention-days: 14
 
   windows-x64:
     name: windows-x64 release asset
@@ -133,35 +127,78 @@ jobs:
           DUCKDB_VERSION: ${{ env.DUCKDB_VERSION }}
         run: scripts/build_windows_release.ps1
 
+      - name: Validate (LOAD smoke against DuckDB ${{ env.DUCKDB_VERSION }})
+        shell: pwsh
+        run: |
+          & .\build\release\duckdb.exe -unsigned -c `
+            "LOAD 'build/release/extension/salesforce/salesforce.duckdb_extension'; SELECT 1 AS ok;"
+          if ($LASTEXITCODE -ne 0) { throw "LOAD smoke failed with exit code $LASTEXITCODE" }
+
       - name: Package
         shell: pwsh
         run: scripts/package_dist_windows.ps1 -Version $env:RELEASE_VERSION
 
+      # Temporary workflow artifact only -- see the matching comment on the
+      # linux-x64 job; `publish` is the only job that ever writes a release.
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
           name: duckdb-salesforce-windows-x64
           path: dist/duckdb-salesforce-*-windows-x64.zip
           if-no-files-found: error
+          retention-days: 14
 
-      - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
-        shell: pwsh
+  publish:
+    name: Publish GitHub Release
+    needs: [linux-x64, windows-x64]
+    # Strictly a real `vX.Y.Z` tag push. workflow_dispatch NEVER reaches this
+    # job's publish step regardless of the `tag` input -- that input only
+    # exists so a preflight run can resolve a version string for packaging;
+    # it must never be usable to trigger a real publish. `needs` above means
+    # this job (and therefore any release) never runs unless BOTH platform
+    # jobs succeeded first -- a Linux-only or Windows-only build can never
+    # produce a release missing the other asset.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download linux-x64 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: duckdb-salesforce-linux-x64
+          path: dist
+
+      - name: Download windows-x64 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: duckdb-salesforce-windows-x64
+          path: dist
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum duckdb-salesforce-*-linux-x64.tar.gz duckdb-salesforce-*-windows-x64.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          $notesFile = "docs/RELEASE_NOTES_$env:RELEASE_TAG.md"
-          gh release view $env:RELEASE_TAG *> $null
-          if ($LASTEXITCODE -ne 0) {
-            if (Test-Path $notesFile) {
-              gh release create $env:RELEASE_TAG --title $env:RELEASE_TAG --notes-file $notesFile
-            } else {
-              gh release create $env:RELEASE_TAG --title $env:RELEASE_TAG --notes "Automated release assets for $env:RELEASE_TAG."
-            }
-            if ($LASTEXITCODE -ne 0) {
-              gh release view $env:RELEASE_TAG *> $null
-              if ($LASTEXITCODE -ne 0) { throw "Release $env:RELEASE_TAG does not exist and could not be created." }
-            }
-          }
-          gh release upload $env:RELEASE_TAG dist/duckdb-salesforce-*-windows-x64.zip --clobber
+          notes_file="docs/RELEASE_NOTES_${RELEASE_TAG}.md"
+          notes_args=(--notes "Automated release assets for ${RELEASE_TAG}.")
+          if [ -f "$notes_file" ]; then
+            notes_args=(--notes-file "$notes_file")
+          fi
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" "${notes_args[@]}"
+          fi
+          gh release upload "$RELEASE_TAG" \
+            dist/duckdb-salesforce-*-linux-x64.tar.gz \
+            dist/duckdb-salesforce-*-windows-x64.zip \
+            dist/SHA256SUMS.txt \
+            --clobber

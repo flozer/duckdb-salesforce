@@ -8,7 +8,7 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.14.1"><img alt="release v0.14.1" src="https://img.shields.io/badge/release-v0.14.1-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.14.2"><img alt="release v0.14.2" src="https://img.shields.io/badge/release-v0.14.2-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
     <a href="https://github.com/duckdb/community-extensions/pull/2078"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-merged-brightgreen.svg"></a>
     <a href="https://duckdb.org/community_extensions/download_metrics"><img alt="DuckDB Community total downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fflozer%2Fduckdb-salesforce%2Fmain%2F.github%2Fbadges%2Fdownloads.json"></a>
@@ -247,7 +247,8 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.14.1**. Community baseline: **v0.14.1**, merged in
+Own-repo release: **v0.14.2** (DuckDB v1.5.5 compatibility). Community
+baseline: **v0.14.1**, merged in
 [`duckdb/community-extensions#2078`](https://github.com/duckdb/community-extensions/pull/2078).
 The previous upstream Windows CI blocker was cleared by the DuckDB `v1.5.4`
 community pin; new DuckDB releases still require explicit validation.
