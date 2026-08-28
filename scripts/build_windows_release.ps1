@@ -1,7 +1,12 @@
 # build_windows_release.ps1 — GitHub Actions / local MSVC release build.
 #
-# Builds the static and loadable Salesforce extension into build/release using
-# the same vcpkg manifest dependency path expected by DuckDB community CI.
+# Builds the static and loadable Salesforce extension, plus the `shell` CLI
+# target (DuckDB's CMake target name for the CLI; its OUTPUT_NAME property
+# renames the produced binary to duckdb.exe -- NOT to be confused with the
+# separate `duckdb` target, which is the core DuckDB shared library/DLL),
+# into build/release using the same vcpkg manifest dependency path expected
+# by DuckDB community CI. The CLI is needed so the release workflow can run
+# a LOAD smoke test against the just-built extension before packaging it.
 
 param(
     [string]$DuckDBVersion = $env:DUCKDB_VERSION,
@@ -64,7 +69,7 @@ $cfg = @(
 cmake @cfg
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-cmake --build $buildPosix --config Release --target salesforce_extension salesforce_loadable_extension
+cmake --build $buildPosix --config Release --target salesforce_extension salesforce_loadable_extension shell
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 exit 0
