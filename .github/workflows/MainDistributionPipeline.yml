@@ -36,7 +36,7 @@ jobs:
       fail-fast: false
       matrix:
         # Proven DuckDB versions (locally validated via scripts/build_matrix.ps1).
-        duckdb_version: ["v1.5.2", "v1.5.3", "v1.5.4"]
+        duckdb_version: ["v1.5.2", "v1.5.3", "v1.5.4", "v1.5.5"]
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@18c54662c5326c5e74b6a3589ee0ea7d3faa6fc4
     with:
       extension_name: salesforce
