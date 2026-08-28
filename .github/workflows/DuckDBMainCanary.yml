@@ -1,0 +1,52 @@
+# Informational canary — build + offline test against an arbitrary duckdb/main
+# (or any other ref/SHA) commit, using the SAME official reusable pipeline as
+# MainDistributionPipeline.yml (extension-ci-tools' _extension_distribution.yml),
+# not the local build_matrix.ps1 script.
+#
+# This is explicitly NOT a supported-version claim and NEVER gates a merge:
+# duckdb/main moves ahead of any DuckDB release this extension targets, and a
+# failure here is expected/allowed. It exists purely to surface API drift early
+# with real, reproducible CI evidence (build logs, job status) instead of a
+# local-only guess.
+#
+# Manual-only (workflow_dispatch), flozer/duckdb-salesforce only. Never produces
+# a release, tag, or community-extensions submission — this workflow only calls
+# the same build+test reusable workflow the main pipeline calls, never the
+# deploy/release one.
+#
+# A temporary `push` trigger (scoped to compat/duckdb-v1.5.5-readiness only)
+# was used once to get this workflow's first real run before it existed on
+# the default branch -- workflow_dispatch returns a 404 against a workflow
+# file the default branch doesn't have yet. That run's evidence is recorded
+# in docs/superpowers/specs/2026-08-27-duckdb-v2-c-api-readiness.md (run
+# 33176235844). The `push` trigger has been removed again now that the
+# evidence is captured; workflow_dispatch works normally once this file
+# reaches the default branch.
+
+name: DuckDB main canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      duckdb_sha:
+        description: "Exact duckdb/main commit SHA to build+test against (informational, non-gating)"
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    name: DuckDB main @ ${{ inputs.duckdb_sha }}
+    # Same ci_tools_version pin as MainDistributionPipeline.yml, so this canary
+    # is evaluated with the same official build infrastructure as the
+    # supported-version matrix -- not a different/newer extension-ci-tools pin.
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@18c54662c5326c5e74b6a3589ee0ea7d3faa6fc4
+    with:
+      extension_name: salesforce
+      duckdb_version: ${{ inputs.duckdb_sha }}
+      ci_tools_version: 18c54662c5326c5e74b6a3589ee0ea7d3faa6fc4
+      # Same platform scope as the main pipeline.
+      exclude_archs: "linux_amd64_musl;linux_arm64;linux_arm64_musl;osx_amd64;wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw;windows_arm64"

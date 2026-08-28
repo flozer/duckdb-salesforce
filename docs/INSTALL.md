@@ -15,9 +15,27 @@ artifact as described below. Community updates remain human-gated; see
 ## Supported DuckDB versions
 
 Extensions are **version-locked** to the DuckDB they were built against. This
-extension is built + tested against **DuckDB v1.5.2, v1.5.3, and v1.5.4** (the CI matrix).
-The pinned DuckDB + `extension-ci-tools` commits live in the git submodules; use
-the matching DuckDB build/CLI for the artifact you produce.
+extension is built + tested against **DuckDB v1.5.2, v1.5.3, v1.5.4, and
+v1.5.5**, per the official `MainDistributionPipeline.yml` run
+[33175570085](https://github.com/flozer/duckdb-salesforce/actions/runs/33175570085)
+(2026-08-28): v1.5.4 and v1.5.5 pass on Linux x64, Windows x64, and macOS
+arm64. **v1.5.2 and v1.5.3 currently fail on Windows x64** in that same run.
+The failure occurs while compiling DuckDB's vendored `fmt` header with the
+current GitHub Windows toolchain. The exact ownership — legacy DuckDB
+configuration, current MSVC behavior, CI tooling, or their interaction — has
+not yet been isolated. It is tracked as a separate legacy-compatibility issue
+and does not affect the successful v1.5.4/v1.5.5 validation.
+v1.5.2/v1.5.3 still pass on Linux x64 and macOS arm64. See README.md's
+validated matrix table for the full per-platform breakdown. A prior local-only
+Windows result (this same maintainer's machine, before this CI run existed)
+is kept only as historical evidence and does not override the table above.
+The pinned DuckDB + `extension-ci-tools` commits live in the git submodules;
+use the matching DuckDB build/CLI for the artifact you produce.
+
+DuckDB v2.0 readiness (ahead of any stable v2.0 release) is tracked separately
+in [docs/superpowers/specs/2026-08-27-duckdb-v2-c-api-readiness.md](superpowers/specs/2026-08-27-duckdb-v2-c-api-readiness.md);
+no v2.0 support is claimed until a stable v2.0 tag exists and passes this same
+local matrix.
 
 ## Prerequisites
 
@@ -49,7 +67,13 @@ Common: `git`, CMake ≥ 3.5, a C++17 compiler, OpenSSL.
   suggestion in the error message.
 
 CI validates build + the offline (mock) test suite on **linux_amd64,
-windows_amd64, and osx_arm64** across DuckDB v1.5.2, v1.5.3, and v1.5.4.
+windows_amd64, and osx_arm64** across DuckDB v1.5.2, v1.5.3, v1.5.4, and
+v1.5.5 — run
+[33175570085](https://github.com/flozer/duckdb-salesforce/actions/runs/33175570085),
+2026-08-28. All four versions pass on linux_amd64 and osx_arm64. On
+windows_amd64, v1.5.4 and v1.5.5 pass; v1.5.2 and v1.5.3 fail while compiling
+DuckDB's vendored `fmt` header — root cause not yet isolated, see the
+"Supported DuckDB versions" section above for the full statement.
 
 ## Build
 

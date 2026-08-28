@@ -4,7 +4,7 @@ Files in this archive:
   salesforce.duckdb_extension  - the DuckDB extension binary
 
 Requirements:
-  1. DuckDB CLI v1.5.3 or another ABI-compatible v1.5.x build
+  1. DuckDB CLI v1.5.3, v1.5.4, or v1.5.5, or another ABI-compatible v1.5.x build
   2. Salesforce Connected App credentials or JWT bearer setup
   3. TLS certificate verification remains enabled
 
