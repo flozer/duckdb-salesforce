@@ -166,13 +166,13 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Download linux-x64 artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: duckdb-salesforce-linux-x64
           path: dist
 
       - name: Download windows-x64 artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: duckdb-salesforce-windows-x64
           path: dist
