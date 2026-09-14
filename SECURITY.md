@@ -2,11 +2,17 @@
 
 ## Status & scope
 
-`duckdb-salesforce` is at **v0.8 — read-only, feature-complete for local use;
-not yet published to community-extensions.** Live validation is **manual-only**
-and must be run only against an org the maintainer is **authorized to use**;
-automated CI must never contact Salesforce or require secrets. Treat it as
-pre-1.0 until a versioned release explicitly states production readiness.
+`duckdb-salesforce` is at **v0.14.2 (own-repo) — read-only, feature-complete
+for local use.** It has been published to `duckdb/community-extensions`
+twice (added via [#2037](https://github.com/duckdb/community-extensions/pull/2037),
+updated via [#2078](https://github.com/duckdb/community-extensions/pull/2078));
+the community catalog currently serves **v0.14.1** — one release behind this
+repo's own-repo tag, a deliberate process gap, not an oversight (see
+`docs/community/description.yml` and the "Community publication gate" section
+below). Live validation is **manual-only** and must be run only against an org
+the maintainer is **authorized to use**; automated CI must never contact
+Salesforce or require secrets. Treat it as pre-1.0 until a versioned release
+explicitly states production readiness.
 
 This policy is the enforced, reviewable form of the security gate in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) Appendix C.4. It is a **hard
@@ -56,7 +62,13 @@ The two sensitive credentials are `client_secret` and `refresh_token`
 
 Per `docs/ARCHITECTURE.md` Appendix C.5, **no** push, PR, tag, or release to
 `duckdb/community-extensions` happens without explicit human go/no-go, after
-multi-test evidence. The default flow stays in `flozer/duckdb-salesforce`.
+multi-test evidence. This gate has applied to every community publication to
+date ([#2037](https://github.com/duckdb/community-extensions/pull/2037),
+[#2078](https://github.com/duckdb/community-extensions/pull/2078)) and
+continues to apply to any future community update — the community catalog
+version is bumped only as its own explicit, separate step, never
+automatically alongside an own-repo release. The default flow stays in
+`flozer/duckdb-salesforce`.
 
 ## Reporting a vulnerability
 

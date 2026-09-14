@@ -10,9 +10,11 @@
 # This workflow does not set SF_LIVE_* and must never do so.
 #
 # Delegates to DuckDB's standard reusable extension pipeline (extension-ci-tools,
-# pinned to the same commit as the submodule). Platforms: linux_amd64 +
-# windows_amd64 (required baseline) + osx_arm64 (extra coverage); osx_amd64 /
-# linux-arm / musl / wasm / mingw stay excluded. Nothing here touches
+# pinned to the same commit as the submodule -- see .gitmodules; kept in sync
+# deliberately so a local `make release`/`make debug` and this CI use the same
+# extension-ci-tools Makefile/workflow logic. Bump both together). Platforms:
+# linux_amd64 + windows_amd64 (required baseline) + osx_arm64 (extra coverage);
+# osx_amd64 / linux-arm / musl / wasm / mingw stay excluded. Nothing here touches
 # duckdb/community-extensions (gate C.5):
 # it builds + tests on the flozer repo only.
 #
@@ -37,11 +39,11 @@ jobs:
       matrix:
         # Proven DuckDB versions (locally validated via scripts/build_matrix.ps1).
         duckdb_version: ["v1.5.2", "v1.5.3", "v1.5.4", "v1.5.5"]
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@18c54662c5326c5e74b6a3589ee0ea7d3faa6fc4
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@64aec33f4f659eed8e542507b3afa3b262b37e42
     with:
       extension_name: salesforce
       duckdb_version: ${{ matrix.duckdb_version }}
-      ci_tools_version: 18c54662c5326c5e74b6a3589ee0ea7d3faa6fc4
+      ci_tools_version: 64aec33f4f659eed8e542507b3afa3b262b37e42
       # Keep linux_amd64 + windows_amd64 + osx_arm64 (native on macOS runners).
       # osx_amd64 stays excluded (cross-compile, deferred); musl/arm-linux/wasm/
       # mingw excluded.
