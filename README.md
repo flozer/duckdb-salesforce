@@ -17,6 +17,7 @@
     <a href="docs/en/usage_guide.md">Usage guide</a> |
     <a href="docs/en/function_manual.md">Function manual</a> |
     <a href="docs/ROADMAP.md">Roadmap</a> |
+    <a href="CHANGELOG.md">Changelog</a> |
     <a href="docs/pt/usage_guide.md">Guia PT</a> |
     <a href="CONTRIBUTING.md">Contributing</a> |
     <a href="CODE_OF_CONDUCT.md">Code of conduct</a> |
@@ -328,6 +329,8 @@ Docs are split by language under `docs/en/` (English, primary) and `docs/pt/`
 - [docs/INSTALL.md](docs/INSTALL.md) - local installation and unsigned loading.
 - [docs/ROADMAP.md](docs/ROADMAP.md) - bridge-first roadmap and deferred work.
 - [docs/DOCS_PARITY.md](docs/DOCS_PARITY.md) - PT/EN documentation parity map.
+- [CHANGELOG.md](CHANGELOG.md) - per-release summary index; links each entry
+  to its full `docs/RELEASE_NOTES_*.md`.
 
 ## Repository Layout
 
