@@ -1,0 +1,194 @@
+# Quality checks (R-004, R-005) — all informational, none gate anything.
+#
+# Three independent, manual-only (workflow_dispatch) jobs, each
+# `continue-on-error: true` so a finding never fails the workflow run:
+#
+#   - clang-format-check: dry-run only, reports how many src/ files would
+#     change; never applies formatting.
+#   - sanitizer-asan-ubsan: Linux Debug build. DuckDB's own CMakeLists
+#     defaults ENABLE_SANITIZER/ENABLE_UBSAN to TRUE for Debug builds
+#     (see duckdb/CMakeLists.txt), so a plain `make debug` already builds
+#     under ASan+UBSan -- no extra flags needed. Runs the existing offline
+#     SQLLogicTest suite.
+#   - sanitizer-tsan-quota-concurrency: Linux Debug build with THREADSAN=1
+#     (extension-ci-tools' own supported Make variable -- see
+#     extension-ci-tools/makefiles/duckdb_extension.Makefile). DuckDB's
+#     CMakeLists auto-disables ASan/UBSan when ENABLE_THREAD_SANITIZER is
+#     on, so this is a clean TSan-only build. Runs the same offline suite,
+#     which now includes test/sql/salesforce_quota_concurrency.test (R-005):
+#     8 real, concurrent connections/threads (DuckDB's native
+#     `concurrentloop` -- see duckdb/test/sqlite/sqllogic_command.cpp
+#     ParallelExecuteLoop, one independent Connection per iteration)
+#     hitting src/salesforce_quota.cpp's g_cache_lock/g_last_lock at once.
+#
+# None of this changes `make release`/`make debug` for anyone else -- these
+# are separate jobs/build directories, not a change to the default build.
+#
+# KNOWN ISSUE (as of 2026-09-14, both sanitizer jobs): the Linux Debug build
+# itself fails to LINK -- `ld: multiple definition of
+# 'duckdb::LogicalType::VARCHAR'` between src/libduckdb_static.a and
+# extension/salesforce/.../src/salesforce_report.cpp.o -- identically under
+# ASan+UBSan and under THREADSAN=1, i.e. unrelated to which sanitizer is
+# active. This blocks both sanitizer jobs before any test runs; it is not a
+# sanitizer finding and not a race condition. Root cause not further
+# investigated (out of this task's scope; not a src/ code issue -- grepped
+# salesforce_report.cpp, it uses LogicalType::VARCHAR the same way every
+# other salesforce_*.cpp file does). Never previously discovered because
+# this project's official CI (MainDistributionPipeline.yml) only ever builds
+# Release on Linux, and local Debug builds were only ever run on
+# Windows/MSVC, whose linker doesn't enforce this the same way GNU ld does.
+# See DEV->PM #004 for the full report; unblocking this is a separate,
+# human-decided follow-up.
+
+name: Quality (sanitizers, format) — informational
+
+on:
+  workflow_dispatch:
+
+jobs:
+  clang-format-check:
+    name: clang-format --dry-run (metric only, no changes applied)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Ensure clang-format is available
+        run: |
+          if ! command -v clang-format >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends clang-format
+          fi
+
+      - name: clang-format --dry-run over src/
+        run: |
+          clang-format --version
+          total=0
+          dirty=0
+          for f in $(find src -name '*.cpp' -o -name '*.hpp'); do
+            total=$((total + 1))
+            if ! clang-format --dry-run --Werror "$f" > /dev/null 2>&1; then
+              dirty=$((dirty + 1))
+              echo "WOULD REFORMAT: $f"
+            fi
+          done
+          echo ""
+          echo "clang-format: $dirty / $total files in src/ would change against .clang-format"
+          echo "(informational only -- no reformatting applied, no gate)"
+
+  sanitizer-asan-ubsan:
+    name: Linux Debug — ASan+UBSan (informational)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build g++ pkg-config python3 ccache
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=1G
+          echo "PATH=/usr/lib/ccache:$PATH" >> $GITHUB_ENV
+
+      - name: Cache ccache
+        uses: actions/cache@v6
+        with:
+          path: ~/.ccache
+          key: ccache-sanitizer-asan-salesforce-${{ github.sha }}
+          restore-keys: ccache-sanitizer-asan-salesforce-
+
+      - name: Pin DuckDB version
+        run: DUCKDB_GIT_VERSION=v1.5.5 make set_duckdb_version
+
+      - name: Build (Debug, ASan+UBSan on by default)
+        env:
+          GEN: ninja
+        run: make debug
+
+      - name: Run offline SQLLogicTest suite under ASan+UBSan
+        env:
+          ASAN_OPTIONS: halt_on_error=0:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=0:print_stacktrace=1
+        run: |
+          failed=0
+          for f in test/sql/salesforce_*.test; do
+            case "$f" in
+              *_live.test) continue ;;
+            esac
+            echo "=== $f ==="
+            if ! ./build/debug/test/unittest "$f"; then
+              failed=$((failed + 1))
+              echo "!!! sanitizer finding or failure in $f !!!"
+            fi
+          done
+          echo ""
+          echo "ASan+UBSan run: $failed file(s) reported a finding (informational -- does not gate)"
+
+  sanitizer-tsan-quota-concurrency:
+    name: Linux Debug — TSan, quota governor concurrency (R-005, informational)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build g++ pkg-config python3 ccache
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=1G
+          echo "PATH=/usr/lib/ccache:$PATH" >> $GITHUB_ENV
+
+      - name: Cache ccache
+        uses: actions/cache@v6
+        with:
+          path: ~/.ccache
+          key: ccache-sanitizer-tsan-salesforce-${{ github.sha }}
+          restore-keys: ccache-sanitizer-tsan-salesforce-
+
+      - name: Pin DuckDB version
+        run: DUCKDB_GIT_VERSION=v1.5.5 make set_duckdb_version
+
+      - name: Build (Debug, THREADSAN=1 -- TSan only, ASan/UBSan auto-disabled)
+        env:
+          GEN: ninja
+          THREADSAN: 1
+        run: make debug
+
+      - name: Run offline SQLLogicTest suite under TSan (includes the R-005 concurrency test)
+        env:
+          TSAN_OPTIONS: halt_on_error=0:second_deadlock_stack=1
+        run: |
+          failed=0
+          for f in test/sql/salesforce_*.test; do
+            case "$f" in
+              *_live.test) continue ;;
+            esac
+            echo "=== $f ==="
+            if ! ./build/debug/test/unittest "$f"; then
+              failed=$((failed + 1))
+              echo "!!! TSan finding or failure in $f !!!"
+            fi
+          done
+          echo ""
+          echo "TSan run: $failed file(s) reported a finding (informational -- does not gate)"
+          echo "salesforce_quota_concurrency.test result is in the per-file output above."
