@@ -26,7 +26,8 @@ future-facing are now implemented:
 - COUNT pushdown exists for zero-column `COUNT(*)`-class scans.
 - Tooling API schema discovery exists through `sf_schema_source='tooling'`.
 - Parent relationship traversal exists through `sf_relationships='parent'`.
-- Local DuckDB release matrix coverage exists for `v1.5.2` and `v1.5.3`.
+- DuckDB release matrix coverage exists for `v1.5.4` and `v1.5.5`
+  (`v1.5.2`/`v1.5.3` support dropped 2026-09-14).
 
 The remaining high-value gaps are therefore mostly about **large extraction
 ergonomics and repeatable materialization**, not the first read-only connector

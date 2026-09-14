@@ -286,33 +286,30 @@ make test_release
 Windows MSVC and RTOOLS/MinGW local validation are documented in
 [docs/INSTALL.md](docs/INSTALL.md).
 
+**Supported: DuckDB v1.5.4 and v1.5.5 only.** v1.5.2/v1.5.3 support was
+dropped 2026-09-14 (maintainer decision) — see "Dropped versions" below.
+
 Validated matrix (official, from `MainDistributionPipeline.yml` run
-[33175570085](https://github.com/flozer/duckdb-salesforce/actions/runs/33175570085),
-2026-08-28):
+[34879771640](https://github.com/flozer/duckdb-salesforce/actions/runs/34879771640), 2026-09-14):
 
-| Platform | DuckDB v1.5.2 | DuckDB v1.5.3 | DuckDB v1.5.4 | DuckDB v1.5.5 |
-|---|---:|---:|---:|---:|
-| Linux x64 | Pass | Pass | Pass | Pass |
-| Windows x64 | **Fail** | **Fail** | Pass | Pass |
-| macOS arm64 | Pass | Pass | Pass | Pass |
-| Windows RTOOLS/MinGW local | - | Pass (historical, local) | - | - |
+| Platform | DuckDB v1.5.4 | DuckDB v1.5.5 |
+|---|---:|---:|
+| Linux x64 | Pass | Pass |
+| Windows x64 | Pass | Pass |
+| macOS arm64 | Pass | Pass |
 
-**v1.5.2/v1.5.3 currently fail on Windows in official CI.** The failure occurs
-while compiling DuckDB's vendored `fmt` header with the current GitHub
-Windows toolchain. The exact ownership — legacy DuckDB configuration, current
-MSVC behavior, CI tooling, or their interaction — has not yet been isolated.
-It is tracked as a separate legacy-compatibility issue and does not affect
-the successful v1.5.4/v1.5.5 validation. A local Windows build of
-v1.5.2/v1.5.3 previously passed (see git history) on the maintainer's machine
-before this CI run existed as evidence — that result is now superseded by
-this table for Windows on those two versions, per policy (GitHub Actions is
-the official reference). Not investigated further in this delivery (out of
-scope: this delivery targets v1.5.5 compatibility).
+### Dropped versions (v1.5.2, v1.5.3)
 
-v1.5.5 was also validated locally on Windows x64 (Release + Debug, full
-offline suite, 0 skipped) before this CI run — see `scripts/build_matrix.ps1`
-and the `build(compat)` commit; kept as historical evidence, superseded by
-the table above as the official result per current policy.
+No longer supported, tested, or built by this project as of 2026-09-14. They
+previously failed on Windows in official CI (DuckDB's vendored `fmt` header
+against the GitHub Windows toolchain) — root cause was never isolated, and
+rather than continue investigating a version this project doesn't need to
+keep supporting, the maintainer chose to drop them (scope reduction, not a
+code fix). Historical evidence of that failure and of prior local
+Windows passes for these versions remains in git history (see the
+`docs/RELEASE_NOTES_*.md` for the releases that covered them, and CI run
+[33175570085](https://github.com/flozer/duckdb-salesforce/actions/runs/33175570085)
+from 2026-08-28) — not reproduced or re-explained here.
 
 DuckDB extensions are version-locked to the DuckDB release used at build time.
 

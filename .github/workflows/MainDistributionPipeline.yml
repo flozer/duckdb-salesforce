@@ -37,8 +37,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Proven DuckDB versions (locally validated via scripts/build_matrix.ps1).
-        duckdb_version: ["v1.5.2", "v1.5.3", "v1.5.4", "v1.5.5"]
+        # Supported DuckDB versions (locally validated via scripts/build_matrix.ps1).
+        # v1.5.2/v1.5.3 dropped 2026-09-14: Windows build fails on DuckDB's
+        # vendored fmt vs the current MSVC toolchain (R-003); scope reduction,
+        # not a code fix -- see README.md "Current Status" for detail.
+        duckdb_version: ["v1.5.4", "v1.5.5"]
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@64aec33f4f659eed8e542507b3afa3b262b37e42
     with:
       extension_name: salesforce
