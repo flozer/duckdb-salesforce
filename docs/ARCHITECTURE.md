@@ -22,7 +22,7 @@
 12. [Class Structure](#12-class-structure)
 13. [C++ File Structure](#13-c-file-structure)
 14. [DuckDB Extension Structure](#14-duckdb-extension-structure)
-15. [Roadmap v0.1 → v1.0](#15-roadmap-v01--v10)
+15. [Roadmap and Delivered Milestones](#15-roadmap-and-delivered-milestones)
 16. [Risk Analysis](#16-risk-analysis)
 17. [Salesforce Quota Analysis](#17-salesforce-quota-analysis)
 18. [Test Plan](#18-test-plan)
@@ -676,19 +676,47 @@ Unlike Firebird's empty dependency list, this declares real deps:
 
 ---
 
-## 15. Roadmap v0.1 → v1.0
+## 15. Roadmap and Delivered Milestones
+
+> This table was originally a forward-looking v0.1→v1.0 plan. It now reflects
+> what has actually shipped: several early aspirations here (a GraphQL
+> pushdown path, "Vault Mode") were not pursued — see the note below the
+> table. **[docs/ROADMAP.md](ROADMAP.md) is the live source of truth** for
+> planned/open work; this table is a current-state summary, not a live
+> tracker, and will not be kept in lockstep with every future release.
 
 | Version | Milestone | Scope |
 |---|---|---|
-| **v0.1** | Read-only REST scan MVP | `ATTACH` (refresh-token OAuth), `SalesforceAuth`, `HttpTransport`, REST `/query` + `queryMore`, sObject Describe schema load, projection + basic predicate + LIMIT pushdown, JSON→vector append. Single partition only. |
-| **v0.2** | Tooling-based fast schema + cache | `ToolingClient` (EntityDefinition/FieldDefinition/RelationshipInfo), `MetadataCache` with `__sf_objects`/`__sf_fields`/`__sf_relationships`, TTL + manual invalidation. Faster ATTACH. |
-| **v0.3** | Bulk API 2.0 + transport selection | `BulkQueryJob` (lifecycle, polling, CSV locator paging), `TransportSelector` (10K-row crossover), PK Chunking. Parallel partition scans. |
-| **v0.4** | Quota governor + resilience | `QuotaGovernor` (`/limits` polling, daily budget reserve, ~15 calls/s limiter), exponential backoff + jitter, 429/403 distinction, cursor-expiry recovery. |
-| **v0.5** | Auth hardening + JWT Bearer | RTR atomic token rotation, `JwtBearerStrategy`, proactive refresh tuning, secure-storage guidance. Picklist/record-type enrichment via `MetadataClient` (`__sf_picklists`/`__sf_recordtypes`). |
-| **v0.6** | Pushdown completeness + observability | Full filter recursion (IN/LIKE/BETWEEN/relationship traversal within limits), `ORDER BY`/aggregate pushdown, residual surfacing, dbt sources, profile table. Bulk parallel/partial downloads (Winter '25). |
-| **v0.7** | GraphQL pushdown path (optional) | GraphQL/UI API client for shallow relationship + formatted-value scenarios (Appendix A). Query-plan cache. |
-| **v0.8–0.9** | Vault Mode foundations | Persisted metadata cache to local DuckDB, Salesforce→Parquet export pipeline, offline catalog mode (Appendix B). |
-| **v1.0** | Stable GA | Hardened error taxonomy, full test matrix vs sandbox, benchmarks published, community-extensions listing, semantic-versioned API. |
+| **v0.1** | Read-only REST scan MVP | `ATTACH` (refresh-token OAuth), REST `/query` + `queryMore`, sObject Describe schema load, projection + predicate + `LIMIT` pushdown. |
+| **v0.2** | Lazy scan + broader pushdown | Page-granularity lazy REST scan, metadata describe cache, global object listing, `IN`/`LIKE`/`OR` superset-prefilter pushdown with residual safety. |
+| **v0.3–v0.4** | Bulk API 2.0 + quota governor | Bulk API 2.0 query path (job lifecycle, polling, CSV decoding), `sf_force_transport` (`rest`/`bulk`/`auto`), quota governor gating Bulk job starts. |
+| **v0.5–v0.6** | Diagnostics + fast schema | `salesforce_query_cost()`, `COUNT(*)` pushdown, Tooling-API-based fast schema discovery (`sf_schema_source='tooling'`), opt-in parent relationship traversal. |
+| **v0.7–v0.7.1** | Bulk streaming + PK chunking | Lazy Bulk result streaming; sequential, then parallel, `sf_bulk_chunks` PK chunking. |
+| **v0.8–v0.9.3** | Distribution hardening + coverage | CI matrix on `flozer` (Linux/Windows/macOS), `queryAll`, explicit `salesforce_aggregate()` (with `GROUP BY`), metadata refresh + picklist/record-type functions, two-sided range pushdown, Bulk backfill guardrails. |
+| **v0.10.0–v0.10.1** | Report Bridge | `salesforce_reports()`, `salesforce_report()`, `salesforce_report_soql()` — opt-in, describe-validated, sample/discovery only (2,000-row cap), never a large-extraction path. |
+| **v0.11.0–v0.11.1** | Report Bridge explainability + Metadata Engine v2 | Describe-validated base-object/token/relationship resolution with explainability columns; shared per-catalog Metadata Engine backing both the Report Bridge and diagnostics, de-duplicating Describe calls. |
+| **v0.12.0–v0.12.1** | Scan explainability | `salesforce_query_explain()` — last-scan, field-by-field pushed-vs-residual view. |
+| **v0.13.0** | Relationship graph, cut 1 | `salesforce_relationship_graph()` — on-demand parent enumerator with explicit per-edge status. |
+| **v0.14.0** | Relationship graph, cut 2 | Opt-in child relationships + `direction` filter on `salesforce_relationship_graph()`. |
+| **v0.14.2** | DuckDB v1.5.5 compatibility | No functional change; DuckDB v1.5.5 build/test validation, a `duckdb/main` canary evidence pass, and (in a later cycle) a reduced own-repo CI matrix (v1.5.2/v1.5.3 dropped, v1.5.4/v1.5.5 only). |
+
+**Not pursued:** the original plan's later milestones — a GraphQL pushdown
+path (Appendix A) and "Vault Mode" persisted/offline materialization
+(Appendix B) — were not built. Current direction treats materialization as a
+DuckDB-native workflow the connector *enables* but does not own
+(`CREATE TABLE ... AS SELECT`, `COPY ... TO parquet`, dbt/Airflow patterns —
+see docs/ROADMAP.md's "Documentation-Only: Materialization With DuckDB"),
+which reads as a different position than Appendix B's persisted-cache
+framing. Appendix A/B are left exactly as written (out of this task's
+scope) — flagged here as a place the two documents may now disagree, not
+resolved in this pass.
+
+**Open / planned work** is tracked live in [docs/ROADMAP.md](ROADMAP.md), and
+notably includes: transparent `GROUP BY`/`COUNT(field)` pushdown during scans
+(still deferred — distinct from `salesforce_aggregate()`'s already-delivered
+explicit `GROUP BY`), grandparent-depth SOQL relationship paths pushed into a
+single query, relationship-expansion diagnostics, auth UX improvements, and
+macOS live-TLS trust-store validation.
 
 ---
 
