@@ -55,12 +55,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Ensure clang-format is available
-        run: |
-          if ! command -v clang-format >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends clang-format
-          fi
+      - name: Install clang-format 11.0.1 (matches duckdb/scripts/format.py pin, cycle #006)
+        run: sudo pip3 install 'clang_format==11.0.1'
 
       - name: clang-format --dry-run over src/
         run: |
