@@ -14,11 +14,10 @@ namespace duckdb {
 
 // Record the per-scan facts known at InitGlobal (resets pages/rows/quota for the
 // new scan). `est_rows` < 0 and `pages` < 0 are emitted as NULL.
-void DiagRecordScan(const string &object, const string &soql, const string &transport,
-                    int64_t est_rows, const string &transport_reason, int64_t projected_fields,
-                    int64_t total_fields, int64_t pushed_filters, int64_t residual_filters,
-                    const string &where_pushed, bool bulk, int64_t pages_init, bool count_pushdown,
-                    const string &query_mode);
+void DiagRecordScan(const string &object, const string &soql, const string &transport, int64_t est_rows,
+                    const string &transport_reason, int64_t projected_fields, int64_t total_fields,
+                    int64_t pushed_filters, int64_t residual_filters, const string &where_pushed, bool bulk,
+                    int64_t pages_init, bool count_pushdown, const string &query_mode);
 
 // --- scan EXPLAIN capture (#v1.6 metadata-driven scan diagnostics) -----------
 // Write-only, diagnostic-only mirror of what the last scan ALREADY classified:
@@ -26,28 +25,28 @@ void DiagRecordScan(const string &object, const string &soql, const string &tran
 // reads these back, so they cannot affect execution. salesforce_query_explain()
 // annotates them via the shared Metadata Engine.
 struct DiagExplainItem {
-    string role;       // "projection" | "filter" | "relationship"
-    string field;      // resolved field name ("" when field_known=false)
-    bool field_known = false; // false => no single field (complex expr) -> NULL
-    bool pushed = false;   // emitted into SOQL (SELECT for projection / WHERE for filter)
-    bool residual = false; // filter re-applied by DuckDB (false for projection)
-    // role=="relationship": carried directly (the synthesised parent STRUCT is
-    // not in the raw object describe, so it is not re-resolved downstream).
-    string relationship_name;
-    vector<string> reference_to;
+	string role;              // "projection" | "filter" | "relationship"
+	string field;             // resolved field name ("" when field_known=false)
+	bool field_known = false; // false => no single field (complex expr) -> NULL
+	bool pushed = false;      // emitted into SOQL (SELECT for projection / WHERE for filter)
+	bool residual = false;    // filter re-applied by DuckDB (false for projection)
+	// role=="relationship": carried directly (the synthesised parent STRUCT is
+	// not in the raw object describe, so it is not re-resolved downstream).
+	string relationship_name;
+	vector<string> reference_to;
 };
 
 // Snapshot of the last scan's explain capture (object + catalog alias + items +
 // the scan-plan scalars used to synthesise the count/transport meta rows).
 struct DiagExplainSnapshot {
-    string object;
-    string catalog_alias; // empty => unknown -> annotation degrades
-    vector<DiagExplainItem> items;
-    string transport;        // "rest" | "bulk"
-    string transport_reason; // human reason (auto probe / forced / ...)
-    bool count_pushdown = false;
-    string query_mode = "query"; // "query" | "queryAll"
-    int64_t est_rows = -1;       // -1 => unknown
+	string object;
+	string catalog_alias; // empty => unknown -> annotation degrades
+	vector<DiagExplainItem> items;
+	string transport;        // "rest" | "bulk"
+	string transport_reason; // human reason (auto probe / forced / ...)
+	bool count_pushdown = false;
+	string query_mode = "query"; // "query" | "queryAll"
+	int64_t est_rows = -1;       // -1 => unknown
 };
 
 // Record the explain capture for the current scan. Called at InitGlobal AFTER

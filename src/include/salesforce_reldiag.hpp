@@ -26,9 +26,8 @@ void RelDiagBegin(const string &object, const string &mode, int64_t depth);
 // has no single target). `reason` empty -> NULL (an expanded relationship).
 // `field_count` < 0 -> NULL (a skipped relationship). `depth_level` is the
 // parent level (1 = parent, 2 = grandparent).
-void RelDiagRecord(const string &relationship_name, const string &parent_object,
-                   int64_t depth_level, const string &status, const string &reason,
-                   int64_t field_count);
+void RelDiagRecord(const string &relationship_name, const string &parent_object, int64_t depth_level,
+                   const string &status, const string &reason, int64_t field_count);
 
 TableFunction GetSalesforceRelationshipsFunction();
 

@@ -16,8 +16,7 @@ class SalesforceSession;
 //   - sf_quota_enabled=false  -> skip /limits entirely, never block.
 //   - sf_quota_enforce=false  -> consult /limits, compute, but never block (warn).
 //   - /limits unavailable     -> fail-open (allow) unless sf_quota_fail_open=false.
-void QuotaGuardBulkStart(ClientContext &context, SalesforceSession &session,
-                         const string &instance_url);
+void QuotaGuardBulkStart(ClientContext &context, SalesforceSession &session, const string &instance_url);
 
 // DEBUG / diagnostic. The last governor decision:
 // (limit_name, max, remaining, threshold, allowed, reason).

@@ -16,8 +16,8 @@ string SoqlLiteral(const Value &value);
 
 // SELECT <fields> FROM <object> [WHERE <where>] [LIMIT n]. where_clause empty
 // => no WHERE; limit invalid => no LIMIT.
-string BuildSelectSoql(const string &object, const vector<string> &select_fields,
-                       const string &where_clause, optional_idx limit);
+string BuildSelectSoql(const string &object, const vector<string> &select_fields, const string &where_clause,
+                       optional_idx limit);
 
 // Best-effort predicate pushdown for a table function's pushdown_complex_filter
 // hook. `filters` is the conjunctive list on the scan; the safe, conservative
@@ -35,13 +35,11 @@ string BuildSelectSoql(const string &object, const vector<string> &select_fields
 // SOQL WHERE and whether the translation was exact. Pure observation — does not
 // change pushdown behavior. Used by salesforce_query_explain().
 struct PushdownConjunctInfo {
-    bool translated = false; // a SOQL clause was emitted for this conjunct
-    bool exact = false;      // exact match (removed from residual set); else prefilter
+	bool translated = false; // a SOQL clause was emitted for this conjunct
+	bool exact = false;      // exact match (removed from residual set); else prefilter
 };
-void PushdownToSoql(const vector<SalesforceField> &fields,
-                    const vector<idx_t> &projection_to_field, string &out_where,
-                    vector<unique_ptr<Expression>> &filters,
-                    vector<PushdownConjunctInfo> *out_info = nullptr);
+void PushdownToSoql(const vector<SalesforceField> &fields, const vector<idx_t> &projection_to_field, string &out_where,
+                    vector<unique_ptr<Expression>> &filters, vector<PushdownConjunctInfo> *out_info = nullptr);
 
 // Diagnostic: record / read the most recent SOQL a scan generated. Used by the
 // salesforce_last_soql() table function so tests can assert the pushdown.
