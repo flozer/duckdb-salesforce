@@ -705,11 +705,12 @@ path (Appendix A) and "Vault Mode" persisted/offline materialization
 (Appendix B) — were not built. Current direction treats materialization as a
 DuckDB-native workflow the connector *enables* but does not own
 (`CREATE TABLE ... AS SELECT`, `COPY ... TO parquet`, dbt/Airflow patterns —
-see docs/ROADMAP.md's "Documentation-Only: Materialization With DuckDB"),
-which reads as a different position than Appendix B's persisted-cache
-framing. Appendix A/B are left exactly as written (out of this task's
-scope) — flagged here as a place the two documents may now disagree, not
-resolved in this pass.
+see docs/ROADMAP.md's "Documentation-Only: Materialization With DuckDB").
+As of cycle #006, Appendix A/B each carry a status note at the top making
+this explicit (REST/Bulk crossover corrected to the shipped
+`sf_auto_bulk_threshold` default of 50,000; GraphQL and Vault Mode marked
+historical/not-implemented) — their body content is otherwise kept
+verbatim as a design-history record.
 
 **Open / planned work** is tracked live in [docs/ROADMAP.md](ROADMAP.md), and
 notably includes: transparent `GROUP BY`/`COUNT(field)` pushdown during scans
@@ -902,16 +903,27 @@ A new `src/include/remote_connector_base.hpp` (+ `remote_connector_base.cpp`) ho
 
 ## Appendix A: API-Selection Decision Logic
 
+> **Status note (2026-09-15, cycle #006):** the REST/Bulk crossover value
+> below has been corrected to match what actually shipped —
+> `sf_auto_bulk_threshold` defaults to **50,000**, not 10,000 (see
+> `src/salesforce_extension.cpp:206-209`). The **GraphQL/UI API path** in
+> this appendix was **never implemented** — there is no GraphQL client and
+> no `salesforce_transport_selector.cpp` in `src/`; the extension only ever
+> ships REST and Bulk API 2.0 (`sf_force_transport` = `rest`/`bulk`/`auto`).
+> The GraphQL rows/branches below are kept verbatim as a historical record
+> of a design that was considered and not pursued — see §15 "Not pursued"
+> and [docs/ROADMAP.md](ROADMAP.md).
+
 The `TransportSelector` (invoked in InitGlobal) picks the transport per query. Justification is grounded in the research's row-count, latency, and quota figures.
 
 ```
 estimate N = expected_rows(object, pushed_filters)   # via COUNT() record-count API or cached stats
 
-if query is interactive AND N < 10,000:
+if query is interactive AND N < 50,000:
     → REST /query (+ queryMore)        # fastest, lowest latency; 1 call per 2,000-row page
 elif relationship_traversal AND depth ≤ 2 AND N ≤ 4,000 AND formatted_values_wanted:
-    → GraphQL/UI API                   # field projection + relay cursor; 4,000-record window
-elif N ≥ 10,000  OR  scheduled/bulk_export:
+    → GraphQL/UI API                   # NOT IMPLEMENTED, historical only — field projection + relay cursor; 4,000-record window
+elif N ≥ 50,000  OR  scheduled/bulk_export:
     → Bulk API 2.0                     # 2–6× faster at scale; query jobs don't consume 15K batch pool
 else:
     → REST /query                      # default
@@ -923,9 +935,9 @@ else:
 
 ### Decision table
 
-| Criterion | REST `/query` | Bulk API 2.0 | GraphQL / UI API |
+| Criterion | REST `/query` | Bulk API 2.0 | GraphQL / UI API *(historical — not implemented)* |
 |---|---|---|---|
-| **Row-count sweet spot** | < 10,000 | ≥ 10,000 (to millions) | ≤ 4,000 (relay window) |
+| **Row-count sweet spot** | < 50,000 | ≥ 50,000 (to millions) | ≤ 4,000 (relay window) |
 | **Latency** | Lowest (50–200 ms/page) | Higher (async job + 30 s polling) | Low; 1 call regardless of complexity |
 | **Throughput at scale** | Linear in pages | **2–6× REST** | Inherits SOQL plan cost |
 | **Page size** | 2,000 records | 33,000 records (CSV locator) | first ∈ [200,2000]; 4,000 total |
@@ -933,13 +945,22 @@ else:
 | **Result format** | JSON | CSV only | JSON (+ `displayValue`) |
 | **Consistency** | Immediate | Eventual (poll) | Immediate |
 | **Best for** | Interactive, complex relationships (≤5 levels), metadata | Large export, scheduled sync, data-warehouse | Shallow relationship chains (1–2 hops), formatted values, projection-heavy |
-| **Avoid when** | > 100K rows (call burn) | Sub-10K / interactive | Backward pagination, negation-heavy filters, nested subqueries, record+aggregate together |
+| **Avoid when** | > 100K rows (call burn) | Sub-50K / interactive | Backward pagination, negation-heavy filters, nested subqueries, record+aggregate together |
 
-**Technical justification**: REST's per-page **1-API-call** cost makes it cheap for small sets but linear in calls (100K rows = ~50 calls); Bulk trades async latency for throughput and sidesteps the batch pool for queries, making it the only sane choice for millions of rows under a 100K–150K/day budget. GraphQL is a targeted optimization — its relay cursor caps at **4,000 records** and it cannot do backward pagination, negation, or simultaneous record+aggregate results, so it is reserved for shallow, projection-driven, formatted-value reads.
+**Technical justification**: REST's per-page **1-API-call** cost makes it cheap for small sets but linear in calls (100K rows = ~50 calls); Bulk trades async latency for throughput and sidesteps the batch pool for queries, making it the only sane choice for millions of rows under a 100K–150K/day budget. GraphQL was a targeted optimization considered during design — its relay cursor would have capped at **4,000 records** and it could not do backward pagination, negation, or simultaneous record+aggregate results — but it was never built; the shipped transport choice is REST vs Bulk only.
 
 ---
 
 ## Appendix B: Future "Vault Mode" (Salesforce → Parquet → Offline DuckDB)
+
+> **Status note (2026-09-15, cycle #006):** this direction was **not
+> adopted**. The current position is that materialization is owned by
+> DuckDB itself (or the user), not by this extension — `CREATE TABLE ...
+> AS SELECT`, `COPY ... TO parquet`, dbt/Airflow-style patterns — see
+> [docs/ROADMAP.md § "Documentation-Only: Materialization With
+> DuckDB"](ROADMAP.md#documentation-only-materialization-with-duckdb) and
+> §15 "Not pursued". Kept below verbatim as a historical record of a
+> design that was considered and not pursued.
 
 **Goal**: snapshot Salesforce objects to local **Parquet** so analysts can explore offline in plain DuckDB with **zero live API consumption** — decoupling exploration from Salesforce quotas and latency.
 

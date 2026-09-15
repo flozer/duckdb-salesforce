@@ -13,8 +13,7 @@ struct SalesforceField;
 // never the value and never the whole record.
 //
 // No HTTP, no network: operates only on already-fetched record JSON (#6).
-void AppendJsonValue(Vector &vec, idx_t row, const SalesforceField &field,
-                     const string &record_json);
+void AppendJsonValue(Vector &vec, idx_t row, const SalesforceField &field, const string &record_json);
 
 // Decode a non-null string cell (e.g. a Bulk CSV cell) into vec[row] using the
 // field's mapped type — the shared cast core (date/time normalisation, base64,

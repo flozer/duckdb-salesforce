@@ -12,8 +12,8 @@ class ClientContext;
 // Resolve an attached salesforce catalog by ATTACH alias and copy its in-memory
 // credentials (config + token). Throws a clear, secret-free BinderException if
 // `alias` is not an attached Salesforce catalog. Used by salesforce_aggregate().
-void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias,
-                                     SalesforceConfig &cfg, SalesforceTokenSet &token);
+void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias, SalesforceConfig &cfg,
+                                     SalesforceTokenSet &token);
 
 // salesforce_refresh_metadata(catalog [, object]) — clear an attached salesforce
 // catalog's in-memory metadata cache (#v1.3 §10). Empty object = global.
@@ -22,8 +22,7 @@ TableFunction GetSalesforceRefreshMetadataFunction();
 // Raw describe JSON for `object` on an attached salesforce catalog, cached per
 // ATTACH (#v1.3 §14). Throws if `alias` is not a Salesforce catalog. Used by the
 // picklist / record-type metadata functions.
-string GetSalesforceObjectDescribeJson(ClientContext &context, const string &alias,
-                                       const string &object);
+string GetSalesforceObjectDescribeJson(ClientContext &context, const string &alias, const string &object);
 
 // Returns the StorageExtension registered under the name "salesforce" so that
 //

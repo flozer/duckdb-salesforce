@@ -8,8 +8,7 @@ namespace duckdb {
 // precision/scale are used for currency/percent decimals. Unknown types map
 // conservatively to VARCHAR and set *unknown=true so the caller can emit a
 // secret-free warning. Case-insensitive on the type name.
-LogicalType MapSalesforceType(const string &sf_type, int64_t precision, int64_t scale,
-                              bool *unknown);
+LogicalType MapSalesforceType(const string &sf_type, int64_t precision, int64_t scale, bool *unknown);
 
 // Map a Tooling API FieldDefinition.DataType DISPLAY string (e.g. "Text(255)",
 // "Number(18,0)", "Checkbox", "Date/Time", "Lookup(Account)") to a DuckDB
