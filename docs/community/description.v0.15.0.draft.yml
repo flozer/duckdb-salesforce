@@ -1,10 +1,8 @@
-# DRAFT ONLY — review draft for a future v0.14.1 -> v0.15.0 community
-# update. NOT the real submission file. Per PM->DEV #006 gate C.5: this is
-# preparation, not execution. The real docs/community/description.yml is
-# untouched and still declares version/repo.ref v0.14.1 (live in
-# duckdb/community-extensions). This draft is promoted to the real file, a
-# fork is made, and a PR is opened ONLY after a separate, explicit
-# maintainer C.5 GO — see docs/community/C6_SUBMISSION_PLAN.md.
+# SUPERSEDED (2026-09-16): this draft was promoted, and the v0.14.1 -> v0.15.0
+# community update was merged via
+# https://github.com/duckdb/community-extensions/pull/2710. The real
+# docs/community/description.yml now reflects the live state. Kept as
+# historical planning evidence — see docs/community/C6_SUBMISSION_PLAN.md.
 
 extension:
   name: salesforce

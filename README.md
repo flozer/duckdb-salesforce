@@ -10,7 +10,7 @@
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.15.0"><img alt="release v0.15.0" src="https://img.shields.io/badge/release-v0.15.0-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
-    <a href="https://github.com/duckdb/community-extensions/pull/2078"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-merged-brightgreen.svg"></a>
+    <a href="https://github.com/duckdb/community-extensions/pull/2710"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-merged-brightgreen.svg"></a>
     <a href="https://duckdb.org/community_extensions/download_metrics"><img alt="DuckDB Community total downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fflozer%2Fduckdb-salesforce%2Fmain%2F.github%2Fbadges%2Fdownloads.json"></a>
   </p>
   <p>
@@ -38,8 +38,8 @@ exports, lakehouse-style snapshots, and cross-source joins.
 `duckdb-salesforce` is the first Salesforce extension published in the DuckDB
 Community Extensions registry, added via
 [duckdb/community-extensions#2037](https://github.com/duckdb/community-extensions/pull/2037)
-and updated to `v0.14.1` via
-[duckdb/community-extensions#2078](https://github.com/duckdb/community-extensions/pull/2078).
+and updated to `v0.15.0` via
+[duckdb/community-extensions#2710](https://github.com/duckdb/community-extensions/pull/2710).
 
 The extension is a bridge, not an ETL platform: Salesforce access, transport,
 authentication, metadata, and safe pushdown live here; joins, aggregations,
@@ -62,8 +62,8 @@ materialization, files, and downstream analytics stay in DuckDB.
 - **Published in DuckDB Community Extensions** - added through
   [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037)
   and updated through
-  [`duckdb/community-extensions#2078`](https://github.com/duckdb/community-extensions/pull/2078);
-  the pinned `v0.14.1` source ref is public-clone validated and CI green.
+  [`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710);
+  the pinned `v0.15.0` source ref is public-clone validated and CI green.
 
 ## Features
 
@@ -253,11 +253,11 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.14.2** (DuckDB v1.5.5 compatibility). Community
-baseline: **v0.14.1**, merged in
-[`duckdb/community-extensions#2078`](https://github.com/duckdb/community-extensions/pull/2078).
-The previous upstream Windows CI blocker was cleared by the DuckDB `v1.5.4`
-community pin; new DuckDB releases still require explicit validation.
+Own-repo release: **v0.15.0** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
+Community baseline: **v0.15.0**, merged in
+[`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710).
+Own-repo and community are in sync as of this release; new DuckDB releases
+still require explicit validation.
 
 | Area | Status |
 |---|---|

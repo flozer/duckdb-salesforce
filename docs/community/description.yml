@@ -5,8 +5,8 @@
 # duckdb/community-extensions and open a PR. The community CI builds + signs the
 # extension for every supported platform from the pinned repo ref below.
 #
-# LIVE in duckdb/community-extensions. Current community ref: v0.14.1
-# (this file promotes the update to v0.15.0 — see docs/community/C6_SUBMISSION_PLAN.md).
+# LIVE in duckdb/community-extensions. Current community ref: v0.15.0
+# (merged via duckdb/community-extensions#2710, 2026-09-16).
 
 extension:
   name: salesforce

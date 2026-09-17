@@ -1,11 +1,12 @@
-# C.6 community UPDATE plan — v0.14.1 → v0.15.0 (PREPARED — NOT EXECUTED)
+# C.6 community UPDATE plan — v0.14.1 → v0.15.0 (EXECUTED — MERGED)
 
-> **This is a plan, not an action.** Nothing here has been done for the
-> update. No fork branch, no PR, no comment in `duckdb/community-extensions`
-> for v0.15.0. Execute only after an explicit maintainer **C.5 GO** (same gate
-> used for the v0.9.2→v0.12.1 and v0.12.1→v0.14.1 rounds — see the superseded
-> `C5_SUBMISSION_PLAN.md` / `PR_READINESS.md`), and only after a final human
-> confirm of the exact PR contents.
+> **Executed and merged (2026-09-16).** Maintainer gave explicit C.5 GO after
+> reviewing the exact PR content; the update was submitted and merged via
+> [`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710).
+> A follow-up reviewer request (`lghavami`) to pin `repo.ref` to a commit SHA
+> instead of the tag name was applied before merge. This document is kept as
+> a record of the plan that was actually executed — see the superseded
+> `C5_SUBMISSION_PLAN.md` / `PR_READINESS.md` for the earlier v0.12.1 round.
 >
 > **Context — this is an UPDATE, not a first submission.** `salesforce` is
 > already accepted and live in community at **v0.14.1** via
