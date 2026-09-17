@@ -65,3 +65,6 @@ Testing/
 Thumbs.db
 .vscode/
 .idea/
+
+# PM long-term memory (local only, never versioned)
+AGENTES.MD
