@@ -12,6 +12,27 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.15.0](docs/RELEASE_NOTES_v0.15.0.md) — 2026-09-15
+
+- **DuckDB v1.5.2/v1.5.3 support dropped** — official baseline is now
+  **v1.5.4+** (v1.5.2/v1.5.3 had a pre-existing, unresolved Windows/MSVC
+  `fmt` build failure; scope reduction, not a code fix). User-visible
+  change, the reason this is a minor bump and not a patch.
+- `extension-ci-tools` pin aligned between `.gitmodules` and CI; stale
+  `SECURITY.md` corrected.
+- `.clang-format` added and all of `src/` reformatted (formatting only, no
+  behavior change — same assertion count before/after).
+- Informational, non-blocking ASan/UBSan/TSan CI jobs added; real
+  concurrency test for the quota governor (`salesforce_quota_concurrency.test`,
+  8 real threads).
+- This `CHANGELOG.md` added; `docs/ARCHITECTURE.md` roadmap and Appendix
+  A/B factual corrections (REST/Bulk crossover, GraphQL/Vault Mode marked
+  historical).
+- No SOQL/scan/transport/quota behavior change vs `v0.14.2`.
+- Submitted as a community-extensions update:
+  [duckdb/community-extensions#2710](https://github.com/duckdb/community-extensions/pull/2710)
+  (pending review).
+
 ## [v0.14.2](docs/RELEASE_NOTES_v0.14.2.md) — 2026-08-28
 
 - Compatibility-only release: DuckDB **v1.5.5** support, no functional
