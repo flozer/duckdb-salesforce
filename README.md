@@ -8,7 +8,7 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.15.0"><img alt="release v0.15.0" src="https://img.shields.io/badge/release-v0.15.0-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.15.1"><img alt="release v0.15.1" src="https://img.shields.io/badge/release-v0.15.1-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
     <a href="https://github.com/duckdb/community-extensions/pull/2710"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-merged-brightgreen.svg"></a>
     <a href="https://duckdb.org/community_extensions/download_metrics"><img alt="DuckDB Community total downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fflozer%2Fduckdb-salesforce%2Fmain%2F.github%2Fbadges%2Fdownloads.json"></a>
@@ -79,6 +79,7 @@ materialization, files, and downstream analytics stay in DuckDB.
 | Aggregates | Transparent `COUNT(*)` pushdown and explicit `salesforce_aggregate()` with optional `GROUP BY`. |
 | Diagnostics | Last SOQL, transport, quota, query cost, page counts, relationship decisions. |
 | Query explainability | `salesforce_query_explain()` — read-only, last-scan, field-by-field view of pushed vs. residual filters, projection, relationship, count, and transport (diagnostic-only; no scan behavior change). |
+| In-DB discoverability | Every function self-documents through `duckdb_functions()`: description, runnable example, real parameter names, categories. |
 | Testing | Offline mock suite plus validated live smoke; CI covers Linux, Windows, and macOS arm64. |
 
 ## Quick Start
@@ -253,11 +254,13 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.15.0** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
+Own-repo release: **v0.15.1** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
 Community baseline: **v0.15.0**, merged in
-[`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710).
-Own-repo and community are in sync as of this release; new DuckDB releases
-still require explicit validation.
+[`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710);
+the `v0.15.1` community update is prepared but pending the project's
+explicit submission gate. Every extension function also documents itself
+through `duckdb_functions()` (description, example, parameter names) as of
+`v0.15.1`.
 
 | Area | Status |
 |---|---|
@@ -277,6 +280,7 @@ still require explicit validation.
 | Manual metadata cache refresh | Done |
 | Metadata Engine v2 + `metadata_objects` / `metadata_fields` | Done |
 | Query explainability (`salesforce_query_explain()`) | Done |
+| Function metadata in `duckdb_functions()` (issue [#66](https://github.com/flozer/duckdb-salesforce/issues/66)) | Done |
 | Linux + Windows + macOS arm64 CI | Done |
 | Transparent `COUNT(field)` / `MIN` / `MAX` pushdown | Deferred: requires optimizer rewrite |
 | Salesforce writes / Metadata API deploy | Out of scope |

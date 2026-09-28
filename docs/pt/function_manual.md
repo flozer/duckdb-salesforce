@@ -31,6 +31,23 @@ Nos exemplos, assumimos que você já executou um `ATTACH ... AS sf` e que os
 sObjects `Account` e `Contact` estão acessíveis como `sf.Account` e
 `sf.Contact`.
 
+## Descobrindo funções pelo SQL
+
+Desde a `v0.15.1` cada função deste manual também se autodocumenta dentro do
+DuckDB: a `duckdb_functions()` expõe, para cada função `salesforce_*` /
+`sf_*`, uma `description` de uma frase, um exemplo executável em `examples`
+e nomes reais de parâmetros em `parameters` — assim clientes SQL, notebooks
+e agentes de IA podem descobrir a superfície sem sair da conexão:
+
+```sql
+SELECT function_name, description, examples, parameters
+FROM duckdb_functions()
+WHERE function_name LIKE 'salesforce%' OR function_name = 'sf_url_encode';
+```
+
+Este manual continua sendo a referência completa; os metadados no banco são
+um resumo de uma linha mais um exemplo por função.
+
 ## Requisito de execução
 
 A extensão se comunica com o Salesforce pelas APIs REST e Bulk usando o

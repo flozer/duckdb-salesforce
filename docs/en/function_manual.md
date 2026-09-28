@@ -26,6 +26,23 @@ implemented, tested, and documented here.
 A clearly separated final section documents debug/test-only entry points
 that are **not a stable API**.
 
+## Discovering functions from SQL
+
+Since `v0.15.1` every function in this manual also documents itself inside
+DuckDB: `duckdb_functions()` exposes, for each `salesforce_*` / `sf_*`
+function, a one-sentence `description`, a runnable `examples` entry, and
+real `parameters` names — so SQL clients, notebooks, and AI agents can
+discover the surface without leaving the connection:
+
+```sql
+SELECT function_name, description, examples, parameters
+FROM duckdb_functions()
+WHERE function_name LIKE 'salesforce%' OR function_name = 'sf_url_encode';
+```
+
+This manual remains the full reference; the in-DB metadata is a one-line
+summary plus example per function.
+
 ### Table of contents
 
 - [Runtime requirement](#runtime-requirement)

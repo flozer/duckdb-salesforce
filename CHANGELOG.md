@@ -12,6 +12,21 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.15.1](docs/RELEASE_NOTES_v0.15.1.md) — 2026-09-28
+
+- **Function discoverability via `duckdb_functions()`** (issue
+  [#66](https://github.com/flozer/duckdb-salesforce/issues/66)): all 25
+  registered functions (24 table + 1 scalar) now carry a
+  `FunctionDescription` — real parameter names (was `col0`/`col1` on
+  11/14), a one-sentence description (was 0/25), a runnable example (was
+  0/25), and categories.
+- Registration-only metadata: **no scan/SOQL/pushdown/transport/quota
+  behavior change**; `on_conflict` semantics of the bare overloads
+  preserved (`ALTER_ON_CONFLICT`).
+- New offline guard `test/sql/salesforce_functions_docs.test`.
+- Patch bump per the `v0.12.1` precedent (binary-shipped docs, no
+  functional change).
+
 ## [v0.15.0](docs/RELEASE_NOTES_v0.15.0.md) — 2026-09-15
 
 - **DuckDB v1.5.2/v1.5.3 support dropped** — official baseline is now

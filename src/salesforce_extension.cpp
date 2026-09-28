@@ -17,9 +17,46 @@
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/storage/storage_extension.hpp"
 
 namespace duckdb {
+
+namespace {
+
+// Register a function with a FunctionDescription attached so it documents
+// itself through duckdb_functions(): real parameter names, a one-sentence
+// description, a runnable example, and categories (#66). on_conflict must
+// mirror the bare RegisterFunction overloads (ALTER), because the
+// Create*FunctionInfo default is ERROR_ON_CONFLICT and would break reload.
+void RegisterDescribed(ExtensionLoader &loader, TableFunction function, vector<string> parameter_names,
+                       string description, vector<string> examples, vector<string> categories) {
+	CreateTableFunctionInfo info(std::move(function));
+	FunctionDescription desc;
+	desc.parameter_names = std::move(parameter_names);
+	desc.description = std::move(description);
+	desc.examples = std::move(examples);
+	desc.categories = std::move(categories);
+	info.descriptions.push_back(std::move(desc));
+	info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+	loader.RegisterFunction(std::move(info));
+}
+
+void RegisterDescribed(ExtensionLoader &loader, ScalarFunction function, vector<string> parameter_names,
+                       string description, vector<string> examples, vector<string> categories) {
+	CreateScalarFunctionInfo info(std::move(function));
+	FunctionDescription desc;
+	desc.parameter_names = std::move(parameter_names);
+	desc.description = std::move(description);
+	desc.examples = std::move(examples);
+	desc.categories = std::move(categories);
+	info.descriptions.push_back(std::move(desc));
+	info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+	loader.RegisterFunction(std::move(info));
+}
+
+} // namespace
 
 static void LoadInternal(ExtensionLoader &loader) {
 	// Scope the last-scan diagnostics (query_cost / query_explain) to this
@@ -43,56 +80,127 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// salesforce_describe(object, client_id:=, client_secret:=, refresh_token:=,
 	//   login_url:=, api_version:=) — introspect a single sObject's schema (#5).
-	loader.RegisterFunction(GetSalesforceDescribeFunction());
+	RegisterDescribed(loader, GetSalesforceDescribeFunction(), {"object"},
+	                  "Fetches the REST describe metadata (fields, types, relationships) for a single "
+	                  "Salesforce sObject without an ATTACH; credentials are passed as the named "
+	                  "parameters client_id, client_secret, refresh_token, login_url and api_version.",
+	                  {"SELECT * FROM salesforce_describe('Account', client_id := '<client_id>', "
+	                  "client_secret := '<client_secret>', refresh_token := '<refresh_token>');"},
+	                  {"metadata"});
 
 	// salesforce_query(soql, client_id:=, ...) — paginated SOQL fetcher (#6),
 	// returns raw JSON records. Typed scanning lands in #7/#8.
-	loader.RegisterFunction(GetSalesforceQueryFunction());
-	loader.RegisterFunction(GetSalesforceUrlEncodeFunction());
+	RegisterDescribed(loader, GetSalesforceQueryFunction(), {"soql"},
+	                  "Runs a read-only SOQL query against Salesforce and returns the raw JSON records "
+	                  "with lazy pagination; credentials use the same named parameters as "
+	                  "salesforce_describe().",
+	                  {"SELECT * FROM salesforce_query('SELECT Id, Name FROM Account LIMIT 10', client_id "
+	                  ":= '<client_id>', client_secret := '<client_secret>', refresh_token := "
+	                  "'<refresh_token>');"},
+	                  {"query"});
+	RegisterDescribed(loader, GetSalesforceUrlEncodeFunction(), {"text"},
+	                  "Percent-encodes a string for safe use as a literal inside a SOQL query or a "
+	                  "Salesforce REST URL.",
+	                  {"sf_url_encode('Acme & Sons')"}, {"utility"});
 
 	// salesforce_decode(fields_json, records_json) — JSON record -> typed
 	// DuckDB vectors (#7). Test/utility surface; the scan wires it in at #8.
-	loader.RegisterFunction(GetSalesforceDecodeFunction());
+	RegisterDescribed(loader, GetSalesforceDecodeFunction(), {"fields_json", "records_json"},
+	                  "Decodes a fields-describe JSON array plus a records JSON array into typed DuckDB "
+	                  "rows; utility surface of the scan's JSON-to-vector conversion.",
+	                  {"SELECT * FROM salesforce_decode('[{\"name\":\"Name\",\"type\":\"string\"}]', "
+	                  "'[{\"Name\":\"Acme\"}]');"},
+	                  {"utility"});
 
 	// salesforce_last_soql() — diagnostic: the SOQL the most recent scan
 	// generated (projection + predicate pushdown). Used by tests.
-	loader.RegisterFunction(GetSalesforceLastSoqlFunction());
+	RegisterDescribed(loader, GetSalesforceLastSoqlFunction(), {},
+	                  "Returns the SOQL (projection plus predicate pushdown) generated by the most "
+	                  "recent salesforce scan; returns no rows until a scan has run.",
+	                  {"SELECT * FROM salesforce_last_soql();"}, {"diagnostic"});
 
 	// salesforce_last_scan_pages() — DEBUG/TEST ONLY: query pages the most
 	// recent scan fetched (proves lazy pagination, #11). Not a public API.
-	loader.RegisterFunction(GetSalesforceLastScanPagesFunction());
+	RegisterDescribed(loader, GetSalesforceLastScanPagesFunction(), {},
+	                  "TEST ONLY: returns the number of query pages the most recent scan fetched, "
+	                  "proving lazy pagination.",
+	                  {"SELECT * FROM salesforce_last_scan_pages();"}, {"diagnostic", "test"});
 
 	// salesforce_last_bulk_create_body() — DEBUG/TEST ONLY: JSON body of the
 	// most recent Bulk job-create POST, so tests can assert the Bulk job carries
 	// the same projection + predicate SOQL as REST (v0.3). Not a public API.
-	loader.RegisterFunction(GetSalesforceLastBulkCreateBodyFunction());
+	RegisterDescribed(loader, GetSalesforceLastBulkCreateBodyFunction(), {},
+	                  "TEST ONLY: returns the JSON body of the most recent Bulk API 2.0 job-create POST, "
+	                  "showing the pushed SOQL.",
+	                  {"SELECT * FROM salesforce_last_bulk_create_body();"}, {"diagnostic", "test"});
 
 	// salesforce_last_transport() — DEBUG/TEST ONLY: transport the most recent
 	// scan resolved to + probed est_rows + reason (proves 'auto' selection,
 	// v0.3 §2). Also user-facing diagnostic for why REST vs Bulk was chosen.
-	loader.RegisterFunction(GetSalesforceLastTransportFunction());
+	RegisterDescribed(loader, GetSalesforceLastTransportFunction(), {},
+	                  "Returns the transport (rest or bulk) the most recent scan resolved to, with the "
+	                  "row-count estimate and the reason for the choice.",
+	                  {"SELECT * FROM salesforce_last_transport();"}, {"diagnostic"});
 
 	// salesforce_last_quota() — DEBUG/diagnostic: the last quota-governor
 	// decision (limit_name, max, remaining, threshold, allowed, reason). v0.4.
-	loader.RegisterFunction(GetSalesforceLastQuotaFunction());
+	RegisterDescribed(loader, GetSalesforceLastQuotaFunction(), {},
+	                  "Returns the most recent quota-governor decision for Bulk job starts: limit name, "
+	                  "max, remaining, threshold, whether the job was allowed, and why.",
+	                  {"SELECT * FROM salesforce_last_quota();"}, {"diagnostic"});
 
 	// salesforce_query_cost() — unified LAST-SCAN cost view (#v0.4 §4): SOQL,
 	// transport, projection ratio, pushed/residual filter counts, pages, rows
 	// delivered, quota, and short selectivity guidance. Aggregates the granular
 	// salesforce_last_* diagnostics; does not replace them.
-	loader.RegisterFunction(GetSalesforceQueryCostFunction());
+	RegisterDescribed(loader, GetSalesforceQueryCostFunction(), {},
+	                  "Returns a unified cost view of the most recent scan: SOQL, transport, projection "
+	                  "ratio, pushed and residual filter counts, pages, rows delivered, quota decision "
+	                  "and Bulk poll count.",
+	                  {"SELECT * FROM salesforce_query_cost();"}, {"diagnostic"});
 
 	// Report Bridge (§16) — list report definitions.
-	loader.RegisterFunction(GetSalesforceReportsFunction());
+	RegisterDescribed(loader, GetSalesforceReportsFunction(), {"catalog"},
+	                  "Lists the Salesforce report definitions visible to the authenticated user, for "
+	                  "Report Bridge discovery and validation.",
+	                  {"SELECT * FROM salesforce_reports('sf');"}, {"report"});
 	// Report Bridge (§16) Phase C — tabular report sample + diagnostics.
-	loader.RegisterFunction(GetSalesforceReportFunction());
+	RegisterDescribed(loader, GetSalesforceReportFunction(), {"catalog", "report_id"},
+	                  "Runs a tabular Salesforce report synchronously and returns its fact rows plus run "
+	                  "diagnostics; capped at 2,000 rows, for discovery and validation rather than "
+	                  "large extraction.",
+	                  {"SELECT * FROM salesforce_report('sf', '00O...');"}, {"report"});
 	// Report Bridge (§16) Phase D — best-effort candidate SOQL reconstruction.
-	loader.RegisterFunction(GetSalesforceReportSoqlFunction());
+	RegisterDescribed(loader, GetSalesforceReportSoqlFunction(), {"catalog", "report_id"},
+	                  "Returns a best-effort, describe-validated candidate SOQL translation of a report "
+	                  "with explainability columns (translatable, translation_status, blocked_by, "
+	                  "confidence); reports translatable = false instead of an unverified SOQL.",
+	                  {"SELECT * FROM salesforce_report_soql('sf', '00O...');"}, {"report", "diagnostic"});
 	// Metadata Engine v2 (§17) — read-only field metadata diagnostic.
-	loader.RegisterFunction(GetSalesforceMetadataFieldsFunction());
-	loader.RegisterFunction(GetSalesforceMetadataObjectsFunction());
-	loader.RegisterFunction(GetSalesforceRelationshipGraphFunction());
-	loader.RegisterFunction(GetSalesforceQueryExplainFunction());
+	RegisterDescribed(loader, GetSalesforceMetadataFieldsFunction(), {"catalog", "object"},
+	                  "Returns per-field schema metadata for an sObject in an attached salesforce "
+	                  "catalog (name, type, capability flags, reference target, picklist values) from "
+	                  "the shared read-only metadata cache.",
+	                  {"SELECT field_name, type FROM salesforce_metadata_fields('sf', 'Account');"},
+	                  {"metadata"});
+	RegisterDescribed(loader, GetSalesforceMetadataObjectsFunction(), {"catalog"},
+	                  "Lists the sObjects visible to the authenticated user in an attached salesforce "
+	                  "catalog, with queryable and other capability flags, from the shared read-only "
+	                  "metadata cache.",
+	                  {"SELECT object_name FROM salesforce_metadata_objects('sf') WHERE queryable;"},
+	                  {"metadata"});
+	RegisterDescribed(loader, GetSalesforceRelationshipGraphFunction(), {"catalog", "object"},
+	                  "Enumerates relationship edges reachable from an sObject with an explicit status "
+	                  "per edge (resolved, polymorphic, self_reference, cyclic, ...); accepts an "
+	                  "optional positional max_depth plus the named parameters include_children "
+	                  "(default false) and direction ('parent', 'child' or 'both', default 'parent').",
+	                  {"SELECT * FROM salesforce_relationship_graph('sf', 'Contact');"},
+	                  {"metadata", "diagnostic"});
+	RegisterDescribed(loader, GetSalesforceQueryExplainFunction(), {},
+	                  "Returns a field-by-field explanation of the most recent scan: which filters were "
+	                  "pushed to SOQL versus evaluated as residuals, plus projection, relationship, "
+	                  "count and transport decisions; diagnostic only, never changes scan behavior.",
+	                  {"SELECT * FROM salesforce_query_explain();"}, {"diagnostic"});
 
 	// salesforce_relationships() — LAST-RESOLUTION relationship diagnostics
 	// (#v1.0): one `config` row (sf_relationships mode, effective depth,
@@ -101,38 +209,72 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// polymorphic / self_reference / cycle / name_collision /
 	// parent_not_describable / no_fields / no_relationship_name). Explains
 	// over-fetch and why a parent was or wasn't expanded. Read-only diagnostic.
-	loader.RegisterFunction(GetSalesforceRelationshipsFunction());
+	RegisterDescribed(loader, GetSalesforceRelationshipsFunction(), {},
+	                  "Explains the most recent scan's relationship resolution: one config row (mode, "
+	                  "effective depth, expanded/skipped counts) plus one row per reference field, "
+	                  "expanded with field counts or skipped with a reason.",
+	                  {"SELECT * FROM salesforce_relationships();"}, {"diagnostic"});
 
 	// salesforce_aggregate(catalog, object, aggregates [, filter]) — explicit,
 	// opt-in server-side SOQL aggregates (#v1.0): runs
 	// SELECT <aggregates> FROM <object> [WHERE <filter>] over an attached
 	// catalog and returns one row, one VARCHAR column per aggregate term. Not
 	// transparent pushdown — the user chooses it. No optimizer / plan rewrite.
-	loader.RegisterFunction(GetSalesforceAggregateFunction());
+	RegisterDescribed(loader, GetSalesforceAggregateFunction(), {"catalog", "object", "aggregates"},
+	                  "Runs an explicit server-side SOQL aggregate over an attached catalog - SELECT "
+	                  "<aggregates> FROM <object> [WHERE <filter>] [GROUP BY <group_by>] - with optional "
+	                  "positional filter and group_by arguments (3 to 5 total) and one VARCHAR column "
+	                  "per aggregate term; opt-in, not transparent pushdown.",
+	                  {"SELECT * FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id) n', "
+	                  "'IsDeleted = false', 'Industry');"},
+	                  {"aggregate"});
 
 	// salesforce_refresh_metadata(catalog [, object]) — manual metadata-cache
 	// refresh (#v1.3 §10): clears the attached catalog's in-memory schema +
 	// object-listing cache so the next reference re-describes. Empty object =
 	// global; a named object clears only that object. No data/disk cache.
-	loader.RegisterFunction(GetSalesforceRefreshMetadataFunction());
+	RegisterDescribed(loader, GetSalesforceRefreshMetadataFunction(), {"catalog"},
+	                  "Invalidates the in-memory metadata cache of an attached catalog - the whole "
+	                  "catalog when no object is given, only the named object otherwise - so the next "
+	                  "reference re-describes.",
+	                  {"SELECT * FROM salesforce_refresh_metadata('sf', 'Account');"}, {"metadata"});
 
 	// salesforce_picklist_values(catalog, object, field) +
 	// salesforce_record_types(catalog, object) — read-only metadata enrichment
 	// (#v1.3 §14) parsed from the cached REST describe. Not the Metadata API.
-	loader.RegisterFunction(GetSalesforcePicklistValuesFunction());
-	loader.RegisterFunction(GetSalesforceRecordTypesFunction());
+	RegisterDescribed(loader, GetSalesforcePicklistValuesFunction(), {"catalog", "object", "field"},
+	                  "Returns the picklist entries of a field from the cached REST describe with value, "
+	                  "label and active flag; read-only metadata, not the Metadata API.",
+	                  {"SELECT value, label FROM salesforce_picklist_values('sf', 'Account', 'Industry') "
+	                  "WHERE active;"},
+	                  {"metadata"});
+	RegisterDescribed(loader, GetSalesforceRecordTypesFunction(), {"catalog", "object"},
+	                  "Returns the record types of an sObject from the cached REST describe: "
+	                  "developer_name, label, record_type_id, active and is_default.",
+	                  {"SELECT developer_name, label, is_default FROM salesforce_record_types('sf', "
+	                  "'Account');"},
+	                  {"metadata"});
 
 	// salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the
 	// attached catalog issued since ATTACH (proves the metadata cache, #12).
-	loader.RegisterFunction(GetSalesforceDescribeCallsFunction());
+	RegisterDescribed(loader, GetSalesforceDescribeCallsFunction(), {},
+	                  "TEST ONLY: returns the number of sObject describes issued since ATTACH, proving "
+	                  "the metadata cache is reused.",
+	                  {"SELECT * FROM salesforce_describe_calls();"}, {"diagnostic", "test"});
 
 	// salesforce_global_describe_calls() — DEBUG/TEST ONLY: global describes
 	// (GET /sobjects) since ATTACH (proves object-list discovery, #14).
-	loader.RegisterFunction(GetSalesforceGlobalDescribeCallsFunction());
+	RegisterDescribed(loader, GetSalesforceGlobalDescribeCallsFunction(), {},
+	                  "TEST ONLY: returns the number of global describe (GET /sobjects) calls issued "
+	                  "since ATTACH, proving object-list discovery caching.",
+	                  {"SELECT * FROM salesforce_global_describe_calls();"}, {"diagnostic", "test"});
 
 	// salesforce_tooling_calls() — DEBUG/TEST ONLY: Tooling API schema queries
 	// since ATTACH (proves fast-schema use + batching, #v0.6 §6).
-	loader.RegisterFunction(GetSalesforceToolingCallsFunction());
+	RegisterDescribed(loader, GetSalesforceToolingCallsFunction(), {},
+	                  "TEST ONLY: returns the number of Tooling API schema queries issued since ATTACH, "
+	                  "proving fast-schema batching (sf_schema_source = 'tooling').",
+	                  {"SELECT * FROM salesforce_tooling_calls();"}, {"diagnostic", "test"});
 
 	// Test-only hooks for the OAuth exchange (#3). When sf_mock_token_status is
 	// non-zero, ATTACH uses a mock HTTP client returning that status and

@@ -1,0 +1,37 @@
+# name: test/sql/salesforce_functions_docs.test
+# description: "#66 — every extension function documents itself through
+#              duckdb_functions(): a description, an example, and real
+#              parameter names (never col0/col1 placeholders). Pure metadata —
+#              no scan/pushdown/transport behavior is exercised."
+# group: [salesforce]
+
+require salesforce
+
+# All 25 registered functions (24 table + 1 scalar) carry a description and at
+# least one example. Update both counts when adding a function.
+query II
+SELECT count(*) AS total,
+       count(*) FILTER (WHERE description IS NOT NULL AND len(examples) > 0) AS documented
+FROM duckdb_functions()
+WHERE function_name LIKE 'salesforce%' OR function_name = 'sf_url_encode'
+----
+25	25
+
+# No positional parameter keeps the col0/col1 placeholder name (issue metric:
+# real parameter names on every function that takes arguments).
+query I
+SELECT count(*)
+FROM duckdb_functions()
+WHERE (function_name LIKE 'salesforce%' OR function_name = 'sf_url_encode')
+  AND list_contains(parameters, 'col0')
+----
+0
+
+# Spot-check the signature surface an agent would see for one positional
+# function: parameter names and types stay aligned and stable.
+query TT
+SELECT parameters, parameter_types
+FROM duckdb_functions()
+WHERE function_name = 'salesforce_metadata_fields'
+----
+[catalog, object]	[VARCHAR, VARCHAR]
