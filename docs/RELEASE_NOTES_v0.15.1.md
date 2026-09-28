@@ -84,8 +84,10 @@ carries forward to the next baseline migration.
 - `scripts/build_matrix.ps1 -Tags v1.5.4,v1.5.5 -Baseline v1.5.4`:
   see the run record below (filled in before tagging).
 - Official `MainDistributionPipeline.yml` matrix (linux_amd64,
-  windows_amd64, osx_arm64 × v1.5.4/v1.5.5): run against the tag before
-  the GitHub Release is published; see the run table below.
+  windows_amd64, osx_arm64 × v1.5.4/v1.5.5): run
+  [36480105969](https://github.com/flozer/duckdb-salesforce/actions/runs/36480105969)
+  (2026-09-28, `workflow_dispatch` against `main` @ `9ef4631`, pre-tag),
+  **6/6 green**; see the run table below.
 
 ### Local matrix run record
 
@@ -107,7 +109,17 @@ which asserts the coverage directly on each matrix build: 25/25 described,
 
 ### Official CI run record
 
-TO BE FILLED BEFORE TAGGING.
+`MainDistributionPipeline.yml` run
+[36480105969](https://github.com/flozer/duckdb-salesforce/actions/runs/36480105969)
+(2026-09-28, `workflow_dispatch` against `main` @ `9ef4631`, pre-tag;
+extension-ci-tools pinned at `64aec33f`, matching the submodule):
+
+| DuckDB | linux_amd64 | windows_amd64 | osx_arm64 |
+|---|---|---|---|
+| v1.5.4 | Pass | Pass | Pass |
+| v1.5.5 | Pass | Pass | Pass |
+
+**6/6 green.**
 
 ## Gates
 
