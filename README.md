@@ -288,7 +288,7 @@ extension function documents itself through `duckdb_functions()`
 | Transparent `COUNT(field)` pushdown (`sf_aggregate_pushdown`) | Done |
 | Transparent `COUNT(DISTINCT)` / `MIN` / `MAX` pushdown | Done (sortable numeric/temporal/boolean fields; strings stay local) |
 | Transparent `SUM` / `AVG` pushdown | Deferred: gated on decimal evidence (P1.4) |
-| Official DuckDB v1.5.6 support declaration | Pending (validated locally; compat release planned) |
+| Official DuckDB v1.5.6 support declaration | Done (CI matrix v1.5.4/v1.5.5/v1.5.6 × 3 platforms; release-assets build against v1.5.6) |
 | Salesforce writes / Metadata API deploy | Out of scope |
 
 ## Build
@@ -302,17 +302,17 @@ make test_release
 Windows MSVC and RTOOLS/MinGW local validation are documented in
 [docs/INSTALL.md](docs/INSTALL.md).
 
-**Supported: DuckDB v1.5.4 and v1.5.5 only.** v1.5.2/v1.5.3 support was
+**Supported: DuckDB v1.5.4, v1.5.5 and v1.5.6.** v1.5.2/v1.5.3 support was
 dropped 2026-09-14 (maintainer decision) — see "Dropped versions" below.
 
 Validated matrix (official, from `MainDistributionPipeline.yml` run
-[34879771640](https://github.com/flozer/duckdb-salesforce/actions/runs/34879771640), 2026-09-14):
+MAIN_V156_RUN_URL):
 
-| Platform | DuckDB v1.5.4 | DuckDB v1.5.5 |
-|---|---:|---:|
-| Linux x64 | Pass | Pass |
-| Windows x64 | Pass | Pass |
-| macOS arm64 | Pass | Pass |
+| Platform | DuckDB v1.5.4 | DuckDB v1.5.5 | DuckDB v1.5.6 |
+|---|---:|---:|---:|
+| Linux x64 | Pass | Pass | Pass |
+| Windows x64 | Pass | Pass | Pass |
+| macOS arm64 | Pass | Pass | Pass |
 
 ### Dropped versions (v1.5.2, v1.5.3)
 
