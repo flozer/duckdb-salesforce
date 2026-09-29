@@ -279,10 +279,17 @@ public:
 		if (request.url.find("/limits") != string::npos) {
 			return Step(limits_statuses_, limits_bodies_, limits_index_);
 		}
-		// Auto-transport probe (#v0.3 §2): SELECT COUNT() ... -> count sequence.
-		// "COUNT" survives URL-encoding (letters only), so match it before the
-		// generic data-query branch.
-		if (request.url.find("COUNT") != string::npos) {
+		// Auto-transport probe (#v0.3 §2) + pushed aggregates (P1.2a/P1.2b/
+		// P1.3): SOQL containing COUNT (incl. COUNT_DISTINCT), or the fixed
+		// a0 output alias of pushed-aggregate queries (SELECT COUNT(x) a0,
+		// MIN(x) a0, ...), routes to the count/aggregate sequence. "COUNT" and
+		// "a0" survive URL-encoding (alphanumerics only). The EXPLICIT
+		// salesforce_aggregate() function and the PK-chunking MIN/MAX(Id)
+		// probes use user-chosen (or no) aliases, so they keep routing to the
+		// generic data-query sequence. Mock convention: avoid the literal
+		// substring a0 in canned WHERE data. Matched before the queryAll
+		// branch.
+		if (request.url.find("COUNT") != string::npos || request.url.find("a0") != string::npos) {
 			return Step(count_statuses_, count_bodies_, count_index_);
 		}
 		// queryAll (#v0.9 §1): distinct sequence so tests prove the endpoint.

@@ -1,9 +1,11 @@
 # name: test/sql/salesforce_agg_pushdown.test
-# description: P1.2a -- transparent COUNT(field) pushdown (OptimizerExtension).
-#              A no-group COUNT(col) directly over an attached sObject with
-#              every filter pushed runs ONE server-side aggregate SOQL and
-#              emits its single result row; every unsupported shape falls back
-#              to the normal row scan (always correct). Mock-only, no network.
+# description: P1.2a/P1.2b/P1.3 -- transparent no-group aggregate pushdown
+#              (OptimizerExtension). COUNT, COUNT_DISTINCT, MIN and MAX
+#              directly over an attached sObject with every filter pushed run
+#              ONE server-side aggregate SOQL and emit a single result row;
+#              every unsupported shape (strings for MIN/MAX, non-sortable
+#              fields, SUM/AVG, residual filters, GROUP BY, expressions)
+#              falls back to the normal row scan (always correct). Mock-only.
 # group: [salesforce]
 
 require salesforce
@@ -15,12 +17,15 @@ statement ok
 SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
 
 # Note is NOT filterable -> a predicate on it stays residual (blocks pushdown).
+# LastCheck is NOT sortable -> MIN/MAX on it stay local. Amount is a currency
+# (DECIMAL(12,2)); CreatedDate is a sortable datetime.
 statement ok
-SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"Industry","type":"string","filterable":true},{"name":"Note","type":"string","filterable":false}]}';
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"Industry","type":"string","filterable":true},{"name":"Note","type":"string","filterable":false},{"name":"Amount","type":"currency","filterable":true,"sortable":true,"precision":12,"scale":2},{"name":"CreatedDate","type":"datetime","filterable":true,"sortable":true},{"name":"LastCheck","type":"datetime","filterable":true,"sortable":false}]}';
 
-# Row page for the FALLBACK (no-rewrite) cases: 3 records, 2 in Tech.
+# Row page for the FALLBACK (no-rewrite) cases: 3 records, 2 in Tech; Amount
+# sums to 1508.00; LastCheck is a 2023 wall clock.
 statement ok
-SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"A","Industry":"Tech"},{"Id":"r2","Name":"B","Industry":"Tech"},{"Id":"r3","Name":"C","Industry":"Health"}]}';
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"A","Industry":"Tech","Amount":"1000.50","LastCheck":"2023-01-01T00:00:00.000+0000"},{"Id":"r2","Name":"B","Industry":"Tech","Amount":"500.00","LastCheck":"2023-06-01T00:00:00.000+0000"},{"Id":"r3","Name":"C","Industry":"Health","Amount":"7.50","LastCheck":"2023-12-01T00:00:00.000+0000"}]}';
 
 # Aggregate-query response (routed here because the SOQL contains COUNT):
 # single AggregateResult record with our fixed a0..aN aliases.
@@ -136,18 +141,21 @@ SELECT count(*) FROM salesforce_last_soql() WHERE soql LIKE '%COUNT(%';
 ----
 0
 
-# --- COUNT(DISTINCT) blocks the rewrite (phase P1.2b) -----------------------
+# --- COUNT(DISTINCT) pushes (P1.2b) ------------------------------------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":1,"done":true,"records":[{"a0":3}]}';
+
 query I
 SELECT COUNT(DISTINCT Name) FROM sf.Account;
 ----
 3
 
-query I
-SELECT count(*) FROM salesforce_last_soql() WHERE soql LIKE '%COUNT(%';
+query T
+SELECT soql FROM salesforce_last_soql();
 ----
-0
+SELECT COUNT_DISTINCT(Name) a0 FROM Account
 
-# --- MIN/MAX are NOT pushed in cut 1 (phases P1.3/P1.4) ---------------------
+# --- MIN(Name): string stays LOCAL (SOQL vs DuckDB collation unproven) -------
 query T
 SELECT MIN(Name) FROM sf.Account;
 ----
@@ -157,6 +165,103 @@ query T
 SELECT soql FROM salesforce_last_soql();
 ----
 SELECT Name FROM Account
+
+# --- MIN/MAX numeric (currency) push through (P1.3) ---------------------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":1,"done":true,"records":[{"a0":"1500.75"}]}';
+
+query T
+SELECT MIN(Amount) FROM sf.Account;
+----
+1500.75
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT MIN(Amount) a0 FROM Account
+
+statement ok
+SET sf_mock_count_body = '{"totalSize":1,"done":true,"records":[{"a0":"7.25"}]}';
+
+query T
+SELECT MAX(Amount) FROM sf.Account;
+----
+7.25
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT MAX(Amount) a0 FROM Account
+
+# --- MIN datetime decodes to TIMESTAMP (P1.3) ---------------------------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":1,"done":true,"records":[{"a0":"2024-03-01T10:00:00.000+0000"}]}';
+
+query T
+SELECT MIN(CreatedDate) FROM sf.Account;
+----
+2024-03-01 10:00:00
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT MIN(CreatedDate) a0 FROM Account
+
+# --- mixed COUNT + MIN in one server-side query -------------------------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":1,"done":true,"records":[{"a0":9,"a1":"88.5"}]}';
+
+query IT
+SELECT COUNT(Id), MIN(Amount) FROM sf.Account WHERE Industry = 'Tech';
+----
+9	88.50
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT COUNT(Id) a0, MIN(Amount) a1 FROM Account WHERE Industry = 'Tech'
+
+# --- MIN on a non-sortable datetime stays local -------------------------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":1,"done":true,"records":[{"a0":"2024-01-01T00:00:00.000+0000"}]}';
+
+query T
+SELECT MIN(LastCheck) FROM sf.Account;
+----
+2023-01-01 00:00:00
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT LastCheck FROM Account
+
+# --- MIN over an empty org returns NULL (SOQL null passes through) ------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":1,"done":true,"records":[{"a0":null}]}';
+
+query T
+SELECT MIN(Amount) FROM sf.Account;
+----
+NULL
+
+# --- a null COUNT is a hard error (would silently change results) -------------
+statement error
+SELECT COUNT(Id) FROM sf.Account;
+----
+
+# --- SUM is still deferred (P1.4) ----------------------------------------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":1,"done":true,"records":[{"a0":42}]}';
+
+query T
+SELECT SUM(Amount) FROM sf.Account;
+----
+1508.00
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT Amount FROM Account
 
 # --- aggregate transport failure is a HARD error (correctness depends on it)
 statement ok
