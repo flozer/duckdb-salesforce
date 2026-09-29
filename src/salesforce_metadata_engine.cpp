@@ -427,6 +427,9 @@ static const char *ExplainGuidance(const string &reason) {
 	if (reason == "count_not_pushed") {
 		return "not a count-only scan; records are fetched normally";
 	}
+	if (reason == "aggregate_pushdown") {
+		return "computed server-side by a single aggregate SOQL query - no records fetched";
+	}
 	return "metadata unavailable (catalog detached or engine error); annotation skipped";
 }
 
@@ -541,6 +544,8 @@ unique_ptr<FunctionData> ExplainBind(ClientContext &context, TableFunctionBindIn
 
 		if (item.role == "projection") {
 			row.reason = "projected";
+		} else if (item.role == "aggregate") {
+			row.reason = "aggregate_pushdown";
 		} else if (item.pushed) {
 			row.reason = "pushed_to_soql"; // exact-pushed or prefilter (also residual)
 		} else if (!fld->filterable) {

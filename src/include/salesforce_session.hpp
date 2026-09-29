@@ -157,6 +157,13 @@ public:
 	// back to REST. Never throws.
 	bool TryEstimateCount(const string &count_soql, int64_t &out_rows);
 
+	// Transparent aggregate pushdown (P1.2a): run ONE SOQL aggregate query and
+	// read `aliases` from the first (and only) result record into out_values,
+	// in order. Returns false on ANY failure (HTTP error, empty/odd-shaped
+	// records, missing or null alias) so the caller can treat it as a hard
+	// error with a clear message. Never throws.
+	bool TryAggregateQuery(const string &soql, const vector<string> &aliases, vector<int64_t> &out_values);
+
 	// Read the org's REST /limits (#v0.4 quota governor). One API call; the
 	// caller caches it. Returns an unavailable snapshot (never throws) on any
 	// failure so the governor can apply its fail-open policy.

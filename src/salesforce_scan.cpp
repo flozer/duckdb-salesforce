@@ -46,6 +46,7 @@ unique_ptr<FunctionData> SalesforceScanBindData::Copy() const {
 	r->catalog_alias = catalog_alias;
 	r->explain_filters = explain_filters;
 	r->explain_captured = explain_captured;
+	r->pushed_aggregates = pushed_aggregates;
 	return std::move(r);
 }
 
@@ -89,6 +90,15 @@ struct ScanGlobalState : public GlobalTableFunctionState {
 	bool count_only = false;
 	int64_t count_total = 0;
 	int64_t count_cursor = 0;
+
+	// Transparent aggregate pushdown (P1.2a): the optimizer extension proved a
+	// supported no-group COUNT(col) aggregate sits directly on this scan with
+	// zero residual filters; InitGlobal ran ONE server-side aggregate query and
+	// `agg_values` holds its single result row (one entry per output column).
+	// ScanFunction emits that row exactly once, then stops.
+	bool agg_only = false;
+	vector<int64_t> agg_values;
+	bool agg_sent = false;
 
 	// DuckDB-level projection: which source field each output column maps to.
 	vector<column_t> column_ids;
@@ -345,6 +355,60 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 	}
 	gstate->session->SetBulkPollBudget(gstate->bulk_poll_budget);
 	SetLastScanPages(0);
+
+	// Transparent aggregate pushdown (P1.2a): the optimizer extension rewrote
+	// Aggregate(COUNT(col)) over this Get, so DuckDB no longer computes the
+	// aggregate locally -- it consumes the single row this scan emits. Run ONE
+	// server-side aggregate query (same pushed WHERE, same queryAll mode via
+	// the session) and record the result. Unlike the COUNT(*) estimator, a
+	// failure here is a HARD error: silently falling through to the row scan
+	// would feed the (removed) local aggregate N rows instead of a pre-aggregated
+	// one. The kill-switch (checked at optimize time) is the supported off path.
+	if (!bind.pushed_aggregates.empty()) {
+		string agg_soql = "SELECT ";
+		vector<string> aliases;
+		for (idx_t i = 0; i < bind.pushed_aggregates.size(); i++) {
+			const auto &pa = bind.pushed_aggregates[i];
+			aliases.push_back("a" + std::to_string(i));
+			if (i > 0) {
+				agg_soql += ", ";
+			}
+			agg_soql += pa.func + "(" + pa.field + ") " + aliases.back();
+		}
+		agg_soql += " FROM " + bind.object;
+		if (!bind.pushed_where.empty()) {
+			agg_soql += " WHERE " + bind.pushed_where;
+		}
+		SetLastSoql(agg_soql); // the SOQL actually sent for the aggregate
+		SetLastTransport("rest", 1, "aggregate pushdown -> rest");
+		SetLastScanPages(0);
+		vector<int64_t> values;
+		if (!gstate->session->TryAggregateQuery(agg_soql, aliases, values)) {
+			throw IOException("aggregate pushdown query failed for '%s' (SOQL: %s); "
+			                  "retry with sf_aggregate_pushdown = false to scan rows "
+			                  "and aggregate locally instead.",
+			                  bind.object, agg_soql);
+		}
+		gstate->agg_only = true;
+		gstate->agg_values = std::move(values);
+		// Query-cost + explain diagnostics: the aggregate replaced the row scan,
+		// so pages = 0, rows = 1, and the count family was served server-side.
+		DiagRecordScan(bind.object, agg_soql, "rest", 1, "aggregate pushdown",
+		               static_cast<int64_t>(bind.pushed_aggregates.size()), static_cast<int64_t>(bind.fields.size()),
+		               bind.pushed_filter_count, bind.residual_filter_count, bind.pushed_where, false, 0, true,
+		               gstate->query_all ? "queryAll" : "query");
+		vector<DiagExplainItem> items;
+		for (const auto &pa : bind.pushed_aggregates) {
+			DiagExplainItem it;
+			it.role = "aggregate";
+			it.field = pa.field;
+			it.field_known = true;
+			it.pushed = true;
+			items.push_back(std::move(it));
+		}
+		DiagSetExplain(bind.catalog_alias, std::move(items));
+		return std::move(gstate); // skip the entire row-scan path
+	}
 
 	// Resolve 'auto' -> 'rest'|'bulk' ONCE here (no mid-stream escalation: that
 	// would duplicate already-emitted rows). LIMIT is invisible to a table
@@ -659,6 +723,23 @@ static void AppendBulkStruct(Vector &vec, idx_t row, const SalesforceField &fiel
 static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &bind = data.bind_data->Cast<SalesforceScanBindData>();
 	auto &gstate = data.global_state->Cast<ScanGlobalState>();
+
+	// Transparent aggregate pushdown (P1.2a): InitGlobal already fetched the
+	// single server-side aggregate row; emit it once (one BIGINT per output
+	// column, never NULL for COUNT), then stop.
+	if (gstate.agg_only) {
+		if (gstate.agg_sent) {
+			output.SetCardinality(0);
+			return;
+		}
+		gstate.agg_sent = true;
+		for (idx_t j = 0; j < gstate.column_ids.size() && j < gstate.agg_values.size(); j++) {
+			FlatVector::GetData<int64_t>(output.data[j])[0] = gstate.agg_values[j];
+		}
+		output.SetCardinality(1);
+		DiagAddRowsEmitted(1);
+		return;
+	}
 
 	// COUNT pushdown (#v0.5 §5): emit count_total empty rows (all-NULL virtual
 	// columns) so DuckDB's COUNT(*) counts the right number — no records fetched.
