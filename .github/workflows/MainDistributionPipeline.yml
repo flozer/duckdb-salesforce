@@ -42,11 +42,11 @@ jobs:
         # vendored fmt vs the current MSVC toolchain (R-003); scope reduction,
         # not a code fix -- see README.md "Current Status" for detail.
         duckdb_version: ["v1.5.4", "v1.5.5"]
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@64aec33f4f659eed8e542507b3afa3b262b37e42
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@8d2a39a7902396427e09f6aae4b0f60dc17cb94b
     with:
       extension_name: salesforce
       duckdb_version: ${{ matrix.duckdb_version }}
-      ci_tools_version: 64aec33f4f659eed8e542507b3afa3b262b37e42
+      ci_tools_version: 8d2a39a7902396427e09f6aae4b0f60dc17cb94b
       # Keep linux_amd64 + windows_amd64 + osx_arm64 (native on macOS runners).
       # osx_amd64 stays excluded (cross-compile, deferred); musl/arm-linux/wasm/
       # mingw excluded.
