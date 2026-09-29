@@ -1,0 +1,195 @@
+# name: test/sql/salesforce_agg_pushdown.test
+# description: P1.2a -- transparent COUNT(field) pushdown (OptimizerExtension).
+#              A no-group COUNT(col) directly over an attached sObject with
+#              every filter pushed runs ONE server-side aggregate SOQL and
+#              emits its single result row; every unsupported shape falls back
+#              to the normal row scan (always correct). Mock-only, no network.
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Note is NOT filterable -> a predicate on it stays residual (blocks pushdown).
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"Industry","type":"string","filterable":true},{"name":"Note","type":"string","filterable":false}]}';
+
+# Row page for the FALLBACK (no-rewrite) cases: 3 records, 2 in Tech.
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"A","Industry":"Tech"},{"Id":"r2","Name":"B","Industry":"Tech"},{"Id":"r3","Name":"C","Industry":"Health"}]}';
+
+# Aggregate-query response (routed here because the SOQL contains COUNT):
+# single AggregateResult record with our fixed a0..aN aliases.
+statement ok
+SET sf_mock_count_body = '{"totalSize":2,"done":true,"records":[{"a0":123}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- COUNT(field) WHERE pushed -> ONE server-side COUNT query ----------------
+query I
+SELECT COUNT(Name) FROM sf.Account WHERE Industry = 'Tech';
+----
+123
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT COUNT(Name) a0 FROM Account WHERE Industry = 'Tech'
+
+query I
+SELECT pages FROM salesforce_last_scan_pages();
+----
+0
+
+query I
+SELECT count_pushdown AND pages_fetched = 0 AND rows_emitted = 1 AND residual_filters = 0
+FROM salesforce_query_cost();
+----
+true
+
+# --- the output column name is preserved ------------------------------------
+query T
+SELECT column_name FROM (DESCRIBE SELECT COUNT(Name) AS n FROM sf.Account);
+----
+n
+
+query T
+SELECT column_name FROM (DESCRIBE SELECT COUNT(Name) FROM sf.Account);
+----
+count("Name")
+
+# --- no WHERE: still one server-side query ----------------------------------
+query I
+SELECT COUNT(Id) FROM sf.Account;
+----
+123
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT COUNT(Id) a0 FROM Account
+
+# --- multiple COUNT terms -> one query, one row, several columns ------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":2,"done":true,"records":[{"a0":7,"a1":8}]}';
+
+query II
+SELECT COUNT(Name), COUNT(Id) FROM sf.Account WHERE Industry = 'Tech';
+----
+7	8
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT COUNT(Name) a0, COUNT(Id) a1 FROM Account WHERE Industry = 'Tech'
+
+# --- explain shows the pushed aggregate term --------------------------------
+query I
+SELECT count(*) FROM salesforce_query_explain() WHERE role = 'aggregate' AND field_name = 'Name' AND pushed;
+----
+1
+
+# --- COUNT(*) keeps the existing zero-column COUNT() path -------------------
+statement ok
+SET sf_mock_count_body = '{"totalSize":999,"done":true,"records":[]}';
+
+query I
+SELECT COUNT(*) FROM sf.Account;
+----
+999
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT COUNT() FROM Account
+
+# --- residual filter (non-filterable field) BLOCKS the rewrite --------------
+query I
+SELECT COUNT(Name) FROM sf.Account WHERE Note = 'x';
+----
+0
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT Note, Name FROM Account
+
+query I
+SELECT count_pushdown = false AND residual_filters = 1 FROM salesforce_query_cost();
+----
+true
+
+# --- GROUP BY blocks the rewrite (local aggregation stays correct) ----------
+query II
+SELECT Industry, COUNT(Name) FROM sf.Account GROUP BY Industry ORDER BY Industry;
+----
+Health	1
+Tech	2
+
+query I
+SELECT count(*) FROM salesforce_last_soql() WHERE soql LIKE '%COUNT(%';
+----
+0
+
+# --- COUNT(DISTINCT) blocks the rewrite (phase P1.2b) -----------------------
+query I
+SELECT COUNT(DISTINCT Name) FROM sf.Account;
+----
+3
+
+query I
+SELECT count(*) FROM salesforce_last_soql() WHERE soql LIKE '%COUNT(%';
+----
+0
+
+# --- MIN/MAX are NOT pushed in cut 1 (phases P1.3/P1.4) ---------------------
+query T
+SELECT MIN(Name) FROM sf.Account;
+----
+A
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT Name FROM Account
+
+# --- aggregate transport failure is a HARD error (correctness depends on it)
+statement ok
+SET sf_mock_count_status = '500';
+
+statement error
+SELECT COUNT(Name) FROM sf.Account WHERE Industry = 'Tech';
+----
+
+statement ok
+SET sf_mock_count_status = '200';
+
+# --- kill-switch: sf_aggregate_pushdown = false restores the row scan -------
+# (Industry is filterable, so the WHERE is still pushed to SOQL; the mock
+# returns all 3 records regardless of WHERE, so the local count is 3. The
+# point of the case is the plan shape: row scan + local aggregation.)
+statement ok
+SET sf_aggregate_pushdown = false;
+
+query I
+SELECT COUNT(Name) FROM sf.Account WHERE Industry = 'Tech';
+----
+3
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT Name FROM Account WHERE Industry = 'Tech'
+
+query I
+SELECT count_pushdown = false FROM salesforce_query_cost();
+----
+true
+
+statement ok
+DETACH sf;

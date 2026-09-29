@@ -12,11 +12,13 @@
 #include "salesforce_diag.hpp"
 #include "salesforce_reldiag.hpp"
 #include "salesforce_aggregate.hpp"
+#include "salesforce_agg_optimizer.hpp"
 #include "salesforce_metadata.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb/optimizer/optimizer_extension.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/storage/storage_extension.hpp"
@@ -78,6 +80,24 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto storage_ext = GetSalesforceStorageExtension();
 	StorageExtension::Register(config, "salesforce", shared_ptr<StorageExtension>(storage_ext.release()));
 
+	// Transparent aggregate pushdown (P1.2a): post-optimizer pass rewriting
+	// Aggregate(COUNT(col)) directly over a salesforce_scan into ONE
+	// server-side COUNT query (single-row result), guarded + kill-switchable
+	// via sf_aggregate_pushdown below. Spec:
+	// docs/superpowers/specs/2026-09-29-aggregate-pushdown-optimizer-extension-feasibility.md.
+	OptimizerExtension agg_pushdown;
+	agg_pushdown.optimize_function = SalesforceAggregatePushdownOptimize;
+	OptimizerExtension::Register(config, std::move(agg_pushdown));
+	// Kill-switch for the pass above. Default ON (same stance as the
+	// transparent COUNT(*) pushdown); false restores the row-scan + local
+	// aggregation plan shape.
+	config.AddExtensionOption("sf_aggregate_pushdown",
+	                          "Transparent COUNT(field) pushdown: when a no-group COUNT query runs "
+	                          "directly on an attached sObject with every filter already pushed to "
+	                          "SOQL, run one server-side COUNT query instead of fetching rows "
+	                          "(default true). false keeps the row-scan fallback.",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
+
 	// salesforce_describe(object, client_id:=, client_secret:=, refresh_token:=,
 	//   login_url:=, api_version:=) — introspect a single sObject's schema (#5).
 	RegisterDescribed(loader, GetSalesforceDescribeFunction(), {"object"},
@@ -85,7 +105,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                  "Salesforce sObject without an ATTACH; credentials are passed as the named "
 	                  "parameters client_id, client_secret, refresh_token, login_url and api_version.",
 	                  {"SELECT * FROM salesforce_describe('Account', client_id := '<client_id>', "
-	                  "client_secret := '<client_secret>', refresh_token := '<refresh_token>');"},
+	                   "client_secret := '<client_secret>', refresh_token := '<refresh_token>');"},
 	                  {"metadata"});
 
 	// salesforce_query(soql, client_id:=, ...) — paginated SOQL fetcher (#6),
@@ -95,8 +115,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                  "with lazy pagination; credentials use the same named parameters as "
 	                  "salesforce_describe().",
 	                  {"SELECT * FROM salesforce_query('SELECT Id, Name FROM Account LIMIT 10', client_id "
-	                  ":= '<client_id>', client_secret := '<client_secret>', refresh_token := "
-	                  "'<refresh_token>');"},
+	                   ":= '<client_id>', client_secret := '<client_secret>', refresh_token := "
+	                   "'<refresh_token>');"},
 	                  {"query"});
 	RegisterDescribed(loader, GetSalesforceUrlEncodeFunction(), {"text"},
 	                  "Percent-encodes a string for safe use as a literal inside a SOQL query or a "
@@ -109,7 +129,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                  "Decodes a fields-describe JSON array plus a records JSON array into typed DuckDB "
 	                  "rows; utility surface of the scan's JSON-to-vector conversion.",
 	                  {"SELECT * FROM salesforce_decode('[{\"name\":\"Name\",\"type\":\"string\"}]', "
-	                  "'[{\"Name\":\"Acme\"}]');"},
+	                   "'[{\"Name\":\"Acme\"}]');"},
 	                  {"utility"});
 
 	// salesforce_last_soql() — diagnostic: the SOQL the most recent scan
@@ -181,21 +201,18 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                  "Returns per-field schema metadata for an sObject in an attached salesforce "
 	                  "catalog (name, type, capability flags, reference target, picklist values) from "
 	                  "the shared read-only metadata cache.",
-	                  {"SELECT field_name, type FROM salesforce_metadata_fields('sf', 'Account');"},
-	                  {"metadata"});
+	                  {"SELECT field_name, type FROM salesforce_metadata_fields('sf', 'Account');"}, {"metadata"});
 	RegisterDescribed(loader, GetSalesforceMetadataObjectsFunction(), {"catalog"},
 	                  "Lists the sObjects visible to the authenticated user in an attached salesforce "
 	                  "catalog, with queryable and other capability flags, from the shared read-only "
 	                  "metadata cache.",
-	                  {"SELECT object_name FROM salesforce_metadata_objects('sf') WHERE queryable;"},
-	                  {"metadata"});
+	                  {"SELECT object_name FROM salesforce_metadata_objects('sf') WHERE queryable;"}, {"metadata"});
 	RegisterDescribed(loader, GetSalesforceRelationshipGraphFunction(), {"catalog", "object"},
 	                  "Enumerates relationship edges reachable from an sObject with an explicit status "
 	                  "per edge (resolved, polymorphic, self_reference, cyclic, ...); accepts an "
 	                  "optional positional max_depth plus the named parameters include_children "
 	                  "(default false) and direction ('parent', 'child' or 'both', default 'parent').",
-	                  {"SELECT * FROM salesforce_relationship_graph('sf', 'Contact');"},
-	                  {"metadata", "diagnostic"});
+	                  {"SELECT * FROM salesforce_relationship_graph('sf', 'Contact');"}, {"metadata", "diagnostic"});
 	RegisterDescribed(loader, GetSalesforceQueryExplainFunction(), {},
 	                  "Returns a field-by-field explanation of the most recent scan: which filters were "
 	                  "pushed to SOQL versus evaluated as residuals, plus projection, relationship, "
@@ -226,7 +243,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                  "positional filter and group_by arguments (3 to 5 total) and one VARCHAR column "
 	                  "per aggregate term; opt-in, not transparent pushdown.",
 	                  {"SELECT * FROM salesforce_aggregate('sf', 'Account', 'COUNT(Id) n', "
-	                  "'IsDeleted = false', 'Industry');"},
+	                   "'IsDeleted = false', 'Industry');"},
 	                  {"aggregate"});
 
 	// salesforce_refresh_metadata(catalog [, object]) — manual metadata-cache
@@ -246,13 +263,13 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                  "Returns the picklist entries of a field from the cached REST describe with value, "
 	                  "label and active flag; read-only metadata, not the Metadata API.",
 	                  {"SELECT value, label FROM salesforce_picklist_values('sf', 'Account', 'Industry') "
-	                  "WHERE active;"},
+	                   "WHERE active;"},
 	                  {"metadata"});
 	RegisterDescribed(loader, GetSalesforceRecordTypesFunction(), {"catalog", "object"},
 	                  "Returns the record types of an sObject from the cached REST describe: "
 	                  "developer_name, label, record_type_id, active and is_default.",
 	                  {"SELECT developer_name, label, is_default FROM salesforce_record_types('sf', "
-	                  "'Account');"},
+	                   "'Account');"},
 	                  {"metadata"});
 
 	// salesforce_describe_calls() — DEBUG/TEST ONLY: sObject describes the

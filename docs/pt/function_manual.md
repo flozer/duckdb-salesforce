@@ -427,6 +427,47 @@ SET sf_auto_probe = false;
 SELECT Id, Name FROM sf.Account;
 ```
 
+### `sf_aggregate_pushdown`
+
+#### O que faz
+
+Permite que o planejador atenda uma consulta `COUNT(field)` sem GROUP BY
+com uma única query `COUNT()` SOQL executada no Salesforce, em vez de
+buscar linhas.
+
+#### Como funciona
+
+- Tipo: `BOOLEAN`
+- Padrão: `true`
+
+Quando uma consulta `COUNT(field)` roda **diretamente** sobre um sObject
+anexado e **todos** os predicados do WHERE já foram enviados ao SOQL
+(zero filtros residuais), a extensão reescreve o plano na otimização: uma
+única query `SELECT COUNT(field) ... WHERE ...` roda contra o Salesforce
+e sua única linha de resultado volta ao DuckDB, que deixa de agregar
+localmente. `COUNT(*)` mantém o próprio caminho de coluna zero que já
+existia. A reescrita nunca acontece com GROUP BY, `COUNT(DISTINCT ...)`,
+`COUNT(expressão)`, campos de relacionamento ou blob, ou quando algum
+filtro permanece residual — essas formas mantêm o scan normal de linhas
+com agregação local, que é sempre correto.
+
+#### Para que serve
+
+Transforma uma busca de linhas completa em uma única chamada minúscula à
+API para a contagem analítica mais comum. O kill-switch (`false`) restaura
+o formato de plano do scan de linhas sem reiniciar, caso você precise
+comparar comportamentos.
+
+#### Uso no dia a dia
+
+```sql
+SELECT COUNT(Name) FROM sf.Account WHERE Industry = 'Tech';
+SELECT soql FROM salesforce_last_soql();
+-- SELECT COUNT(Name) a0 FROM Account WHERE Industry = 'Tech'
+
+SET sf_aggregate_pushdown = false;  -- kill-switch: volta ao scan de linhas
+```
+
 ### `sf_bulk_chunks`
 
 #### O que faz
@@ -1900,6 +1941,14 @@ Mantido totalmente residual (sem pushdown):
 - Predicados em campos não filtráveis.
 - Uma cláusula WHERE que excederia 4000 caracteres ao ser renderizada como
   SOQL.
+
+Pushdown transparente de agregados (desde a v0.16.0, kill-switch
+`sf_aggregate_pushdown`): um `COUNT(field)` sem GROUP BY cuja consulta roda
+diretamente sobre um sObject anexado com zero filtros residuais é atendido
+por uma única query `COUNT` SOQL no servidor — nenhuma linha é buscada.
+Veja a configuração `sf_aggregate_pushdown`. GROUP BY, `COUNT(DISTINCT ...)`,
+`COUNT(expressão)`, campos de relacionamento/blob e qualquer forma com
+filtro residual mantêm o scan normal de linhas com agregação local.
 
 Agregações:
 

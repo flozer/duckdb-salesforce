@@ -20,6 +20,7 @@ include_directories(src/include)
 # are added by their respective milestone issues (#3, #4, #5-#9).
 set(EXTENSION_SOURCES
     src/salesforce_extension.cpp
+    src/salesforce_agg_optimizer.cpp
     src/salesforce_storage.cpp
     src/salesforce_config.cpp
     src/salesforce_auth.cpp

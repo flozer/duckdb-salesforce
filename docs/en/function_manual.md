@@ -423,6 +423,45 @@ SET sf_auto_probe = false;   -- skip the COUNT() probe; default to REST
 SELECT Id, Name FROM sf.Account;
 ```
 
+### `sf_aggregate_pushdown`
+
+#### What it does
+
+Lets the planner serve a no-group `COUNT(field)` query with a single
+server-side `COUNT()` SOQL query instead of fetching rows.
+
+#### How it works
+
+- Type: `BOOLEAN`
+- Default: `true`
+
+When a `COUNT(field)` query runs **directly** on an attached sObject and
+**every** WHERE predicate was already pushed to SOQL (zero residual
+filters), the extension rewrites the plan at optimization time: one
+`SELECT COUNT(field) ... WHERE ...` query runs against Salesforce and its
+single result row is returned to DuckDB, which no longer aggregates
+locally. `COUNT(*)` keeps its own existing zero-column path. The rewrite
+never fires for GROUP BY, `COUNT(DISTINCT ...)`, `COUNT(expression)`,
+relationship or blob fields, or when any filter stays residual — those
+shapes keep the normal row scan plus local aggregation, which is always
+correct.
+
+#### Why use it
+
+It turns a full-row fetch into one tiny API call for the most common
+analytical count. The kill-switch (`false`) restores the row-scan plan
+shape without a restart if you ever need to compare behaviors.
+
+#### Daily use
+
+```sql
+SELECT COUNT(Name) FROM sf.Account WHERE Industry = 'Tech';
+SELECT soql FROM salesforce_last_soql();
+-- SELECT COUNT(Name) a0 FROM Account WHERE Industry = 'Tech'
+
+SET sf_aggregate_pushdown = false;  -- kill-switch: back to the row scan
+```
+
 ### API-quota governor
 
 The governor consults the Salesforce `/limits` resource and the
@@ -1890,6 +1929,14 @@ Kept fully residual (not pushed):
 - `NOT`.
 - Predicates on non-filterable fields.
 - A WHERE clause that would exceed 4000 characters once rendered as SOQL.
+
+Transparent aggregate pushdown (since v0.16.0, kill-switch
+`sf_aggregate_pushdown`): a no-group `COUNT(field)` whose query runs
+directly on an attached sObject with zero residual filters is served by a
+single server-side `COUNT` SOQL query — no rows fetched. See the
+`sf_aggregate_pushdown` setting. GROUP BY, `COUNT(DISTINCT ...)`,
+`COUNT(expression)`, relationship/blob fields and any residual-filter
+shape keep the normal row scan with local aggregation.
 
 Aggregates:
 

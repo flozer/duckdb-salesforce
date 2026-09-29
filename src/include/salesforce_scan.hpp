@@ -33,6 +33,20 @@ struct SalesforceScanBindData : public FunctionData {
 	// The pushdown hook may fire more than once with a re-presented residual
 	// filter; capture the explain items only on the first non-empty call.
 	bool explain_captured = false;
+	// Transparent aggregate pushdown (P1.2a): set by the optimizer extension
+	// (salesforce_agg_optimizer.cpp) when a supported no-group aggregate sits
+	// DIRECTLY on this Get with every conjunct already pushed to SOQL.
+	// Consumed at InitGlobal: the scan runs ONE server-side aggregate query and
+	// emits its single result row instead of paging records. Empty => normal
+	// row scan (the always-correct fallback). The Get's returned_types/names
+	// are rebuilt to the aggregate outputs by the optimizer, so this vector's
+	// order IS the Get's output order.
+	struct SalesforcePushedAggregate {
+		string func;     // "COUNT" (first cut; MIN/MAX/SUM/AVG are later phases)
+		string field;    // field API name (top-level, non-relationship, non-blob)
+		string out_name; // output column name preserved from the bound plan
+	};
+	vector<SalesforcePushedAggregate> pushed_aggregates;
 
 	unique_ptr<FunctionData> Copy() const override;
 	bool Equals(const FunctionData &other) const override;
