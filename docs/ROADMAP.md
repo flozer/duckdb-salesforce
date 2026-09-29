@@ -1,6 +1,6 @@
 # duckdb-salesforce Roadmap
 
-Status: post-`v0.14.1` roadmap. Own-repo release `v0.14.1` is live and the DuckDB community catalog now pins `v0.14.1` via [`duckdb/community-extensions#2078`](https://github.com/duckdb/community-extensions/pull/2078). This file records the strategic direction after the connector reached feature maturity, cross-platform CI, public documentation, and community publication.
+Status: post-`v0.15.1` roadmap. Own-repo release `v0.15.1` is live (GitHub Release with Linux/Windows assets; official CI green across DuckDB v1.5.4/v1.5.5 on `linux_amd64`, `windows_amd64`, and `osx_arm64`), and the DuckDB community catalog pins `v0.15.0` via [`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710) with a `v0.15.1` update submitted as [`duckdb/community-extensions#2850`](https://github.com/duckdb/community-extensions/pull/2850). This file records the strategic direction after the connector reached feature maturity, cross-platform CI, public documentation, and community publication.
 
 The core mission is to provide the best bridge between Salesforce and DuckDB for
 analytics. The extension should expose Salesforce data safely, efficiently, and
@@ -67,13 +67,57 @@ The connector already provides:
   residual-safe behavior.
 - `COUNT(*)` pushdown for safe zero-column scans.
 - Cross-platform CI on `linux_amd64`, `windows_amd64`, and `osx_arm64` for
-  DuckDB `v1.5.2`, `v1.5.3`, and `v1.5.4`.
+  the supported DuckDB versions (`v1.5.4`/`v1.5.5`; `v1.5.6` additionally
+  validated locally ahead of official support).
+- `queryAll` opt-in read mode (archived + soft-deleted records).
+- Explicit server-side `salesforce_aggregate()` with optional filter and
+  `GROUP BY`.
+- Auth UX: SFDX auth URL and JWT bearer alongside OAuth refresh-token and
+  environment credentials.
+- Metadata Engine v2 backing `salesforce_metadata_objects()` /
+  `salesforce_metadata_fields()`, `salesforce_picklist_values()`,
+  `salesforce_record_types()`, and manual cache refresh.
+- `salesforce_query_explain()` — field-by-field pushed-vs-residual view.
+- `salesforce_relationship_graph()` with opt-in child relationships and a
+  direction filter.
+- In-DB discoverability: every registered function self-documents through
+  `duckdb_functions()` (description, runnable example, real parameter
+  names, categories).
 - Public bilingual documentation, contribution docs, MIT license, third-party
   notices, and community descriptor draft.
 
-## Next own-repo release candidate (unreleased on `main`)
+## Current priorities
 
-Older release-candidate notes below are retained as historical planning context. Current live community ref is `v0.14.1`; new work should start from a fresh release plan. Contents:
+Ordered working queue (2026-09-29; operational detail lives in the
+maintainer's working notes, not here):
+
+1. **Transparent analytical pushdown — investigation first.** `COUNT(field)`
+   and transparent `MIN`/`MAX` (optionally `SUM`/`AVG`) pushdown all require
+   a DuckDB `OptimizerExtension` (an `Aggregate→Scan` plan rewrite) —
+   machinery the table-function API does not offer today, which is why these
+   two items are deferred. The next step is a feasibility spike with an
+   explicit GO/NO-GO before any implementation. The explicit opt-in
+   `salesforce_aggregate()` already covers the server-side path today, and
+   normal scans keep these aggregates correct through DuckDB.
+2. **Smaller and evidence-gated items.** macOS live TLS validation (or a
+   trust-store path); Report Bridge follow-ups gated on real org fixtures
+   (new report-type→object pairs, `reportTypeMetadata` resolution, real
+   ADDRESS/PHONE token entries); relationship-graph extensions (deep child
+   graphs, cardinality/junction typing, feeding the Report Bridge once
+   proven safe); factual corrections to the main body of
+   `docs/ARCHITECTURE.md`.
+3. **Compatibility tracking.** DuckDB `v1.5.6` official support — already
+   validated locally (build + full offline suite green, numbers identical to
+   v1.5.4/v1.5.5) with the CI matrix/docs/compat-only release to follow —
+   and DuckDB 2.0 monitoring (canary against `v2.0-cyanoptera` before its
+   official release).
+
+## Delivered release candidates (historical)
+
+The release-candidate notes below shipped: the relationship-graph cuts in
+`v0.14.0`, and the map-contract clarification plus the compound/address
+token-resolver mechanism in `v0.15.0`. They are retained as historical
+planning context. Contents:
 
 - **`salesforce_relationship_graph(catalog, object [, max_depth])`** — §18 cut 1,
   on-demand read-only parent relationship enumerator (explicit per-edge status;

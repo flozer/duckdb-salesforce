@@ -66,5 +66,7 @@ Thumbs.db
 .vscode/
 .idea/
 
-# PM long-term memory (local only, never versioned)
+# Local-only agent/PM working files (never versioned)
 AGENTES.MD
+AGENTS.md
+ROADMAP.MD
