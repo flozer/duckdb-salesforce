@@ -6,6 +6,7 @@
 # description.yml in a fork of duckdb/community-extensions and open a PR —
 # only after the project's explicit C.5 maintainer GO.
 #
+# SUBMITTED 2026-09-29 (C.5 GO given): duckdb/community-extensions#2850.
 # Delta vs the live v0.15.0 descriptor: version + repo.ref bumped, and the
 # extended_description gains the duckdb_functions() self-documentation
 # sentence (issue flozer/duckdb-salesforce#66). Nothing else changed.

@@ -123,10 +123,14 @@ extension-ci-tools pinned at `64aec33f`, matching the submodule):
 
 ## Gates
 
-- No community-extensions operation in this release. The community
-  baseline remains `v0.15.0` (merged via
-  [duckdb/community-extensions#2710](https://github.com/duckdb/community-extensions/pull/2710));
-  an update to `v0.15.1` is prepared but parked pending the explicit
-  maintainer authorization required by the C.5 gate.
-- Issue #66 is answered on the own repo after validation, referencing the
-  release.
+- Community update **submitted with maintainer C.5 GO** on 2026-09-29:
+  [duckdb/community-extensions#2850](https://github.com/duckdb/community-extensions/pull/2850)
+  (v0.15.0 → v0.15.1, `repo.ref` pinned to the tag commit
+  `7361ca730afe1e47f866c4636a42739bbd07908e`). Pending review at the time
+  of this writing; the live `docs/community/description.yml` mirror stays
+  at `v0.15.0` until that PR merges. The submission PR notes that the tag
+  was also validated locally against DuckDB v1.5.6 (build + full offline
+  suite green, same numbers as v1.5.4/v1.5.5) ahead of the community
+  repo's own v1.5.6 baseline bump (#2824).
+- Issue #66 was answered on the own repo after validation, referencing
+  this release.
