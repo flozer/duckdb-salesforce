@@ -44,7 +44,16 @@ conditional skip.
 
 ### Official CI run record
 
-TO BE FILLED BEFORE TAGGING (9-job matrix run on this branch).
+`MainDistributionPipeline.yml` run
+[36634470965](https://github.com/flozer/duckdb-salesforce/actions/runs/36634470965)
+(2026-09-29, `workflow_dispatch` on this branch @ `1c48d64`; first 9-job
+matrix) — **9/9 green**:
+
+| DuckDB | linux_amd64 | windows_amd64 | osx_arm64 |
+|---|---|---|---|
+| v1.5.4 | Pass | Pass | Pass |
+| v1.5.5 | Pass | Pass | Pass |
+| v1.5.6 | Pass | Pass | Pass |
 
 ## Gates
 

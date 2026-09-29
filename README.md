@@ -306,7 +306,7 @@ Windows MSVC and RTOOLS/MinGW local validation are documented in
 dropped 2026-09-14 (maintainer decision) — see "Dropped versions" below.
 
 Validated matrix (official, from `MainDistributionPipeline.yml` run
-MAIN_V156_RUN_URL):
+[36634470965](https://github.com/flozer/duckdb-salesforce/actions/runs/36634470965), 2026-09-29):
 
 | Platform | DuckDB v1.5.4 | DuckDB v1.5.5 | DuckDB v1.5.6 |
 |---|---:|---:|---:|
