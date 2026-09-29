@@ -12,6 +12,26 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.16.0](docs/RELEASE_NOTES_v0.16.0.md) — 2026-09-29
+
+- **Transparent `COUNT(field)` pushdown** (roadmap P1.2a, first
+  `OptimizerExtension`): a no-group `COUNT(col)` directly over an attached
+  sObject with zero residual filters is served by ONE server-side
+  `SELECT COUNT(col) ... WHERE ...` query; the plan's Aggregate is replaced
+  by a binding-preserving projection. Guarded (direct-Get child, no
+  GROUP BY/DISTINCT/expressions, non-relationship/non-blob field, zero
+  residual filters); kill-switch `sf_aggregate_pushdown` (default true).
+  Transport/shape failure of the aggregate query is a hard error (no silent
+  fallback). Diagnostics: last_soql/query_cost/query_explain gain aggregate
+  visibility.
+- New offline guard `test/sql/salesforce_agg_pushdown.test` (42 assertions);
+  suite: 51 files, 1490 assertions, 0 failures.
+- Build pins: `duckdb` submodule → tag v1.5.6 (#69 closed as wrong-target);
+  `extension-ci-tools` → `8d2a39a` aligned with the workflow ref (PR #71,
+  superseding #70). Official supported matrix unchanged (v1.5.4/v1.5.5).
+- Minor bump per the loose policy (new feature = minor, precedents
+  v0.9-v0.11).
+
 ## [v0.15.1](docs/RELEASE_NOTES_v0.15.1.md) — 2026-09-28
 
 - **Function discoverability via `duckdb_functions()`** (issue

@@ -8,7 +8,7 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.15.1"><img alt="release v0.15.1" src="https://img.shields.io/badge/release-v0.15.1-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.16.0"><img alt="release v0.16.0" src="https://img.shields.io/badge/release-v0.16.0-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
     <a href="https://github.com/duckdb/community-extensions/pull/2710"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-merged-brightgreen.svg"></a>
     <a href="https://duckdb.org/community_extensions/download_metrics"><img alt="DuckDB Community total downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fflozer%2Fduckdb-salesforce%2Fmain%2F.github%2Fbadges%2Fdownloads.json"></a>
@@ -76,7 +76,7 @@ materialization, files, and downstream analytics stay in DuckDB.
 | Transport selection | `sf_force_transport = 'rest' \| 'bulk' \| 'auto'` with diagnostics explaining choices. |
 | Relationships | Parent and grandparent traversal as nested `STRUCT`, with skip/expand diagnostics. |
 | Metadata Engine v2 | Shared per-catalog read-only metadata cache; `salesforce_metadata_objects()` / `salesforce_metadata_fields()` for analysts; `salesforce_refresh_metadata()` invalidation. |
-| Aggregates | Transparent `COUNT(*)` pushdown and explicit `salesforce_aggregate()` with optional `GROUP BY`. |
+| Aggregates | Transparent `COUNT(*)` and `COUNT(field)` pushdown (kill-switch `sf_aggregate_pushdown`), and explicit `salesforce_aggregate()` with optional `GROUP BY`. |
 | Diagnostics | Last SOQL, transport, quota, query cost, page counts, relationship decisions. |
 | Query explainability | `salesforce_query_explain()` — read-only, last-scan, field-by-field view of pushed vs. residual filters, projection, relationship, count, and transport (diagnostic-only; no scan behavior change). |
 | In-DB discoverability | Every function self-documents through `duckdb_functions()`: description, runnable example, real parameter names, categories. |
@@ -254,13 +254,15 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.15.1** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
+Own-repo release: **v0.16.0** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
 Community baseline: **v0.15.0**, merged in
 [`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710);
-the `v0.15.1` community update is prepared but pending the project's
-explicit submission gate. Every extension function also documents itself
-through `duckdb_functions()` (description, example, parameter names) as of
-`v0.15.1`.
+the `v0.15.1` update was submitted as
+[`duckdb/community-extensions#2850`](https://github.com/duckdb/community-extensions/pull/2850)
+and later updates follow the project's explicit-submission gate. Every
+extension function documents itself through `duckdb_functions()`
+(description, example, parameter names), and no-group `COUNT(field)` queries
+push down transparently (kill-switch `sf_aggregate_pushdown`).
 
 | Area | Status |
 |---|---|
@@ -282,7 +284,9 @@ through `duckdb_functions()` (description, example, parameter names) as of
 | Query explainability (`salesforce_query_explain()`) | Done |
 | Function metadata in `duckdb_functions()` (issue [#66](https://github.com/flozer/duckdb-salesforce/issues/66)) | Done |
 | Linux + Windows + macOS arm64 CI | Done |
-| Transparent `COUNT(field)` / `MIN` / `MAX` pushdown | Deferred: requires optimizer rewrite |
+| Transparent `COUNT(field)` pushdown (`sf_aggregate_pushdown`) | Done |
+| Transparent `COUNT(DISTINCT)` / `MIN` / `MAX` / `SUM` / `AVG` pushdown | Deferred: requires extending the OptimizerExtension pass |
+| Official DuckDB v1.5.6 support declaration | Pending (validated locally; compat release planned) |
 | Salesforce writes / Metadata API deploy | Out of scope |
 
 ## Build
