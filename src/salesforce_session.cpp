@@ -180,35 +180,22 @@ bool SalesforceSession::TryEstimateCount(const string &count_soql, int64_t &out_
 	}
 }
 
-bool SalesforceSession::TryAggregateQuery(const string &soql, const vector<string> &aliases,
-                                          vector<int64_t> &out_values) {
+bool SalesforceSession::TryAggregateQuery(const string &soql, string &out_record_json) {
 	try {
 		HttpResponse resp = AuthorizedSend(false, QueryPath(soql), "");
 		if (resp.status != 200) {
 			return false;
 		}
 		// A no-GROUP-BY aggregate always returns exactly one record (nulls when
-		// the org has zero matching rows). Anything else is shape drift -> the
-		// caller surfaces a clear error instead of emitting a wrong number.
+		// the org has zero matching rows). Zero records is shape drift -> the
+		// caller raises a hard error. Value-level nulls are NOT failures: they
+		// are the correct empty-org answer for MIN/MAX (COUNT is validated by
+		// the scan, where a null count would silently change results).
 		auto records = sfjson::GetObjectArray(resp.body, "records");
 		if (records.empty()) {
 			return false;
 		}
-		out_values.clear();
-		out_values.reserve(aliases.size());
-		for (const auto &alias : aliases) {
-			bool found = false, is_null = false;
-			string raw;
-			sfjson::GetValue(records[0], alias, raw, found, is_null);
-			if (!found || is_null) {
-				return false;
-			}
-			int64_t v = sfjson::GetInt(records[0], alias, -1);
-			if (v < 0) {
-				return false;
-			}
-			out_values.push_back(v);
-		}
+		out_record_json = std::move(records[0]);
 		return true;
 	} catch (...) {
 		return false;

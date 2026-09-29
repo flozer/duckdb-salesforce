@@ -431,39 +431,48 @@ SELECT Id, Name FROM sf.Account;
 
 #### O que faz
 
-Permite que o planejador atenda uma consulta `COUNT(field)` sem GROUP BY
-com uma única query `COUNT()` SOQL executada no Salesforce, em vez de
-buscar linhas.
+Permite que o planejador atenda uma consulta sem GROUP BY de `COUNT`,
+`COUNT_DISTINCT`, `MIN` ou `MAX` com uma única query SOQL de agregado
+executada no Salesforce, em vez de buscar linhas.
 
 #### Como funciona
 
 - Tipo: `BOOLEAN`
 - Padrão: `true`
 
-Quando uma consulta `COUNT(field)` roda **diretamente** sobre um sObject
-anexado e **todos** os predicados do WHERE já foram enviados ao SOQL
-(zero filtros residuais), a extensão reescreve o plano na otimização: uma
-única query `SELECT COUNT(field) ... WHERE ...` roda contra o Salesforce
-e sua única linha de resultado volta ao DuckDB, que deixa de agregar
-localmente. `COUNT(*)` mantém o próprio caminho de coluna zero que já
-existia. A reescrita nunca acontece com GROUP BY, `COUNT(DISTINCT ...)`,
-`COUNT(expressão)`, campos de relacionamento ou blob, ou quando algum
-filtro permanece residual — essas formas mantêm o scan normal de linhas
-com agregação local, que é sempre correto.
+Quando tal consulta roda **diretamente** sobre um sObject anexado e
+**todos** os predicados do WHERE já foram enviados ao SOQL (zero filtros
+residuais), a extensão reescreve o plano na otimização: uma única query
+`SELECT <fn>(campo) ... WHERE ...` roda contra o Salesforce e sua única
+linha de resultado volta ao DuckDB, que deixa de agregar localmente.
+Restrições:
+
+- `COUNT(*)` mantém o próprio caminho de coluna zero que já existia.
+- `MIN`/`MAX` exigem um campo **ordenável (sortable)** de tipo numérico,
+  temporal ou booleano; strings permanecem locais (a semântica de
+  collation entre SOQL e DuckDB não está provada como equivalente).
+- A reescrita nunca acontece com GROUP BY, agregado sobre expressão,
+  campos de relacionamento ou blob, ou quando algum filtro permanece
+  residual — essas formas mantêm o scan normal de linhas com agregação
+  local, que é sempre correto.
+- Falha de transporte da query de agregado é um erro duro (a corretude
+  depende da resposta do servidor); a mensagem aponta para o kill-switch.
 
 #### Para que serve
 
 Transforma uma busca de linhas completa em uma única chamada minúscula à
-API para a contagem analítica mais comum. O kill-switch (`false`) restaura
-o formato de plano do scan de linhas sem reiniciar, caso você precise
-comparar comportamentos.
+API para os agregados analíticos mais comuns. O kill-switch (`false`)
+restaura o formato de plano do scan de linhas sem reiniciar, caso você
+precise comparar comportamentos.
 
 #### Uso no dia a dia
 
 ```sql
-SELECT COUNT(Name) FROM sf.Account WHERE Industry = 'Tech';
+SELECT COUNT(Name), MIN(Amount), MAX(CreatedDate)
+FROM sf.Account WHERE Industry = 'Tech';
 SELECT soql FROM salesforce_last_soql();
--- SELECT COUNT(Name) a0 FROM Account WHERE Industry = 'Tech'
+-- SELECT COUNT(Name) a0, MIN(Amount) a1, MAX(CreatedDate) a2
+--   FROM Account WHERE Industry = 'Tech'
 
 SET sf_aggregate_pushdown = false;  -- kill-switch: volta ao scan de linhas
 ```
@@ -1942,13 +1951,15 @@ Mantido totalmente residual (sem pushdown):
 - Uma cláusula WHERE que excederia 4000 caracteres ao ser renderizada como
   SOQL.
 
-Pushdown transparente de agregados (desde a v0.16.0, kill-switch
-`sf_aggregate_pushdown`): um `COUNT(field)` sem GROUP BY cuja consulta roda
-diretamente sobre um sObject anexado com zero filtros residuais é atendido
-por uma única query `COUNT` SOQL no servidor — nenhuma linha é buscada.
-Veja a configuração `sf_aggregate_pushdown`. GROUP BY, `COUNT(DISTINCT ...)`,
-`COUNT(expressão)`, campos de relacionamento/blob e qualquer forma com
-filtro residual mantêm o scan normal de linhas com agregação local.
+Pushdown transparente de agregados (desde a v0.17.0, kill-switch
+`sf_aggregate_pushdown`): uma consulta sem GROUP BY de `COUNT`,
+`COUNT_DISTINCT`, `MIN` ou `MAX` que roda diretamente sobre uma coluna de
+um sObject anexado com zero filtros residuais é atendida por uma única
+query SOQL de agregado no servidor — nenhuma linha é buscada. `MIN`/`MAX`
+exigem campo ordenável de tipo numérico, temporal ou booleano (strings
+permanecem locais). Veja a configuração `sf_aggregate_pushdown`. GROUP BY,
+agregado sobre expressão, campos de relacionamento/blob e qualquer forma
+com filtro residual mantêm o scan normal de linhas com agregação local.
 
 Agregações:
 

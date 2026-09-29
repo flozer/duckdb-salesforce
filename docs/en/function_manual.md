@@ -427,37 +427,48 @@ SELECT Id, Name FROM sf.Account;
 
 #### What it does
 
-Lets the planner serve a no-group `COUNT(field)` query with a single
-server-side `COUNT()` SOQL query instead of fetching rows.
+Lets the planner serve a no-group `COUNT`, `COUNT_DISTINCT`, `MIN` or `MAX`
+query with a single server-side aggregate SOQL query instead of fetching
+rows.
 
 #### How it works
 
 - Type: `BOOLEAN`
 - Default: `true`
 
-When a `COUNT(field)` query runs **directly** on an attached sObject and
-**every** WHERE predicate was already pushed to SOQL (zero residual
-filters), the extension rewrites the plan at optimization time: one
-`SELECT COUNT(field) ... WHERE ...` query runs against Salesforce and its
+When such a query runs **directly** on an attached sObject and **every**
+WHERE predicate was already pushed to SOQL (zero residual filters), the
+extension rewrites the plan at optimization time: one
+`SELECT <fn>(field) ... WHERE ...` query runs against Salesforce and its
 single result row is returned to DuckDB, which no longer aggregates
-locally. `COUNT(*)` keeps its own existing zero-column path. The rewrite
-never fires for GROUP BY, `COUNT(DISTINCT ...)`, `COUNT(expression)`,
-relationship or blob fields, or when any filter stays residual — those
-shapes keep the normal row scan plus local aggregation, which is always
-correct.
+locally. Constraints:
+
+- `COUNT(*)` keeps its own existing zero-column path.
+- `MIN`/`MAX` require a **sortable** field of a numeric, temporal or
+  boolean type; strings stay local (SOQL vs DuckDB collation semantics are
+  not proven equivalent).
+- The rewrite never fires for GROUP BY, aggregate-over-expression,
+  relationship or blob fields, or when any filter stays residual — those
+  shapes keep the normal row scan plus local aggregation, which is always
+  correct.
+- A transport failure of the aggregate query is a hard error (correctness
+  depends on the server answer); the error message points at the
+  kill-switch.
 
 #### Why use it
 
 It turns a full-row fetch into one tiny API call for the most common
-analytical count. The kill-switch (`false`) restores the row-scan plan
-shape without a restart if you ever need to compare behaviors.
+analytical aggregates. The kill-switch (`false`) restores the row-scan
+plan shape without a restart if you ever need to compare behaviors.
 
 #### Daily use
 
 ```sql
-SELECT COUNT(Name) FROM sf.Account WHERE Industry = 'Tech';
+SELECT COUNT(Name), MIN(Amount), MAX(CreatedDate)
+FROM sf.Account WHERE Industry = 'Tech';
 SELECT soql FROM salesforce_last_soql();
--- SELECT COUNT(Name) a0 FROM Account WHERE Industry = 'Tech'
+-- SELECT COUNT(Name) a0, MIN(Amount) a1, MAX(CreatedDate) a2
+--   FROM Account WHERE Industry = 'Tech'
 
 SET sf_aggregate_pushdown = false;  -- kill-switch: back to the row scan
 ```
@@ -1930,13 +1941,14 @@ Kept fully residual (not pushed):
 - Predicates on non-filterable fields.
 - A WHERE clause that would exceed 4000 characters once rendered as SOQL.
 
-Transparent aggregate pushdown (since v0.16.0, kill-switch
-`sf_aggregate_pushdown`): a no-group `COUNT(field)` whose query runs
-directly on an attached sObject with zero residual filters is served by a
-single server-side `COUNT` SOQL query — no rows fetched. See the
-`sf_aggregate_pushdown` setting. GROUP BY, `COUNT(DISTINCT ...)`,
-`COUNT(expression)`, relationship/blob fields and any residual-filter
-shape keep the normal row scan with local aggregation.
+Transparent aggregate pushdown (since v0.17.0, kill-switch
+`sf_aggregate_pushdown`): a no-group `COUNT`, `COUNT_DISTINCT`, `MIN` or
+`MAX` whose query runs directly on an attached sObject column with zero
+residual filters is served by a single server-side aggregate SOQL query —
+no rows fetched. `MIN`/`MAX` require a sortable numeric, temporal or
+boolean field (strings stay local). See the `sf_aggregate_pushdown`
+setting. GROUP BY, aggregate-over-expression, relationship/blob fields and
+any residual-filter shape keep the normal row scan with local aggregation.
 
 Aggregates:
 

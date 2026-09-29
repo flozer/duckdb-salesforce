@@ -92,10 +92,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// transparent COUNT(*) pushdown); false restores the row-scan + local
 	// aggregation plan shape.
 	config.AddExtensionOption("sf_aggregate_pushdown",
-	                          "Transparent COUNT(field) pushdown: when a no-group COUNT query runs "
-	                          "directly on an attached sObject with every filter already pushed to "
-	                          "SOQL, run one server-side COUNT query instead of fetching rows "
-	                          "(default true). false keeps the row-scan fallback.",
+	                          "Transparent no-group aggregate pushdown: when COUNT, COUNT_DISTINCT, MIN "
+	                          "or MAX runs directly on an attached sObject column with every filter "
+	                          "already pushed to SOQL, run one server-side aggregate SOQL query instead "
+	                          "of fetching rows (default true). MIN/MAX require a sortable numeric, "
+	                          "temporal or boolean field. false keeps the row-scan fallback.",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
 
 	// salesforce_describe(object, client_id:=, client_secret:=, refresh_token:=,

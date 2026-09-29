@@ -1,13 +1,14 @@
-// Transparent aggregate pushdown (P1.2a; roadmap P1, spec
+// Transparent aggregate pushdown (P1.2a/P1.2b/P1.3; roadmap P1, spec
 // docs/superpowers/specs/2026-09-29-aggregate-pushdown-optimizer-extension-feasibility.md).
 //
 // A post-optimizer pass (OptimizerExtension::optimize_function, i.e. it runs
 // AFTER every built-in pass and owns the final plan shape) that finds
 //
-//     Aggregate(no groups: COUNT(col), ...) -> Get(salesforce_scan)
+//     Aggregate(no groups: COUNT(col)|COUNT(DISTINCT col)|MIN(col)|MAX(col), ...)
+//       -> Get(salesforce_scan)
 //
 // and turns it into a scan that runs ONE server-side aggregate query
-// (SELECT COUNT(col) a0, ... FROM obj WHERE <pushed_where>) emitting a single
+// (SELECT <fn>(col) a0, ... FROM obj WHERE <pushed_where>) emitting a single
 // result row, with the Aggregate node replaced by a binding-preserving
 // Projection.
 //
@@ -15,12 +16,17 @@
 // the plan is left untouched and DuckDB aggregates locally over the normal
 // row scan (today's always-correct fallback):
 //   - no GROUP BY / grouping sets;
-//   - every aggregate is COUNT(single column) -- not distinct, no FILTER,
-//     no ORDER BY, no expression children (COUNT(*) keeps the existing
-//     zero-column scan path);
+//   - every aggregate is a single-column call of a supported function
+//     (COUNT, COUNT_DISTINCT, MIN, MAX) -- no FILTER, no ORDER BY, no
+//     expression children (COUNT(*) keeps the existing zero-column scan
+//     path); SUM/AVG stay deferred (P1.4, decimal evidence);
 //   - the referenced field is top-level, non-relationship and non-blob;
+//     MIN/MAX additionally require a sortable field of a numeric, temporal
+//     or boolean DuckDB type (strings keep local aggregation: SOQL and
+//     DuckDB collation semantics are not proven equivalent);
 //   - ZERO residual filters (bind_data.residual_filter_count == 0): a
-//     residually-filtered row stream must not be replaced by a server count;
+//     residually-filtered row stream must not be replaced by a server
+//     aggregate;
 //   - the sf_aggregate_pushdown kill-switch is on (checked here; the scan
 //     side has no choice once the plan is rewritten, by design).
 
@@ -39,6 +45,34 @@
 namespace duckdb {
 
 namespace {
+
+// MIN/MAX pushdown type gate (P1.3): numeric, temporal and boolean DuckDB
+// types only. Strings stay local (SOQL vs DuckDB collation semantics are not
+// proven equivalent); BLOB/STRUCT are unreachable here but stay rejected.
+bool AggPushableMinMaxType(const LogicalType &type) {
+	switch (type.id()) {
+	case LogicalTypeId::BOOLEAN:
+	case LogicalTypeId::TINYINT:
+	case LogicalTypeId::SMALLINT:
+	case LogicalTypeId::INTEGER:
+	case LogicalTypeId::BIGINT:
+	case LogicalTypeId::HUGEINT:
+	case LogicalTypeId::UTINYINT:
+	case LogicalTypeId::USMALLINT:
+	case LogicalTypeId::UINTEGER:
+	case LogicalTypeId::UBIGINT:
+	case LogicalTypeId::FLOAT:
+	case LogicalTypeId::DOUBLE:
+	case LogicalTypeId::DECIMAL:
+	case LogicalTypeId::DATE:
+	case LogicalTypeId::TIME:
+	case LogicalTypeId::TIMESTAMP:
+	case LogicalTypeId::TIMESTAMP_TZ:
+		return true;
+	default:
+		return false;
+	}
+}
 
 // Validate the Aggregate->Get pattern and, on success, annotate the scan's
 // bind data with the pushed-aggregate spec and rebuild the Get's output schema
@@ -91,17 +125,26 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 			return false;
 		}
 		auto &bag = expr->Cast<BoundAggregateExpression>();
-		if (!StringUtil::CIEquals(bag.function.name, "count")) {
-			return false; // MIN/MAX/SUM/AVG are later phases (P1.3/P1.4)
+		if (bag.filter || bag.order_bys) {
+			return false; // FILTER / ORDER BY inside the aggregate stays local
 		}
-		if (bag.IsDistinct() || bag.filter || bag.order_bys) {
-			return false; // COUNT(DISTINCT ...) is phase P1.2b
+		// Supported functions (SOQL names): COUNT, COUNT_DISTINCT (P1.2b),
+		// MIN/MAX (P1.3). SUM/AVG stay deferred (P1.4, decimal evidence);
+		// COUNT(*) has no children: the zero-column scan path owns it.
+		const auto fname = StringUtil::Lower(bag.function.name);
+		const bool is_count = fname == "count";
+		const bool is_minmax = fname == "min" || fname == "max";
+		if (!is_count && !is_minmax) {
+			return false;
+		}
+		if (bag.IsDistinct() && !is_count) {
+			return false; // DISTINCT is only defined for COUNT in SOQL
 		}
 		if (bag.children.size() != 1) {
-			return false; // COUNT(*) has no children: the zero-column path owns it
+			return false;
 		}
 		if (bag.children[0]->type != ExpressionType::BOUND_COLUMN_REF) {
-			return false; // COUNT(expr) stays local
+			return false; // aggregate over an expression stays local
 		}
 		auto &ref = bag.children[0]->Cast<BoundColumnRefExpression>();
 		if (ref.binding.table_index != get.table_index) {
@@ -121,15 +164,34 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 		}
 		const auto &field = bind->fields[original_idx];
 		if (field.is_relationship || !field.children.empty() || field.name.find('.') != string::npos) {
-			return false; // relationship STRUCTs stay out of cut 1
+			return false; // relationship STRUCTs stay out of this pass
 		}
 		if (StringUtil::Lower(field.sf_type) == "base64") {
-			return false; // blob fields are not server-countable
+			return false; // blob fields are not server-aggregable
+		}
+		if (is_minmax) {
+			if (!field.sortable) {
+				return false; // SOQL MIN/MAX need ORDER BY semantics: sortable
+			}
+			if (!AggPushableMinMaxType(field.duckdb_type)) {
+				return false; // VARCHAR (collation), BLOB, STRUCT: stay local
+			}
 		}
 		SalesforceScanBindData::SalesforcePushedAggregate pa;
-		pa.func = "COUNT";
+		if (is_count) {
+			pa.func = bag.IsDistinct() ? "COUNT_DISTINCT" : "COUNT";
+			// COUNT / COUNT(DISTINCT) return BIGINT in both engines.
+			pa.emit.duckdb_type = LogicalType::BIGINT;
+		} else {
+			pa.func = StringUtil::Upper(fname);
+			pa.emit.duckdb_type = field.duckdb_type;
+		}
 		pa.field = field.name;
 		pa.out_name = expr->GetName();
+		// Decode surface: the SOQL result key is the alias (a0, a1, ...); the
+		// describe field's type metadata drives AppendJsonValue's conversion.
+		pa.emit.name = "a" + std::to_string(pushed.size());
+		pa.emit.sf_type = field.sf_type;
 		pushed.push_back(std::move(pa));
 	}
 
@@ -140,9 +202,10 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 	vector<LogicalType> types;
 	vector<string> names;
 	for (idx_t i = 0; i < pushed.size(); i++) {
-		types.push_back(LogicalType::BIGINT);
+		types.push_back(pushed[i].emit.duckdb_type);
 		names.push_back(pushed[i].out_name);
-		out_colrefs.push_back(make_uniq<BoundColumnRefExpression>(LogicalType::BIGINT, ColumnBinding(get_index, i)));
+		out_colrefs.push_back(
+		    make_uniq<BoundColumnRefExpression>(pushed[i].emit.duckdb_type, ColumnBinding(get_index, i)));
 	}
 	bind->pushed_aggregates = std::move(pushed);
 	get.returned_types = std::move(types);
