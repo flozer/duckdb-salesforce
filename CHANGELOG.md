@@ -12,6 +12,23 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.17.0](docs/RELEASE_NOTES_v0.17.0.md) — 2026-09-29
+
+- **Aggregate pushdown family extended** (same `OptimizerExtension`,
+  kill-switch `sf_aggregate_pushdown`): `COUNT(DISTINCT)` (SOQL
+  `COUNT_DISTINCT`) and `MIN`/`MAX` join `COUNT` from v0.16.0. MIN/MAX
+  require a sortable numeric/temporal/boolean field (strings stay local —
+  collation unproven); mixed terms run in one server-side query.
+- Type-aware single-row emission via the raw aggregate record and the
+  existing decode path; MIN/MAX nulls pass through (empty-org answer),
+  COUNT nulls and transport/shape failures stay hard errors.
+- Mock-router convention: pushed aggregates keyed on the fixed `a0` alias;
+  `salesforce_aggregate()` and PK-chunking probes keep their data-query
+  routing (regression caught by the offline suite).
+- SUM/AVG remain deferred (P1.4). Guard test: 65 assertions; suite: 51
+  files, 1513 assertions, 0 failures; local matrix v1.5.4/v1.5.5
+  1514 assertions each.
+
 ## [v0.16.0](docs/RELEASE_NOTES_v0.16.0.md) — 2026-09-29
 
 - **Transparent `COUNT(field)` pushdown** (roadmap P1.2a, first
