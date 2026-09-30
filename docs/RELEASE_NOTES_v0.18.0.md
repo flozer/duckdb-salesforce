@@ -109,6 +109,6 @@ release-prep commit `a521d24` docs-only) — **9/9 green**:
 
 - Community update: **submitted with maintainer OK** on 2026-09-30 —
   [duckdb/community-extensions#2875](https://github.com/duckdb/community-extensions/pull/2875)
-  (single jump v0.15.1 → v0.18.0, `repo.ref` pinned to \`6a03b02\`). The live
-  \`docs/community/description.yml\` mirror stays at v0.15.1 until that PR
+  (single jump v0.15.1 → v0.18.0, `repo.ref` pinned to `6a03b02`). The live
+  `docs/community/description.yml` mirror stays at v0.15.1 until that PR
   merges.
