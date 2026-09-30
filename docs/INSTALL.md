@@ -15,10 +15,9 @@ artifact as described below. Community updates remain human-gated; see
 ## Supported DuckDB versions
 
 Extensions are **version-locked** to the DuckDB they were built against. This
-extension is built + tested against **DuckDB v1.5.4 and v1.5.5 only**, per the
-official `MainDistributionPipeline.yml` run
-[34879771640](https://github.com/flozer/duckdb-salesforce/actions/runs/34879771640)
-(2026-09-14): both pass on Linux x64, Windows x64, and macOS arm64.
+extension is built + tested against **DuckDB v1.5.4, v1.5.5 and v1.5.6**, per
+the official `MainDistributionPipeline.yml` matrix (all three pass on Linux
+x64, Windows x64, and macOS arm64).
 
 v1.5.2 and v1.5.3 support was **dropped 2026-09-14** (maintainer decision,
 scope reduction — not a code fix). They previously failed to compile on
@@ -64,10 +63,9 @@ Common: `git`, CMake ≥ 3.5, a C++17 compiler, OpenSSL.
   suggestion in the error message.
 
 CI validates build + the offline (mock) test suite on **linux_amd64,
-windows_amd64, and osx_arm64** across DuckDB v1.5.4 and v1.5.5 — run
-[34879771640](https://github.com/flozer/duckdb-salesforce/actions/runs/34879771640),
-2026-09-14. Both versions pass on all three platforms. v1.5.2/v1.5.3 are no
-longer part of the matrix — see "Supported DuckDB versions" above.
+windows_amd64, and osx_arm64** across DuckDB **v1.5.4, v1.5.5 and v1.5.6** —
+all three pass on all three platforms. v1.5.2/v1.5.3 are no longer part of
+the matrix — see "Supported DuckDB versions" above.
 
 ## Build
 
