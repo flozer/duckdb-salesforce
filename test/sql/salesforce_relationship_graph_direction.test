@@ -83,11 +83,32 @@ SELECT * FROM salesforce_relationship_graph('sf', 'Account', direction := 'sidew
 ----
 direction
 
-# === direction := 'child' ignores max_depth (children stay single-level) =====
+# === direction := 'child' honours max_depth (P2.3 recursion) =================
+# Fixture: one root child (Account<-Contacts). The mock reuses the Account
+# describe for Contact, so recursion returns to the root object -> the depth-2
+# edge is reported as cyclic, and deeper levels stay pruned by the visited set.
 query I
-SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 4, direction := 'child');
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', direction := 'child');
 ----
 1
+
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 4, direction := 'child')
+WHERE depth_level = 1;
+----
+1
+
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 4, direction := 'child')
+WHERE depth_level = 2 AND status = 'cyclic';
+----
+1
+
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 4, direction := 'child')
+WHERE depth_level > 2;
+----
+0
 
 statement ok
 DETACH sf;

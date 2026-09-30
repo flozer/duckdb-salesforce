@@ -1166,16 +1166,20 @@ mudança de comportamento**.
 #### Como funciona
 
 As relações de pai são percorridas em profundidade até `max_depth` (padrão `1`,
-limitado a `[1,4]`). Com `include_children := true`, as relações **filhas
-diretas** do objeto também são listadas (um nível, sem recursão — relações
-filhas se multiplicam muito).
+limitado a `[1,4]`). Com `include_children := true` (ou
+`direction := 'child'`/`'both'`), as relações filhas do objeto são listadas
+**e recursadas** pelos filhos resolvidos (nomeados + consultáveis) até o mesmo
+`max_depth`, com proteção de ciclo — relações filhas se multiplicam muito, então
+mantenha `max_depth` pequeno (2 costuma bastar).
 
 `direction := 'parent' | 'child' | 'both'` filtra quais lados retornam
 (case-insensitive). **Vence** sobre `include_children` quando ambos são
 informados; senão `include_children := true` significa `both` e o padrão é
 `parent`. Use `direction := 'child'` para listar só relações filhas sem o ruído
-dos pais. `max_depth` se aplica à travessia de pais; linhas filhas são sempre de
-nível raiz. Colunas de saída:
+dos pais. `max_depth` limita AMBOS os lados; o padrão (`1`) mantém as linhas
+filhas apenas no nível raiz. A travessia de filhos recursa somente por filhos
+`resolved` — filhos sem nome e não consultáveis são becos sem saída. Colunas de
+saída:
 
 | Coluna | Tipo | Notas |
 |---|---|---|
@@ -1210,10 +1214,11 @@ SELECT path, target_object, status
 FROM salesforce_relationship_graph('sf', 'Contact', 2)
 ORDER BY path;
 
--- inclui as relações filhas diretas do objeto
+-- relações filhas, dois níveis (Contacts.Orders = filho de filho)
 SELECT path, target_object, direction, status
-FROM salesforce_relationship_graph('sf', 'Account', include_children := true)
-WHERE direction = 'child';
+FROM salesforce_relationship_graph('sf', 'Account', 2, direction := 'child')
+WHERE depth_level = 1 OR status = 'resolved'
+ORDER BY path;
 ```
 
 ### `salesforce_last_soql()`

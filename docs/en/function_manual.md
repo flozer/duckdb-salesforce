@@ -1185,16 +1185,19 @@ name, independent of `sf_relationships`. Pure metadata; **zero behavior change**
 #### How it works
 
 Parent relationships are walked depth-first up to `max_depth` (default `1`,
-clamped to `[1,4]`). With `include_children := true`, the object's **direct**
-child relationships are also listed (single level, not recursed — child
-relationships fan out heavily).
+clamped to `[1,4]`). With `include_children := true` (or
+`direction := 'child'`/`'both'`), the object's child relationships are listed
+**and recursed** through resolved (named + queryable) children up to the same
+`max_depth`, with cycle protection — child relationships fan out heavily, so
+keep `max_depth` small (2 is usually plenty).
 
 `direction := 'parent' | 'child' | 'both'` filters which sides are returned
 (case-insensitive). It **wins** over `include_children` when both are given;
 otherwise `include_children := true` means `both` and the default is `parent`.
 Use `direction := 'child'` to list only child relationships without parent
-noise. `max_depth` applies to parent traversal; child rows are always
-root-level. Output columns:
+noise. `max_depth` bounds BOTH directions; the default (`1`) keeps child rows
+at the root level only. Child traversal recurses only through `resolved`
+children — unnamed and not-queryable children are dead ends. Output columns:
 
 | Column | Type | Notes |
 |---|---|---|
@@ -1230,10 +1233,11 @@ SELECT path, target_object, status
 FROM salesforce_relationship_graph('sf', 'Contact', 2)
 ORDER BY path;
 
--- include the object's direct child relationships
+-- child relationships, two levels deep (Contacts.Orders = a child of a child)
 SELECT path, target_object, direction, status
-FROM salesforce_relationship_graph('sf', 'Account', include_children := true)
-WHERE direction = 'child';
+FROM salesforce_relationship_graph('sf', 'Account', 2, direction := 'child')
+WHERE depth_level = 1 OR status = 'resolved'
+ORDER BY path;
 ```
 
 ### `salesforce_last_soql()`

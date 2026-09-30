@@ -5,7 +5,8 @@
 #
 # Children are OPT-IN (named include_children, default false -> parent-only,
 # byte-identical to cut 1). When on, the ROOT object's direct child
-# relationships are listed (single level, no recursion): direction='child',
+# relationships are listed; since P2.3 child traversal RECURSES through
+# resolved children up to max_depth (default 1 = the old single-level view):
 # relationship_type='childRelationship'. Status: resolved | not_queryable |
 # unnamed_child (null relationshipName -> not SOQL-subquery-addressable).
 
@@ -69,10 +70,19 @@ WHERE direction = 'parent' ORDER BY path;
 ----
 Owner	User	resolved
 
-# children are single-level (depth 1) even with a deeper max_depth
+# children now RECURSE with an explicit deeper max_depth (P2.3): the mock
+# reuses the Account describe for every object, so depth-2 child rows exist
+query I
+SELECT count(*) > 0
+FROM salesforce_relationship_graph('sf', 'Account', 3, include_children := true)
+WHERE direction = 'child' AND depth_level = 2;
+----
+true
+
+# the old single-level contract still holds at the default max_depth = 1
 query I
 SELECT count(*) = 0
-FROM salesforce_relationship_graph('sf', 'Account', 3, include_children := true)
+FROM salesforce_relationship_graph('sf', 'Account', include_children := true)
 WHERE direction = 'child' AND depth_level > 1;
 ----
 true

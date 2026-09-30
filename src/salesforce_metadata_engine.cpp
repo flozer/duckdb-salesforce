@@ -792,6 +792,90 @@ void RelGraphWalk(ClientContext &context, SalesforceMetadataEngine &eng, const s
 	}
 }
 
+// Child-side DFS (P2.3): mirrors RelGraphWalk for the child direction,
+// recursing through RESOLVED children only (named + queryable) up to
+// max_depth. Unnamed children are deliberate dead ends (not SOQL-subquery-
+// addressable, and child fan-out is already heavy). `visited` is the
+// ancestor chain incl. `current` (case-insensitive cycle detection).
+void RelGraphChildWalk(ClientContext &context, SalesforceMetadataEngine &eng, const string &current,
+                       const string &path_prefix, int64_t depth, int64_t max_depth, vector<string> &visited,
+                       vector<RelEdgeRow> &rows) {
+	const SalesforceDescribe *desc;
+	try {
+		desc = &eng.GetObjectDescribe(context, current);
+	} catch (...) {
+		return; // defensive: children are only recursed after a successful resolve
+	}
+	for (auto &cr : desc->child_relationships) {
+		RelEdgeRow r;
+		r.source_object = current;
+		r.depth_level = depth;
+		r.direction = "child";
+		r.relationship_type = "childRelationship";
+		r.target_object = cr.child_object;
+		if (!cr.field.empty()) {
+			r.reference_to.push_back(cr.field); // child's FK back to this object
+		}
+		if (cr.relationship_name.empty()) {
+			r.path = path_prefix.empty() ? "child:" + cr.child_object : path_prefix + ".child:" + cr.child_object;
+			r.status = "unnamed_child";
+			r.caveat = "child relationship has no relationshipName; not SOQL-subquery-addressable";
+			r.caveat_null = false;
+			rows.push_back(std::move(r));
+			continue;
+		}
+		r.relationship_name = cr.relationship_name;
+		r.path = path_prefix.empty() ? cr.relationship_name : path_prefix + "." + cr.relationship_name;
+		if (!eng.IsQueryable(context, cr.child_object)) {
+			r.status = "not_queryable";
+			r.caveat = "child object not queryable in Describe Global";
+			r.caveat_null = false;
+			rows.push_back(std::move(r));
+			continue;
+		}
+		bool cycle = false;
+		for (auto &a : visited) {
+			if (StringUtil::CIEquals(a, cr.child_object)) {
+				cycle = true;
+				break;
+			}
+		}
+		if (cycle) {
+			r.status = "cyclic";
+			r.caveat = "target already on the relationship path";
+			r.caveat_null = false;
+			rows.push_back(std::move(r));
+			continue;
+		}
+		if (depth < max_depth) {
+			// Recurse only below max_depth; describing the child both validates
+			// it and feeds the next level.
+			bool describable = true;
+			try {
+				eng.GetObjectDescribe(context, cr.child_object);
+			} catch (...) {
+				describable = false;
+			}
+			if (!describable) {
+				r.status = "not_describable";
+				r.caveat = "child Describe failed or unavailable";
+				r.caveat_null = false;
+				rows.push_back(std::move(r));
+				continue;
+			}
+			r.status = "resolved";
+			string child_path = r.path;
+			rows.push_back(std::move(r));
+			visited.push_back(cr.child_object);
+			RelGraphChildWalk(context, eng, cr.child_object, child_path, depth + 1, max_depth, visited, rows);
+			visited.pop_back();
+		} else {
+			r.status = "resolved";
+			rows.push_back(std::move(r));
+		}
+	}
+}
+
 unique_ptr<FunctionData> RelGraphBind(ClientContext &context, TableFunctionBindInput &input,
                                       vector<LogicalType> &return_types, vector<string> &names) {
 	if (input.inputs.size() < 2 || input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
@@ -845,41 +929,14 @@ unique_ptr<FunctionData> RelGraphBind(ClientContext &context, TableFunctionBindI
 		RelGraphWalk(context, eng, object, "", 1, max_depth, visited, bind->rows);
 	}
 
-	// Child relationships (#v1.6 §18 cut 2): ROOT object only, single level, no
-	// recursion (child relationships fan out heavily). direction='child'.
+	// Child relationships (P2.3 recursion, replacing the v0.14.0 ROOT-only
+	// single-level listing): DFS through RESOLVED children up to max_depth.
+	// At the default max_depth = 1 the output is byte-identical to the old
+	// single-level behavior.
 	if (want_child) {
-		const SalesforceDescribe &root = eng.GetObjectDescribe(context, object); // cached
-		for (auto &cr : root.child_relationships) {
-			RelEdgeRow r;
-			r.source_object = object;
-			r.depth_level = 1;
-			r.direction = "child";
-			r.relationship_type = "childRelationship";
-			r.target_object = cr.child_object;
-			if (!cr.field.empty()) {
-				r.reference_to.push_back(cr.field); // child's FK back to this object
-			}
-			if (cr.relationship_name.empty()) {
-				// Unnamed child: not SOQL-subquery-addressable by name. Reported,
-				// relationship_name stays empty -> emitted as NULL.
-				r.path = "child:" + cr.child_object;
-				r.status = "unnamed_child";
-				r.caveat = "child relationship has no relationshipName; not "
-				           "SOQL-subquery-addressable";
-				r.caveat_null = false;
-			} else {
-				r.relationship_name = cr.relationship_name;
-				r.path = cr.relationship_name;
-				if (eng.IsQueryable(context, cr.child_object)) {
-					r.status = "resolved";
-				} else {
-					r.status = "not_queryable";
-					r.caveat = "child object not queryable in Describe Global";
-					r.caveat_null = false;
-				}
-			}
-			bind->rows.push_back(std::move(r));
-		}
+		vector<string> visited;
+		visited.push_back(object);
+		RelGraphChildWalk(context, eng, object, "", 1, max_depth, visited, bind->rows);
 	}
 
 	names = {"source_object", "relationship_name", "path",   "depth_level", "target_object", "reference_to",
