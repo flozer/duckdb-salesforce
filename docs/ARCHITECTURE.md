@@ -1,6 +1,6 @@
 # duckdb-salesforce — Architecture
 
-> Architecture document for a DuckDB out-of-tree (community) extension that exposes Salesforce orgs as queryable, scannable tables inside DuckDB. The design directly reuses the proven architecture of `duckdb-firebird` (catalog/storage extension + parallel table-function scanner + pushdown query builder + connection pool) and replaces the Firebird ISC wire protocol with Salesforce's official HTTP APIs (REST/SOQL, Bulk API 2.0, Tooling API, Metadata API, optionally GraphQL/UI API), authenticated via OAuth 2.0.
+> Architecture document for a DuckDB out-of-tree (community) extension that exposes Salesforce orgs as queryable, scannable tables inside DuckDB. The design directly reuses the proven architecture of `duckdb-firebird` (catalog/storage extension + parallel table-function scanner + pushdown query builder + connection pool) and replaces the Firebird ISC wire protocol with Salesforce's official HTTP APIs (REST/SOQL, Bulk API 2.0, Tooling API, Metadata API), authenticated via OAuth 2.0. (An early plan sketched a GraphQL/UI API transport; it was never implemented — see the correction notes in §23.)
 >
 > Every limit, quota, and threshold cited below is taken verbatim from the Salesforce API research bundled with this design. No numbers are invented.
 
@@ -324,7 +324,7 @@ This mirrors the Firebird bind → InitGlobal → InitLocal → Scan lifecycle e
 ### 5.2 InitGlobal phase (`firebird_scanner.cpp:529-573` analog)
 
 1. Capture pushdown context: `column_ids`, `projection_ids`, `filters` into global state.
-2. **Transport selection** (NEW): estimate row count (from `COUNT()` record-count API or cached statistics). Apply the decision logic in Appendix A: REST for `< 10,000` rows, Bulk 2.0 for `≥ 10,000` rows.
+2. **Transport selection**: `sf_force_transport` picks `rest` (default), `bulk`, or `auto`. In `auto`, a single `SELECT COUNT()` REST probe (zero row egress) estimates the row count and Bulk 2.0 is chosen above `sf_auto_bulk_threshold` (default **50,000**); see Appendix A for the full decision logic.
 3. Partitioning:
    - **REST + PK**: reuse `PickPartitionCount` (`MIN_ROWS_PER_PARTITION = 2M`, capped at `hardware_concurrency`). Slice the key range into N buckets; each `PartitionSpec.where_clause` becomes a SOQL predicate `Id >= 'lo' AND Id <= 'hi'` (or `LastModifiedDate` range).
    - **Bulk**: prefer **PK Chunking** (Salesforce-internal parallelism) and emit a single logical job, or coarse `LastModifiedDate` ranges if client-side parallel jobs are desired (bounded by the **25 concurrent jobs** limit).
@@ -351,9 +351,9 @@ Acquire an HTTP client lease from the session pool (`AcquireWithInfo` analog) ca
 **Endpoint**: `/services/data/vXX.0/query` (and `/queryAll` for soft-deleted/archived records).
 
 **When used** — the primary path for **interactive and small result sets**:
-- Row-count sweet spot: **< 10,000 records** (fastest, lowest latency).
+- Row-count sweet spot: interactive reads — the smaller the result, the lower the latency; page-granularity lazy fetch means a small `LIMIT` never pulls later pages.
 - Ad-hoc retrieval, metadata introspection, complex relationship queries.
-- `10K–100K` rows: still REST via `queryMore` cursor pagination when low latency matters and Bulk's async overhead is undesirable.
+- Large extracts are better served by Bulk (see the `sf_force_transport='auto'` threshold, default 50,000); REST via `queryMore` cursor pagination remains correct at any size.
 
 **Pagination**:
 - Each page returns up to **2,000 records** (default and max per page; configurable via `BATCH_SIZE`).
@@ -375,7 +375,7 @@ Acquire an HTTP client lease from the session pool (`AcquireWithInfo` analog) ca
 
 **Endpoint**: `POST /services/data/vXX.0/jobs/query`.
 
-**When used** — the path for **large extracts**: queries **exceeding 10,000 records**, scheduled syncs, data-warehouse loads. Bulk 2.0 is **2–6× faster than REST** for large exports and is the standard choice when throughput matters over latency.
+**When used** — the path for **large extracts**: scheduled syncs, data-warehouse loads, `CREATE TABLE AS` / `COPY`. The shipped threshold is `sf_auto_bulk_threshold` (default **50,000** estimated rows) under `sf_force_transport='auto'`; `bulk` forces this path unconditionally (guarded against projected blob fields).
 
 ### 7.1 Job lifecycle
 
@@ -401,7 +401,7 @@ Open ──(submit SOQL)──▶ [UploadComplete]* ──▶ InProgress ──�
 
 ### 7.4 PK Chunking
 
-- Splits a large table query by primary-key ranges and queries in parallel **internally**, reducing lock contention. Default chunk **10,000 records**, tunable up to **250,000** for very large tables. This is the preferred large-table parallelism mechanism — it offloads partitioning to Salesforce and avoids consuming client-side concurrent-job slots.
+- **As shipped here:** `sf_bulk_chunks = N` (1–8; default 1 = off) splits the scan into N disjoint Id ranges (a MIN/MAX(Id) probe plus a lexical split), each run as its own Bulk job streamed lazily; N > 1 runs the chunks in parallel. This is client-side partitioning; Salesforce-internal PK chunking (record-count chunk sizes up to 250,000) is a different mechanism this extension does not use.
 
 ### 7.5 Retry / fault handling
 
@@ -500,7 +500,7 @@ The research notes local caching of picklists/reference data can eliminate **50�
 The pushdown engine reuses the Firebird `TranslateFilter` recursion (`firebird_query.cpp`) and `FirebirdQueryBuilder::Result` structure, retargeting SQL → **SOQL**.
 
 ### 11.1 Projection pushdown
-`column_ids` → SOQL `SELECT` field list (only projected fields). `ReferenceColumns` maps the `fetch_chunk` (all referenced columns) to the output chunk (projection subset) — identical to `firebird_scanner.cpp:769+`. Field projection also reduces payload size, a noted GraphQL/REST efficiency win.
+`column_ids` → SOQL `SELECT` field list (only projected fields). `ReferenceColumns` maps the `fetch_chunk` (all referenced columns) to the output chunk (projection subset) — identical to `firebird_scanner.cpp:769+`. Field projection also reduces payload size on the REST path.
 
 ### 11.2 Predicate pushdown
 `TableFilterSet` is walked recursively; each fragment becomes a SOQL `WHERE` condition. Salesforce uses **literal-interpolated** SOQL (no bound `?` parameters / XSQLDA), so `SalesforceQueryBuilder` formats and escapes literals inline (the `SafeLiteralInline` role expands to cover all types). The accumulated `WHERE` is hard-bounded at **4,000 characters**; overflow conditions are demoted to **residual** and re-applied locally.
@@ -524,13 +524,13 @@ The pushdown engine reuses the Firebird `TranslateFilter` recursion (`firebird_q
 | `BETWEEN` | ✅ Yes | Rewritten as `>= AND <=`. |
 | `LIMIT` ≤ 2,000 | ✅ Yes | SOQL `LIMIT`. |
 | `ORDER BY` (single partition, sortable field) | ✅ Conditional | SOQL `ORDER BY`. |
-| Aggregates `COUNT/SUM/AVG/MIN/MAX` + `GROUP BY` | ✅ Conditional | SOQL aggregates / GraphQL `groupBy` (selective). |
-| Child-to-parent relationship traversal | ✅ Conditional | Dot notation; **≤ 5 levels** (REST SOQL) / **≤ 55 child-to-parent** (GraphQL). |
+| Aggregates | ✅ Conditional | `COUNT(*)` pushed for zero-column scans; `COUNT`/`COUNT_DISTINCT`/`MIN`/`MAX` pushed transparently via the optimizer pass (`sf_aggregate_pushdown`; MIN/MAX need sortable numeric/temporal/boolean fields); explicit `salesforce_aggregate()` for server-side SOQL aggregates with optional filter/GROUP BY. `SUM`/`AVG` stay local (deferred). |
+| Child-to-parent relationship traversal | ✅ Conditional | Dot notation; shipped opt-in traversal is depth **≤ 2** (parent/grandparent, single-target only, polymorphic skipped); SOQL itself allows up to 5 levels. |
 | Parent-to-child subquery | ✅ Conditional | Inline subquery; **≤ 20 relationships**; cannot mix with parent filters in one query. |
 | `WHERE` string > 4,000 chars | ❌ No | Exceeds SOQL `WHERE` limit → residual. |
 | `LIMIT` > 2,000 | ❌ No (paginate) | Exceeds SOQL `LIMIT` cap → use cursor/locator paging. |
 | `LIKE '%infix%'` / suffix wildcards | ⚠️ Partial | Pushed if SOQL supports the pattern; otherwise residual. |
-| `NOT LIKE`, complex negation `!=` chains | ❌ Often residual | GraphQL lacks robust negation; SOQL ok but flagged for selectivity. |
+| `NOT LIKE`, complex negation `!=` chains | ❌ Often residual | Not translated by the shipped pushdown; applied residually by DuckDB (always correct). |
 | `OFFSET` > 2,000 | ❌ No | SOQL/Tooling `OFFSET` capped at 2,000 → cursor paging. |
 | Non-filterable fields (formula/computed) | ❌ No | Salesforce rejects them in `WHERE` → residual. |
 | Joins across unrelated sObjects | ❌ No | No arbitrary joins in SOQL → DuckDB join locally. |
@@ -591,7 +591,7 @@ SalesforceConnectionInfo      SalesforceQueryBuilder            SalesforceMetada
 | `MetadataClient` | SOAP retrieve for picklists/record types. |
 | `QuotaGovernor` | `/limits` polling; daily-budget guard; rate limiter; backoff coordinator. |
 | `MetadataCache` | `__sf_*` table population, TTL, invalidation. |
-| `TransportSelector` | REST vs Bulk vs GraphQL decision (Appendix A). |
+| Transport selection | `rest` / `bulk` / `auto` via `sf_force_transport` + `SELECT COUNT()` probe + `sf_auto_bulk_threshold` (Appendix A). Lives in the scan init (`salesforce_scan.cpp`), not a separate class. |
 | `SalesforceCatalog` / `SalesforceSchemaEntry` / `SalesforceTableEntry` / `SalesforceTransactionManager` | Catalog mapping (Firebird storage analogs); transaction manager is a read-only no-op. |
 
 ---
@@ -599,6 +599,18 @@ SalesforceConnectionInfo      SalesforceQueryBuilder            SalesforceMetada
 ## 13. C++ File Structure
 
 Mirrors the Firebird layout (10-source `EXTENSION_SOURCES`), adding the HTTP/auth/quota/cache modules and the shared base.
+
+> **Correction (2026-09-30):** the tree below is the ORIGINAL PLAN, kept for
+> provenance — several listed files were never created under those names
+> (`salesforce_transport_selector.*`, `salesforce_observability.cpp`,
+> `salesforce_dbt_sources.cpp`, `remote_connector_base.*`, the SOAP
+> `salesforce_metadata.cpp` fallback). The shipped layout is the flat
+> `salesforce_<area>.cpp` set registered in `CMakeLists.txt` (scan, soql,
+> session, http_client, auth, describe, query, types, value, aggregate,
+> metadata, metadata_engine, report, quota, diag, reldiag, storage,
+> extension, agg_optimizer). Namesakes that did ship (`salesforce_quota.cpp`,
+> `salesforce_metadata.cpp`, `salesforce_query.cpp`, ...) may differ in scope
+> from the plan's comments.
 
 ```
 src/
@@ -813,7 +825,7 @@ macOS live-TLS trust-store validation.
 Derived strictly from the research's stated latencies, page sizes, and throughput multipliers.
 
 ### 19.1 REST vs Bulk crossover
-- **Crossover ≈ 10,000 records.** Below it, REST wins on latency (single/few `/query` calls, no async job setup). At/above it, Bulk 2.0 is the standard choice and is **2–6× faster** for large exports.
+- **Crossover = `sf_auto_bulk_threshold` (default 50,000 estimated rows) under `sf_force_transport='auto'`** — the shipped, configurable decision point (not the research-era 10,000). Below it, REST wins on latency (single/few `/query` calls, no async job setup); at/above it, Bulk 2.0 is chosen and is generally faster for large exports. The latency model below is the original research estimate, kept for reference; measure real crossovers with `salesforce_query_cost()`.
 
 ### 19.2 REST latency model
 - Per page: **50–200 ms**, up to **2,000 records/page**.
