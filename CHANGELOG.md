@@ -12,6 +12,34 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.18.0](docs/RELEASE_NOTES_v0.18.0.md) — 2026-09-30
+
+- **Child-direction recursion** in `salesforce_relationship_graph` (P2.3):
+  resolved children walked up to `max_depth` with cycle protection; default
+  byte-identical to the old single-level listing.
+- **Report Bridge base object from `reportTypeMetadata`** (P2.2 cut 2):
+  unique first-category `fullyQualifiedName` prefix becomes a
+  `report_type_metadata` candidate (after `CustomEntity$`, before the builtin
+  map); live-proven CaseList→Case, joined types correctly ambiguous.
+- **v2.0 readiness**: aggregate-pushdown pass dual-compiles on 1.5.x and 2.0
+  (SFINAE; informational, no v2 claim).
+- **P1.4 closed by live evidence**: server SUM under-reports exact DuckDB
+  DECIMAL by ~1,160 on a 3.1M-row real-org window (floating-point summation)
+  → transparent SUM/AVG rejected; `salesforce_aggregate()` stays explicit.
+- ARCHITECTURE.md body factual corrections; verification smokes added
+  (aggregate precision, candidate-SOQL check).
+- Community: v0.15.1 merged upstream (#2850); v0.16.0–v0.18.0 not submitted
+  (explicit-OK gate). Also fixes the v0.17.1 metadata skew (vcpkg.json was
+  left at 0.17.0; no CHANGELOG entry had been added for v0.17.1 — both
+  corrected here).
+
+## [v0.17.1](docs/RELEASE_NOTES_v0.17.1.md) — 2026-09-30
+
+- **Official DuckDB v1.5.6 support** (P4, compat-only): CI matrix 9 jobs
+  (v1.5.4/v1.5.5/v1.5.6 × linux/windows/osx); release-assets packaging
+  baseline → v1.5.6; README/INSTALL/public roadmap to the three-version
+  surface. No `src/` change.
+
 ## [v0.17.0](docs/RELEASE_NOTES_v0.17.0.md) — 2026-09-29
 
 - **Aggregate pushdown family extended** (same `OptimizerExtension`,

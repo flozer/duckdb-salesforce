@@ -254,7 +254,7 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.17.0** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
+Own-repo release: **v0.18.0** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
 Community baseline: **v0.15.0**, merged in
 [`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710);
 the `v0.15.1` update was submitted as
@@ -263,7 +263,9 @@ and later updates follow the project's explicit-submission gate. Every
 extension function documents itself through `duckdb_functions()`
 (description, example, parameter names), and no-group `COUNT`,
 `COUNT(DISTINCT)`, `MIN` and `MAX` queries push down transparently
-(kill-switch `sf_aggregate_pushdown`).
+(kill-switch `sf_aggregate_pushdown`). `salesforce_relationship_graph`
+recurses child relationships up to `max_depth`, and the Report Bridge
+resolves a report's base object from the official `reportTypeMetadata`.
 
 | Area | Status |
 |---|---|
@@ -287,8 +289,11 @@ extension function documents itself through `duckdb_functions()`
 | Linux + Windows + macOS arm64 CI | Done |
 | Transparent `COUNT(field)` pushdown (`sf_aggregate_pushdown`) | Done |
 | Transparent `COUNT(DISTINCT)` / `MIN` / `MAX` pushdown | Done (sortable numeric/temporal/boolean fields; strings stay local) |
-| Transparent `SUM` / `AVG` pushdown | Deferred: gated on decimal evidence (P1.4) |
+| Transparent `SUM` / `AVG` pushdown | Rejected by live evidence: Salesforce SUM is floating point and diverged ~1,160 on a 3.1M-row window; `salesforce_aggregate()` is the explicit opt-in |
 | Official DuckDB v1.5.6 support declaration | Done (CI matrix v1.5.4/v1.5.5/v1.5.6 × 3 platforms; release-assets build against v1.5.6) |
+| Relationship-graph child recursion (`max_depth`) | Done (P2.3) |
+| Report Bridge base object via `reportTypeMetadata` (cut 2) | Done (P2.2) |
+| DuckDB 2.0 support | Future: tracked for when 2.0 ships GA (pass already dual-compiles; migration surface mapped) |
 | Salesforce writes / Metadata API deploy | Out of scope |
 
 ## Build
