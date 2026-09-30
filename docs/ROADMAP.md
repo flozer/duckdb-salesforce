@@ -106,10 +106,14 @@ maintainer's working notes, not here):
    graphs, cardinality/junction typing, feeding the Report Bridge once
    proven safe); factual corrections to the main body of
    `docs/ARCHITECTURE.md`.
-3. **Compatibility tracking.** DuckDB 2.0 monitoring (canary against
-   `v2.0-cyanoptera` before its official release). DuckDB `v1.5.6` official
-   support is being declared via the CI matrix, docs, and a compat-only
-   release.
+3. **Compatibility tracking.** The single future-compatibility item kept on
+   this roadmap is **DuckDB 2.0**: the informational canary against
+   `v2.0-cyanoptera` runs on demand, the remaining 2.0 migration surface is
+   mapped (bind signatures `vector<Identifier>`, `string_t`/`DataChunk::data`
+   const-qualification, `ListVector`, `named_parameters`, `Catalog::GetCatalog`,
+   `list_entry_t` — see the maintainer working notes), and the dedicated
+   migration cycle happens when 2.0 approaches general availability. DuckDB
+   v1.5.4/v1.5.5/v1.5.6 are the officially supported line.
 
 ## Delivered release candidates (historical)
 
