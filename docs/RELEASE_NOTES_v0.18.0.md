@@ -94,7 +94,16 @@ v0.17.1). The v2.0 dual-compile is informational only — no v2 support claim.
 
 ### Official CI run record
 
-TO BE FILLED BEFORE TAGGING (post-merge main run).
+`MainDistributionPipeline.yml` run
+[36743994783](https://github.com/flozer/duckdb-salesforce/actions/runs/36743994783)
+(2026-09-30, `workflow_dispatch` against post-merge `main` @ `539b204`;
+release-prep commit `a521d24` docs-only) — **9/9 green**:
+
+| DuckDB | linux_amd64 | windows_amd64 | osx_arm64 |
+|---|---|---|---|
+| v1.5.4 | Pass | Pass | Pass |
+| v1.5.5 | Pass | Pass | Pass |
+| v1.5.6 | Pass | Pass | Pass |
 
 ## Gates
 
