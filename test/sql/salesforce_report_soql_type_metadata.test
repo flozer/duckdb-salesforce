@@ -1,0 +1,82 @@
+# name: test/sql/salesforce_report_soql_type_metadata.test
+# description: P2.2 cut 2 -- base-object resolution from reportTypeMetadata.
+#              The report /describe's first category carries fullyQualifiedName
+#              columns whose non-empty first segments collapse to exactly one
+#              object on standard report types (live-proven 2026-09-30 on a
+#              real org: CaseList -> Case, Opportunity -> Opportunity,
+#              OpportunityLead correctly NOT unique). That official per-report
+#              source outranks the static builtin map; ambiguous or absent
+#              reportTypeMetadata keeps the prior behavior. Mock-only.
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Case","queryable":true},{"name":"Contact","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Case","fields":[{"name":"CaseNumber","type":"string","filterable":true},{"name":"Subject","type":"string","filterable":true}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# --- A: unique first-category prefixes -> base resolved by reportTypeMetadata
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"Age of Cases","reportType":{"type":"CaseList"},"reportFormat":"TABULAR","detailColumns":["CaseNumber","Subject"]},"reportTypeMetadata":{"categories":[{"label":"Case info","columns":{"CASE_NUMBER":{"fullyQualifiedName":"Case.CaseNumber"},"SUBJECT":{"fullyQualifiedName":"Case.Subject"}}}]}}';
+
+query TTT
+SELECT base_object, base_object_resolved_by, translatable
+FROM salesforce_report_soql('sf', '00O2');
+----
+Case	report_type_metadata	true
+
+query T
+SELECT soql FROM salesforce_report_soql('sf', '00O2');
+----
+SELECT CaseNumber, Subject FROM Case
+
+# cut 2 outranks the builtin map: CaseList resolves via reportTypeMetadata even
+# after we ALSO register the pair in the builtin contract (both agree on Case)
+query T
+SELECT base_object_resolved_by FROM salesforce_report_soql('sf', '00O2');
+----
+report_type_metadata
+
+# --- B: ambiguous prefixes (joined/multi-object types) -> no candidate -------
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"Joined","reportType":{"type":"WeirdList"},"reportFormat":"TABULAR","detailColumns":["CaseNumber"]},"reportTypeMetadata":{"categories":[{"label":"Mixed","columns":{"CASE_NUMBER":{"fullyQualifiedName":"Case.CaseNumber"},"CONTACT_NAME":{"fullyQualifiedName":"Contact.Name"}}}]}}';
+
+query TTT
+SELECT base_object, base_object_resolved_by, translatable
+FROM salesforce_report_soql('sf', '00O3');
+----
+WeirdList	unresolved	false
+
+# --- C: absent reportTypeMetadata + unmapped type -> documented ingredient ---
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"Mystery","reportType":{"type":"MysteryList"},"reportFormat":"TABULAR","detailColumns":["CaseNumber"]}}';
+
+query TT
+SELECT base_object, base_object_resolved_by
+FROM salesforce_report_soql('sf', '00O4');
+----
+MysteryList	unresolved
+
+# --- D: cut 2 wins over the column-prefix hint (honest root, not a guess) ----
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"name":"Case w Account cols","reportType":{"type":"CaseList"},"reportFormat":"TABULAR","detailColumns":["CaseNumber"]},"reportTypeMetadata":{"categories":[{"label":"Case info","columns":{"CASE_NUMBER":{"fullyQualifiedName":"Case.CaseNumber"}}}]}}';
+
+query TT
+SELECT base_object, base_object_resolved_by
+FROM salesforce_report_soql('sf', '00O5');
+----
+Case	report_type_metadata
+
+statement ok
+DETACH sf;

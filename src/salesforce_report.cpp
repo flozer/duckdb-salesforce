@@ -17,6 +17,8 @@
 #include "salesforce_soql.hpp"
 #include "salesforce_storage.hpp"
 
+#include <set>
+
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 
@@ -517,6 +519,83 @@ static string BuiltinReportTypeObject(const string &report_type) {
 // MatchFieldName) now lives in SalesforceMetadataEngine::ResolveField; Report
 // Bridge calls the engine (Phase B migration, ROADMAP v1.6 §17).
 
+// P2.2 cut 2: the report /describe's reportTypeMetadata.categories[0].columns
+// carry fullyQualifiedName values whose first segment is the base object
+// ("Case.CaseNumber" -> "Case"). On standard report types the non-empty
+// prefixes of the FIRST category collapse to exactly one object (live-proven
+// on a real org 2026-09-30: CaseList -> Case, Opportunity -> Opportunity,
+// OpportunityLead -> Lead — the joined type correctly does NOT collapse).
+// Returns that object, or "" when the first category is absent or ambiguous.
+// The body is scanned structurally: category[0] -> "columns" object -> each
+// member's "fullyQualifiedName".
+static string FirstCategoryUniqueObject(const string &body) {
+	auto categories = sfjson::GetObjectArray(body, "categories");
+	if (categories.empty()) {
+		return "";
+	}
+	string columns_json = sfjson::ExtractObject(categories[0], "columns");
+	if (columns_json.empty()) {
+		return "";
+	}
+	// Walk the "columns" object at member depth: each member is
+	//   "KEY" : { ... "fullyQualifiedName" : "A.B" ... }
+	// Collect the first segment of every non-empty fullyQualifiedName.
+	std::set<string> prefixes;
+	size_t i = 0;
+	const size_t n = columns_json.size();
+	while (i < n) {
+		// find next member key
+		auto key_open = columns_json.find('"', i);
+		if (key_open == string::npos) {
+			break;
+		}
+		auto key_close = columns_json.find('"', key_open + 1);
+		if (key_close == string::npos) {
+			break;
+		}
+		// value starts after the colon; find the member's opening brace
+		auto brace = columns_json.find('{', key_close);
+		auto comma = columns_json.find(',', key_close);
+		if (brace == string::npos || (comma != string::npos && comma < brace)) {
+			i = (comma == string::npos) ? n : comma + 1;
+			continue;
+		}
+		// balanced-brace skip of the member value
+		int depth = 0;
+		size_t j = brace;
+		for (; j < n; j++) {
+			if (columns_json[j] == '{') {
+				depth++;
+			} else if (columns_json[j] == '}') {
+				if (--depth == 0) {
+					break;
+				}
+			}
+		}
+		string member = columns_json.substr(brace, j - brace + 1);
+		auto fqn = member.find("\"fullyQualifiedName\"");
+		if (fqn != string::npos) {
+			auto colon = member.find(':', fqn);
+			if (colon != string::npos) {
+				bool is_null = false, found = false;
+				string fqn_value;
+				sfjson::GetValue(member, "fullyQualifiedName", fqn_value, found, is_null);
+				if (found && !is_null) {
+					auto dot = fqn_value.find('.');
+					if (dot != string::npos && dot > 0) {
+						prefixes.insert(fqn_value.substr(0, dot));
+					}
+				}
+			}
+		}
+		i = j + 1;
+	}
+	if (prefixes.size() != 1) {
+		return ""; // absent, or ambiguous (e.g. joined OpportunityLead types)
+	}
+	return *prefixes.begin();
+}
+
 // Weak fallback: the single dotted prefix shared by report column / filter
 // tokens (e.g. "Account.Name" -> "Account"). Returns "" when there is no dotted
 // token or when prefixes are mixed/ambiguous (more than one distinct prefix).
@@ -710,6 +789,12 @@ static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context, TableFunc
 	if (dollar != string::npos) {
 		candidates.push_back({rt.substr(dollar + 1), "custom_entity_suffix"});
 	} else {
+		// P2.2 cut 2 first: the report's OWN reportTypeMetadata is official
+		// per-report ground truth and outranks the static builtin map.
+		string meta_obj = FirstCategoryUniqueObject(body);
+		if (!meta_obj.empty()) {
+			candidates.push_back({meta_obj, "report_type_metadata"});
+		}
 		string mapped = BuiltinReportTypeObject(rt);
 		if (!mapped.empty()) {
 			candidates.push_back({mapped, "builtin_report_type_map"});
