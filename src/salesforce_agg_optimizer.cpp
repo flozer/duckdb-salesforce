@@ -74,9 +74,14 @@ template <typename T>
 struct HasGetChildren<T, std::void_t<decltype(std::declval<const T &>().GetChildren())>> : std::true_type {};
 
 template <typename T, typename = void>
-struct HasGetBinding : std::false_type {};
+struct HasBindingAccessor : std::false_type {};
 template <typename T>
-struct HasGetBinding<T, std::void_t<decltype(std::declval<const T &>().GetBinding())>> : std::true_type {};
+struct HasBindingAccessor<T, std::void_t<decltype(std::declval<const T &>().Binding())>> : std::true_type {};
+
+template <typename T, typename = void>
+struct HasFunctionAccessor : std::false_type {};
+template <typename T>
+struct HasFunctionAccessor<T, std::void_t<decltype(std::declval<const T &>().Function())>> : std::true_type {};
 
 template <typename T, typename = void>
 struct HasGetName : std::false_type {};
@@ -94,10 +99,11 @@ struct HasFilterIteration<
 // BoundTableFunction (2.0, `GetDefinition()->GetName()` returning Identifier).
 // Every helper below is a TEMPLATE on the owning type: only then is the
 // discarded `if constexpr` branch left uninstantiated (a non-template
-// function's discarded branch is still fully type-checked).
+// function's discarded branch is still fully type-checked). Detection is
+// always on the MEMBER-HOLDING type (e.g. get.function), never the operator.
 template <typename GetT>
 string GetScanFunctionName(const GetT &get) {
-	if constexpr (HasGetDefinition<GetT>::value) {
+	if constexpr (HasGetDefinition<std::decay_t<decltype(get.function)>>::value) {
 		return string(get.function.GetDefinition()->GetName()); // 2.0
 	} else {
 		return get.function.name; // 1.5.x
@@ -109,7 +115,7 @@ string GetScanFunctionName(const GetT &get) {
 template <typename FilterSetT>
 bool TableFilterSetEmpty(const FilterSetT &fs) {
 	if constexpr (HasFilterIteration<FilterSetT>::value) {
-		return fs.begin() == fs.end(); // 2.0
+		return fs.begin() != fs.end() ? false : true; // 2.0 (iterator has only operator!=)
 	} else {
 		return fs.filters.empty(); // 1.5.x
 	}
@@ -133,12 +139,12 @@ bool AggHasFilterOrOrderBys(const AggT &bag) {
 	}
 }
 
-// Aggregate function name: public `function.name` (1.5.x) or
-// `function.GetName()` returning Identifier (2.0).
+// Aggregate function name: public `function.name` (1.5.x) or `Function().GetName()`
+// returning Identifier (2.0).
 template <typename AggT>
 string AggFunctionName(const AggT &bag) {
-	if constexpr (HasGetName<std::decay_t<decltype(bag.function)>>::value) {
-		return string(bag.function.GetName()); // 2.0
+	if constexpr (HasFunctionAccessor<AggT>::value) {
+		return string(bag.Function().GetName()); // 2.0
 	} else {
 		return bag.function.name; // 1.5.x
 	}
@@ -154,11 +160,11 @@ const vector<unique_ptr<Expression>> &AggChildren(const AggT &bag) {
 	}
 }
 
-// Column-ref binding: public `binding` (1.5.x) or GetBinding() (2.0).
+// Column-ref binding: public `binding` (1.5.x) or Binding() (2.0).
 template <typename RefT>
 ColumnBinding ColRefBinding(const RefT &ref) {
-	if constexpr (HasGetBinding<RefT>::value) {
-		return ref.GetBinding(); // 2.0
+	if constexpr (HasBindingAccessor<RefT>::value) {
+		return ref.Binding(); // 2.0
 	} else {
 		return ref.binding; // 1.5.x
 	}
@@ -325,19 +331,21 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 	// Commit: annotate the scan, rebuild the Get schema, prepare the Projection
 	// expressions. Reusing the aggregate's table index keeps every PARENT
 	// ColumnBinding (aggregate_index, i) valid without touching operators above.
-	auto get_index = get.table_index;
 	// The Get's column_ids is the binding space AND the map into the original
-	// schema. Rebuild it as the identity over the NEW (aggregate) schema first
-	// (ColumnIndex carries the index type both lines agree on), then derive
-	// each Projection binding from it.
+	// schema. Rebuild it as the identity over the NEW (aggregate) schema first,
+	// then take each Projection binding straight from GetColumnBindings() --
+	// the binding's index type (idx_t on 1.5.x, ProjectionIndex on 2.0) is
+	// produced by DuckDB itself, so the source compiles on both lines.
 	get.SetColumnIds(vector<ColumnIndex>());
 	auto &col_ids = get.GetMutableColumnIds();
-	vector<string> out_names;
 	for (idx_t i = 0; i < pushed.size(); i++) {
 		col_ids.push_back(ColumnIndex(i));
+	}
+	auto out_bindings = get.GetColumnBindings();
+	vector<string> out_names;
+	for (idx_t i = 0; i < pushed.size(); i++) {
 		out_names.push_back(pushed[i].out_name);
-		out_colrefs.push_back(make_uniq<BoundColumnRefExpression>(
-		    pushed[i].emit.duckdb_type, ColumnBinding(get_index, col_ids[i].GetPrimaryIndex())));
+		out_colrefs.push_back(make_uniq<BoundColumnRefExpression>(pushed[i].emit.duckdb_type, out_bindings[i]));
 	}
 	get.projection_ids.clear(); // struct-extract map referenced the old schema
 
