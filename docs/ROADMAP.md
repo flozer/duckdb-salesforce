@@ -115,6 +115,14 @@ maintainer's working notes, not here):
    migration cycle happens when 2.0 approaches general availability. DuckDB
    v1.5.4/v1.5.5/v1.5.6 are the officially supported line.
 
+4. **Transparent `SUM`/`AVG` pushdown: closed by live evidence (2026-09-30).**
+   On a 3.1M-row window of a real org, Salesforce's server-side SUM diverged
+   from DuckDB's exact DECIMAL result by ~1,160 (floating-point summation) —
+   a transparent pushdown would silently change results, so it is rejected.
+   `salesforce_aggregate()` remains the explicit opt-in; `MIN`/`MAX` (v0.17.0)
+   are exact and stay pushed. Evidence:
+   `docs/smoke/aggregate-precision-v0.17.1.md`.
+
 ## Delivered release candidates (historical)
 
 The release-candidate notes below shipped: the relationship-graph cuts in
