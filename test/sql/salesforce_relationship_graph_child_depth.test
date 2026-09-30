@@ -1,0 +1,99 @@
+# name: test/sql/salesforce_relationship_graph_child_depth.test
+# description: P2.3 -- child-direction recursion. direction='child'/'both'
+#              walks resolved (named + queryable) children up to max_depth
+#              with ancestor-chain cycle protection; unnamed children and
+#              not-queryable children are dead ends. Default max_depth = 1
+#              keeps the historical single-level view byte-identical.
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+# Account, Contact, Order, User queryable; Ghost / Attachment NOT.
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true},{"name":"Contact","queryable":true},{"name":"Order","queryable":true},{"name":"User","queryable":true}]}';
+
+# One describe served for every object: children Contacts/Orders/Ghosts/unnamed
+# Attachment. Because Contact and Order reuse the same body, deeper levels show
+# ancestor-chain cycles (e.g. Account -> Contact -> Order -> Contact).
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"OwnerId","type":"reference","relationshipName":"Owner","referenceTo":["User"],"filterable":true}],"childRelationships":[{"childSObject":"Contact","field":"AccountId","relationshipName":"Contacts"},{"childSObject":"Order","field":"AccountId","relationshipName":"Orders"},{"childSObject":"Ghost","field":"AccountId","relationshipName":"Ghosts"},{"childSObject":"Attachment","field":"ParentId","relationshipName":null}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === default max_depth = 1: historical single-level view =====================
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', direction := 'child');
+----
+4
+
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', direction := 'child')
+WHERE depth_level > 1;
+----
+0
+
+# === max_depth = 3: recursion, cycles, dead ends ==============================
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 3, direction := 'child');
+----
+20
+
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 3, direction := 'child')
+WHERE depth_level = 2;
+----
+8
+
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 3, direction := 'child')
+WHERE depth_level = 3;
+----
+8
+
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 3, direction := 'child')
+WHERE status = 'cyclic';
+----
+6
+
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 3, direction := 'child')
+WHERE status = 'resolved' AND depth_level = 2;
+----
+2
+
+# depth-2 path chains are dotted with the relationship names
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 3, direction := 'child')
+WHERE path = 'Contacts.Orders' AND depth_level = 2 AND status = 'resolved';
+----
+1
+
+# nothing is ever emitted deeper than the requested max_depth
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 3, direction := 'child')
+WHERE depth_level > 3;
+----
+0
+
+# === max_depth = 2 prunes level 3 =============================================
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 2, direction := 'child');
+----
+12
+
+query I
+SELECT count(*) FROM salesforce_relationship_graph('sf', 'Account', 2, direction := 'child')
+WHERE depth_level = 3;
+----
+0
+
+statement ok
+DETACH sf;

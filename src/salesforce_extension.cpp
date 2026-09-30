@@ -211,8 +211,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	RegisterDescribed(loader, GetSalesforceRelationshipGraphFunction(), {"catalog", "object"},
 	                  "Enumerates relationship edges reachable from an sObject with an explicit status "
 	                  "per edge (resolved, polymorphic, self_reference, cyclic, ...); accepts an "
-	                  "optional positional max_depth plus the named parameters include_children "
-	                  "(default false) and direction ('parent', 'child' or 'both', default 'parent').",
+	                  "optional positional max_depth bounding both directions plus the named "
+	                  "parameters include_children (default false) and direction ('parent', 'child' "
+	                  "or 'both', default 'parent'); child traversal recurses through resolved "
+	                  "children up to max_depth with cycle protection.",
 	                  {"SELECT * FROM salesforce_relationship_graph('sf', 'Contact');"}, {"metadata", "diagnostic"});
 	RegisterDescribed(loader, GetSalesforceQueryExplainFunction(), {},
 	                  "Returns a field-by-field explanation of the most recent scan: which filters were "
