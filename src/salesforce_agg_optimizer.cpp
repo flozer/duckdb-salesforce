@@ -29,6 +29,13 @@
 //     aggregate;
 //   - the sf_aggregate_pushdown kill-switch is on (checked here; the scan
 //     side has no choice once the plan is rewritten, by design).
+//
+// DuckDB 1.5.x <-> 2.0 dual compile (canary run 36707374735 evidence): the
+// bound-expression APIs moved from public members to accessors and from
+// string to Identifier in the 2.0 line. This file uses compile-time member
+// detection (SFINAE + `if constexpr`) so the SAME source compiles against
+// both supported lines -- no version macros, each detection falls back to
+// the 1.5.x member shape.
 
 #include "salesforce_agg_optimizer.hpp"
 #include "salesforce_scan.hpp"
@@ -42,9 +49,133 @@
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/planner/operator/logical_projection.hpp"
 
+#include <string>
+#include <type_traits>
+
 namespace duckdb {
 
 namespace {
+
+// --- compile-time member detection (1.5.x members vs 2.0 accessors) ---------
+
+template <typename T, typename = void>
+struct HasGetDefinition : std::false_type {};
+template <typename T>
+struct HasGetDefinition<T, std::void_t<decltype(std::declval<const T &>().GetDefinition())>> : std::true_type {};
+
+template <typename T, typename = void>
+struct HasGetFilter : std::false_type {};
+template <typename T>
+struct HasGetFilter<T, std::void_t<decltype(std::declval<const T &>().GetFilter())>> : std::true_type {};
+
+template <typename T, typename = void>
+struct HasGetChildren : std::false_type {};
+template <typename T>
+struct HasGetChildren<T, std::void_t<decltype(std::declval<const T &>().GetChildren())>> : std::true_type {};
+
+template <typename T, typename = void>
+struct HasBindingAccessor : std::false_type {};
+template <typename T>
+struct HasBindingAccessor<T, std::void_t<decltype(std::declval<const T &>().Binding())>> : std::true_type {};
+
+template <typename T, typename = void>
+struct HasFunctionAccessor : std::false_type {};
+template <typename T>
+struct HasFunctionAccessor<T, std::void_t<decltype(std::declval<const T &>().Function())>> : std::true_type {};
+
+template <typename T, typename = void>
+struct HasGetName : std::false_type {};
+template <typename T>
+struct HasGetName<T, std::void_t<decltype(std::declval<const T &>().GetName())>> : std::true_type {};
+
+template <typename T, typename = void>
+struct HasFilterIteration : std::false_type {};
+template <typename T>
+struct HasFilterIteration<
+    T, std::void_t<decltype(std::declval<const T &>().begin()), decltype(std::declval<const T &>().end())>>
+    : std::true_type {};
+
+// LogicalGet::function: TableFunction (1.5.x, public `name`) or
+// BoundTableFunction (2.0, `GetDefinition()->GetName()` returning Identifier).
+// Every helper below is a TEMPLATE on the owning type: only then is the
+// discarded `if constexpr` branch left uninstantiated (a non-template
+// function's discarded branch is still fully type-checked). Detection is
+// always on the MEMBER-HOLDING type (e.g. get.function), never the operator.
+template <typename GetT>
+string GetScanFunctionName(const GetT &get) {
+	if constexpr (HasGetDefinition<std::decay_t<decltype(get.function)>>::value) {
+		return string(get.function.GetDefinition()->GetName()); // 2.0
+	} else {
+		return get.function.name; // 1.5.x
+	}
+}
+
+// TableFilterSet::filters: public map (1.5.x) or private with begin/end
+// iteration (2.0).
+template <typename FilterSetT>
+bool TableFilterSetEmpty(const FilterSetT &fs) {
+	if constexpr (HasFilterIteration<FilterSetT>::value) {
+		return fs.begin() != fs.end() ? false : true; // 2.0 (iterator has only operator!=)
+	} else {
+		return fs.filters.empty(); // 1.5.x
+	}
+}
+
+// BaseExpression::type: public (1.5.x) or protected behind
+// GetExpressionType() (2.0 -- which also has the accessor on 1.5.x, so just
+// use the accessor unconditionally; kept as a helper for clarity).
+ExpressionType ExprType(const Expression &expr) {
+	return expr.GetExpressionType();
+}
+
+// BoundAggregateExpression filter/order_bys: public members (1.5.x) or
+// GetFilter()/GetOrderBys() accessors (2.0).
+template <typename AggT>
+bool AggHasFilterOrOrderBys(const AggT &bag) {
+	if constexpr (HasGetFilter<AggT>::value) {
+		return bag.GetFilter() != nullptr || bag.GetOrderBys() != nullptr; // 2.0
+	} else {
+		return bag.filter != nullptr || bag.order_bys != nullptr; // 1.5.x
+	}
+}
+
+// Aggregate function name: public `function.name` (1.5.x) or `Function().GetName()`
+// returning Identifier (2.0).
+template <typename AggT>
+string AggFunctionName(const AggT &bag) {
+	if constexpr (HasFunctionAccessor<AggT>::value) {
+		return string(bag.Function().GetName()); // 2.0
+	} else {
+		return bag.function.name; // 1.5.x
+	}
+}
+
+// Aggregate argument list: public `children` (1.5.x) or GetChildren() (2.0).
+template <typename AggT>
+const vector<unique_ptr<Expression>> &AggChildren(const AggT &bag) {
+	if constexpr (HasGetChildren<AggT>::value) {
+		return bag.GetChildren(); // 2.0
+	} else {
+		return bag.children; // 1.5.x
+	}
+}
+
+// Column-ref binding: public `binding` (1.5.x) or Binding() (2.0).
+template <typename RefT>
+ColumnBinding ColRefBinding(const RefT &ref) {
+	if constexpr (HasBindingAccessor<RefT>::value) {
+		return ref.Binding(); // 2.0
+	} else {
+		return ref.binding; // 1.5.x
+	}
+}
+
+// Output display name: GetName() returns string (1.5.x) or Identifier (2.0);
+// direct-initialization through `string(...)` handles both (the Identifier
+// -> string conversion is explicit on 2.0).
+string ExprDisplayName(const Expression &expr) {
+	return string(expr.GetName());
+}
 
 // MIN/MAX pushdown type gate (P1.3): numeric, temporal and boolean DuckDB
 // types only. Strings stay local (SOQL vs DuckDB collation semantics are not
@@ -76,8 +207,9 @@ bool AggPushableMinMaxType(const LogicalType &type) {
 
 // Validate the Aggregate->Get pattern and, on success, annotate the scan's
 // bind data with the pushed-aggregate spec and rebuild the Get's output schema
-// (one BIGINT column per aggregate term). Returns the Projection expressions
-// mapping the new Get outputs to the OLD aggregate bindings via out_colrefs.
+// (one column per aggregate term, typed per term). Returns the Projection
+// expressions mapping the new Get outputs to the OLD aggregate bindings via
+// out_colrefs.
 bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
                               vector<unique_ptr<Expression>> &out_colrefs) {
 	if (!agg.groups.empty() || !agg.grouping_sets.empty() || !agg.grouping_functions.empty()) {
@@ -93,7 +225,7 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 		return false;
 	}
 	auto &get = agg.children[0]->Cast<LogicalGet>();
-	if (get.function.name != "salesforce_scan" || !get.bind_data) {
+	if (GetScanFunctionName(get) != "salesforce_scan" || !get.bind_data) {
 		return false;
 	}
 	SalesforceScanBindData *bind = nullptr;
@@ -105,7 +237,7 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 	if (bind->residual_filter_count != 0 || !bind->pushed_aggregates.empty()) {
 		return false;
 	}
-	if (!get.table_filters.filters.empty()) {
+	if (!TableFilterSetEmpty(get.table_filters)) {
 		return false; // standard TableFilters would reference the old schema
 	}
 	// Kill-switch (default on when unset).
@@ -121,17 +253,17 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 	// across the supported matrix (v1.5.4-v1.5.6; there is no dedicated
 	// `aggregates` member).
 	for (auto &expr : agg.expressions) {
-		if (expr->type != ExpressionType::BOUND_AGGREGATE) {
+		if (ExprType(*expr) != ExpressionType::BOUND_AGGREGATE) {
 			return false;
 		}
 		auto &bag = expr->Cast<BoundAggregateExpression>();
-		if (bag.filter || bag.order_bys) {
+		if (AggHasFilterOrOrderBys(bag)) {
 			return false; // FILTER / ORDER BY inside the aggregate stays local
 		}
 		// Supported functions (SOQL names): COUNT, COUNT_DISTINCT (P1.2b),
 		// MIN/MAX (P1.3). SUM/AVG stay deferred (P1.4, decimal evidence);
 		// COUNT(*) has no children: the zero-column scan path owns it.
-		const auto fname = StringUtil::Lower(bag.function.name);
+		const auto fname = StringUtil::Lower(AggFunctionName(bag));
 		const bool is_count = fname == "count";
 		const bool is_minmax = fname == "min" || fname == "max";
 		if (!is_count && !is_minmax) {
@@ -140,21 +272,22 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 		if (bag.IsDistinct() && !is_count) {
 			return false; // DISTINCT is only defined for COUNT in SOQL
 		}
-		if (bag.children.size() != 1) {
+		const auto &children = AggChildren(bag);
+		if (children.size() != 1) {
 			return false;
 		}
-		if (bag.children[0]->type != ExpressionType::BOUND_COLUMN_REF) {
+		if (ExprType(*children[0]) != ExpressionType::BOUND_COLUMN_REF) {
 			return false; // aggregate over an expression stays local
 		}
-		auto &ref = bag.children[0]->Cast<BoundColumnRefExpression>();
-		if (ref.binding.table_index != get.table_index) {
+		auto &ref = children[0]->Cast<BoundColumnRefExpression>();
+		if (ColRefBinding(ref).table_index != get.table_index) {
 			return false;
 		}
 		// Post-pruning binding space: the Get's column_ids (ColumnIndex list) is
 		// BOTH the binding space (0..N-1) AND the map back to the original field
 		// index in bind->fields. A binding column_index must be resolved through
 		// it -- never used directly as a fields[] index.
-		auto binding_idx = ref.binding.column_index;
+		auto binding_idx = ColRefBinding(ref).column_index;
 		if (binding_idx >= get.GetColumnIds().size()) {
 			return false;
 		}
@@ -187,7 +320,7 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 			pa.emit.duckdb_type = field.duckdb_type;
 		}
 		pa.field = field.name;
-		pa.out_name = expr->GetName();
+		pa.out_name = ExprDisplayName(*expr);
 		// Decode surface: the SOQL result key is the alias (a0, a1, ...); the
 		// describe field's type metadata drives AppendJsonValue's conversion.
 		pa.emit.name = "a" + std::to_string(pushed.size());
@@ -198,28 +331,36 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 	// Commit: annotate the scan, rebuild the Get schema, prepare the Projection
 	// expressions. Reusing the aggregate's table index keeps every PARENT
 	// ColumnBinding (aggregate_index, i) valid without touching operators above.
-	auto get_index = get.table_index;
-	vector<LogicalType> types;
-	vector<string> names;
-	for (idx_t i = 0; i < pushed.size(); i++) {
-		types.push_back(pushed[i].emit.duckdb_type);
-		names.push_back(pushed[i].out_name);
-		out_colrefs.push_back(
-		    make_uniq<BoundColumnRefExpression>(pushed[i].emit.duckdb_type, ColumnBinding(get_index, i)));
-	}
-	bind->pushed_aggregates = std::move(pushed);
-	get.returned_types = std::move(types);
-	get.names = std::move(names);
 	// The Get's column_ids is the binding space AND the map into the original
-	// schema. Rebuild it as the identity over the NEW (aggregate) schema so the
-	// physical scan emits exactly the k aggregate columns in order; the stale
-	// entries referenced the pruned row schema and would resolve out of bounds.
+	// schema. Rebuild it as the identity over the NEW (aggregate) schema first,
+	// then take each Projection binding straight from GetColumnBindings() --
+	// the binding's index type (idx_t on 1.5.x, ProjectionIndex on 2.0) is
+	// produced by DuckDB itself, so the source compiles on both lines.
 	get.SetColumnIds(vector<ColumnIndex>());
 	auto &col_ids = get.GetMutableColumnIds();
-	for (idx_t i = 0; i < out_colrefs.size(); i++) {
+	for (idx_t i = 0; i < pushed.size(); i++) {
 		col_ids.push_back(ColumnIndex(i));
 	}
+	auto out_bindings = get.GetColumnBindings();
+	vector<string> out_names;
+	for (idx_t i = 0; i < pushed.size(); i++) {
+		out_names.push_back(pushed[i].out_name);
+		out_colrefs.push_back(make_uniq<BoundColumnRefExpression>(pushed[i].emit.duckdb_type, out_bindings[i]));
+	}
 	get.projection_ids.clear(); // struct-extract map referenced the old schema
+
+	vector<LogicalType> types;
+	for (const auto &pa : pushed) {
+		types.push_back(pa.emit.duckdb_type);
+	}
+	get.returned_types = std::move(types);
+	// names: vector<string> (1.5.x) or vector<Identifier> (2.0); direct
+	// initialization from a string satisfies both value types.
+	get.names.clear();
+	for (const auto &n : out_names) {
+		get.names.push_back(decltype(get.names)::value_type(n));
+	}
+	bind->pushed_aggregates = std::move(pushed);
 	return true;
 }
 
