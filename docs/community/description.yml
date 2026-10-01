@@ -5,14 +5,14 @@
 # duckdb/community-extensions and open a PR. The community CI builds + signs the
 # extension for every supported platform from the pinned repo ref below.
 #
-# LIVE in duckdb/community-extensions. Current community ref: v0.15.1
-# (update merged via duckdb/community-extensions#2850, 2026-09-30, commit
-# 0b8914c763715f818393ee17ca2b73df4256233d).
+# LIVE in duckdb/community-extensions. Current community ref: v0.18.0
+# (single jump from v0.15.1, merged via duckdb/community-extensions#2875,
+# 2026-10-01, commit 9b731ffecb8067b41f9d5d78d45fefa7f6a22b1c).
 
 extension:
   name: salesforce
   description: Read-only access to Salesforce orgs as DuckDB SQL tables over the official REST and Bulk APIs — OAuth refresh-token or JWT-bearer auth (credentials from inline options, environment variables, or an SFDX auth URL), native ATTACH, projection + predicate pushdown, COUNT pushdown, explicit server-side aggregates with GROUP BY, lazy/auto/Bulk transports with PK chunking (Bulk blob/base64 compatibility guard), a per-job API quota governor, parent + grandparent relationship STRUCT columns with diagnostics, queryAll (archived + deleted), Tooling-API fast schema, and metadata helpers (manual cache refresh, picklist values, record types). Requires DuckDB v1.5.4 or newer.
-  version: 0.15.1
+  version: 0.18.0
   language: C++
   build: cmake
   license: MIT
@@ -28,8 +28,8 @@ extension:
 repo:
   github: flozer/duckdb-salesforce
   # community-extensions CI checks out exactly this ref to build + sign.
-  # tag v0.15.1
-  ref: 7361ca730afe1e47f866c4636a42739bbd07908e
+  # tag v0.18.0
+  ref: 6a03b024e62f4e98781267786a5d46800edea8f8
 
 docs:
   hello_world: |
@@ -57,9 +57,16 @@ docs:
     bearer, with credentials from inline options, environment variables, or an
     SFDX auth URL; credentials stay in memory and are never logged; TLS
     server-certificate verification is always on. Read-only: all mutating
-    catalog operations throw. Since v0.15.1 every function also self-documents
+    catalog operations throw. Since v0.15.1 every function self-documents
     through duckdb_functions() (description, runnable example, real parameter
     names), so SQL clients and AI agents can discover the surface from the
-    connection. Built and tested against DuckDB v1.5.4 and v1.5.5 (v1.5.2/
-    v1.5.3 support was dropped in v0.15.0 — see CHANGELOG.md). Full change
-    history in this repo's CHANGELOG.md.
+    connection. Since v0.16.0-v0.17.0, no-group COUNT, COUNT(DISTINCT), MIN
+    and MAX queries push down transparently (kill-switch
+    sf_aggregate_pushdown; MIN/MAX need a sortable numeric/temporal/boolean
+    field; SUM/AVG deliberately stay local — the server sums in floating
+    point), salesforce_relationship_graph recurses child relationships up to
+    max_depth with cycle protection, and the Report Bridge resolves a report's
+    base object from the official reportTypeMetadata when the first category
+    is unambiguous. Built and tested against DuckDB v1.5.4, v1.5.5 and
+    v1.5.6 (v1.5.2/v1.5.3 support was dropped in v0.15.0 — see CHANGELOG.md).
+    Full change history in this repo's CHANGELOG.md.
