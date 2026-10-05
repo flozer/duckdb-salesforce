@@ -1,0 +1,54 @@
+# name: test/sql/salesforce_retry_settings.test
+# description: sf_retry_max / sf_retry_backoff_ms exist, accept values, clamp
+#              out-of-range input, and do not alter scan behavior. The retry
+#              itself lives in the live HTTP client (offline-untestable); these
+#              assertions pin the settings surface.
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"A"}]}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# defaults accept out-of-range values (clamped, not an error)
+statement ok
+SET sf_retry_max = 0;
+
+statement ok
+SET sf_retry_max = 99;
+
+statement ok
+SET sf_retry_backoff_ms = -5;
+
+statement ok
+SET sf_retry_backoff_ms = 120000;
+
+# a scan with raised retry settings behaves normally
+statement ok
+SET sf_retry_max = 5;
+
+statement ok
+SET sf_retry_backoff_ms = 100;
+
+query T
+SELECT Name FROM sf.Account LIMIT 1;
+----
+A
+
+statement ok
+DETACH sf;

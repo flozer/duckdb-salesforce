@@ -477,6 +477,38 @@ SELECT soql FROM salesforce_last_soql();
 SET sf_aggregate_pushdown = false;  -- kill-switch: volta ao scan de linhas
 ```
 
+### `sf_retry_max` e `sf_retry_backoff_ms`
+
+#### O que fazem
+
+Ajustam como a extensão tenta novamente falhas HTTP **transientes** (429, 5xx,
+erros de conexão) antes de uma chamada falhar.
+
+#### Como funcionam
+
+- `sf_retry_max`: `BIGINT`, padrão `3`, limitado a `[1,10]` — tentativas por
+  chamada.
+- `sf_retry_backoff_ms`: `BIGINT`, padrão `200`, limitado a `[0,60000]` — a
+  tentativa N dorme `backoff_ms * N` antes da próxima.
+
+O caminho 401 → renovação de token → retry é separado e sempre se aplica. Uma
+chamada que esgota as tentativas falha e (para scans) o scan inteiro dá erro —
+aumente `sf_retry_max` (e/ou o backoff) em links instáveis para que um blip de
+rede não aborte uma carga longa.
+
+#### Para que serve
+
+Um blip de rede no meio da carga, sem isso, aborta o scan inteiro. Com um
+orçamento de retry maior, a falha transiente custa segundos em vez de
+re-executar a carga pelo orquestrador.
+
+#### Uso no dia a dia
+
+```sql
+SET sf_retry_max = 5;            -- mais tentativas
+SET sf_retry_backoff_ms = 1000;  -- backoff de 1s, 2s, 3s, 4s, 5s
+```
+
 ### `sf_bulk_chunks`
 
 #### O que faz
@@ -864,7 +896,17 @@ SELECT Account.Owner.Name FROM sf.Contact LIMIT 10;
 
 ### `sf_query_mode`
 
-#### O que faz
+#
+
+**Aviso para cargas incrementais:** deletes **não** atualizam
+`SystemModstamp`, então uma carga incremental por watermark nunca os percebe —
+as linhas deletadas ficam vivas no destino para sempre. Combine o watermark
+com uma varredura periódica de deletados: `SET sf_query_mode = 'queryAll';
+SELECT Id FROM sf.Object WHERE IsDeleted = true` (as linhas ficam varríveis
+por ~15 dias), ou use a API de replicação getDeleted() do Salesforce para
+timestamps exatos de deleção.
+
+### O que faz
 
 Escolhe se um scan lê apenas os registros vivos do sObject ou se também
 inclui os registros arquivados e excluídos (soft delete) que o Salesforce

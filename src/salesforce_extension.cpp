@@ -88,6 +88,20 @@ static void LoadInternal(ExtensionLoader &loader) {
 	OptimizerExtension agg_pushdown;
 	agg_pushdown.optimize_function = SalesforceAggregatePushdownOptimize;
 	OptimizerExtension::Register(config, std::move(agg_pushdown));
+	// Transient-failure retry tuning for HTTP calls (429/5xx/connection):
+	// attempts and linear backoff base (sleep = backoff_ms * attempt). Defaults
+	// preserve the historical hardcoded behavior (3 attempts, 200 ms).
+	config.AddExtensionOption("sf_retry_max",
+	                          "Maximum attempts for transient HTTP failures (429, 5xx, connection "
+	                          "errors) before failing a call. Clamped to [1,10]. Default 3. Raise "
+	                          "for runs over flaky links; the 401 refresh path is separate and "
+	                          "always applies.",
+	                          LogicalType::BIGINT, Value::BIGINT(3));
+	config.AddExtensionOption("sf_retry_backoff_ms",
+	                          "Linear backoff base between transient HTTP retries: attempt N sleeps "
+	                          "backoff_ms * N before retrying. Clamped to [0,60000]. Default 200.",
+	                          LogicalType::BIGINT, Value::BIGINT(200));
+
 	// Kill-switch for the pass above. Default ON (same stance as the
 	// transparent COUNT(*) pushdown); false restores the row-scan + local
 	// aggregation plan shape.

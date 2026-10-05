@@ -473,6 +473,38 @@ SELECT soql FROM salesforce_last_soql();
 SET sf_aggregate_pushdown = false;  -- kill-switch: back to the row scan
 ```
 
+### `sf_retry_max` and `sf_retry_backoff_ms`
+
+#### What they do
+
+Tune how the extension retries **transient** HTTP failures (429, 5xx,
+connection errors) before a call fails.
+
+#### How they work
+
+- `sf_retry_max`: `BIGINT`, default `3`, clamped to `[1,10]` — attempts per
+  call.
+- `sf_retry_backoff_ms`: `BIGINT`, default `200`, clamped to `[0,60000]` —
+  attempt N sleeps `backoff_ms * N` before the next try.
+
+The 401 → token-refresh → retry path is separate and always applies. A call
+that exhausts the attempts fails and (for scans) the whole scan errors — raise
+`sf_retry_max` (and/or the backoff) for runs over flaky links so one network
+blip does not abort a long load.
+
+#### Why use them
+
+One network blip mid-load otherwise aborts the whole scan. With a higher
+retry budget, a transient failure costs seconds instead of re-running the
+load from the orchestrator.
+
+#### Daily use
+
+```sql
+SET sf_retry_max = 5;            -- more attempts
+SET sf_retry_backoff_ms = 1000;  -- 1s, 2s, 3s, 4s, 5s backoff
+```
+
 ### API-quota governor
 
 The governor consults the Salesforce `/limits` resource and the
@@ -762,7 +794,16 @@ SELECT Account.Owner.Name FROM sf.Contact LIMIT 10;
 
 ### `sf_query_mode`
 
-#### What it does
+#
+
+**Incremental-load warning:** deletes do **not** update `SystemModstamp`, so a
+watermark-based incremental load never notices them — deleted rows stay alive
+in the target forever. Pair the watermark with a periodic delete sweep:
+`SET sf_query_mode = 'queryAll'; SELECT Id FROM sf.Object WHERE IsDeleted =
+true` (rows stay sweepable for ~15 days), or use Salesforce's getDeleted()
+Replication API for exact deletion timestamps.
+
+### What it does
 
 Chooses the Salesforce read capability a scan uses, and so whether archived
 and soft-deleted records are returned alongside live rows.

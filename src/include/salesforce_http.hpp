@@ -78,6 +78,6 @@ unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &contex
 // server-certificate verification always ON (no insecure bypass), transient
 // retry/backoff, and no request-body logging. CI uses MockHttpClient instead;
 // the live path is exercised only by the gated salesforce_oauth_live.test.
-unique_ptr<SalesforceHttpClient> CreateLiveHttpClient();
+unique_ptr<SalesforceHttpClient> CreateLiveHttpClient(int retry_max, int backoff_ms);
 
 } // namespace duckdb
