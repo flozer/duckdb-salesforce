@@ -760,9 +760,54 @@ SET sf_relationship_depth = 2;
 SELECT Account.Owner.Name FROM sf.Contact LIMIT 10;
 ```
 
-### `sf_query_mode`
+### `salesforce_deleted_ids(catalog, object [, since] [, until])`
 
 #### What it does
+
+Returns the ids deleted in the org for an sObject within a time window — the
+sync primitive that watermark-based incremental loads need, because **deletes
+do not update `SystemModstamp`**.
+
+#### How it works
+
+- Arguments: attached `catalog`, sObject `object`; optional named `since` /
+  `until` ISO-8601 timestamps (defaults: last 15 minutes → now).
+- Window ≤ 15 minutes: served by the Replication API `getDeleted()` — exact
+  `deleted_date` per id, `source = 'getDeleted'`.
+- Wider window: one `queryAll` scan (`WHERE IsDeleted = true AND
+  SystemModstamp >= since`) — `deleted_date` is NULL (Salesforce does not
+  expose deletion timestamps there), `source = 'queryAll'`; the recycle bin
+  holds rows only ~15 days, so sweep periodically.
+- Output columns: `id`, `deleted_date`, `source`.
+
+#### Why use it
+
+The watermark upsert pattern misses deletes silently (deletion never advances
+the stamp). Pair it with a periodic delete sweep: upsert the changed rows, then
+mark/remove the ids this function returns.
+
+#### Daily use
+
+```sql
+-- exact window (getDeleted)
+SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead',
+    since := '2026-09-30T00:00:00', until := '2026-09-30T00:15:00');
+
+-- longer horizon (queryAll sweep, ~15-day retention)
+SELECT id FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-20T00:00:00');
+```
+
+### `sf_query_mode`
+
+#
+
+**Per-catalog ATTACH overrides:** `query_mode`, `transport` and `bulk_chunks`
+can also be set as ATTACH options — `ATTACH 'salesforce://org' AS sf (TYPE
+salesforce, ..., query_mode 'queryAll')` — and then apply to that catalog only,
+independent of the session settings (concurrent catalogs on one connection
+cannot leak scan mode into each other).
+
+### What it does
 
 Chooses the Salesforce read capability a scan uses, and so whether archived
 and soft-deleted records are returned alongside live rows.

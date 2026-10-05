@@ -48,6 +48,13 @@ struct SalesforceConfig {
 	string login_url;   // default https://login.salesforce.com
 	string api_version; // normalised to "vNN.N", default kDefaultApiVersion
 
+	// Per-catalog scan overrides (ATTACH options; empty/0 = use session
+	// settings). Settable at ATTACH so concurrent catalogs (e.g. dbt models
+	// sharing a connection) cannot leak scan mode into each other.
+	string query_mode;       // empty | "query" | "queryAll"
+	string transport;        // empty | "rest" | "bulk" | "auto"
+	int64_t bulk_chunks = 0; // 0 | [1,8]
+
 	// Default Salesforce login host and API version used when the
 	// corresponding options are omitted.
 	static constexpr const char *kDefaultLoginUrl = "https://login.salesforce.com";

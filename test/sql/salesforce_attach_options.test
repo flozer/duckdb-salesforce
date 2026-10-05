@@ -1,0 +1,70 @@
+# name: test/sql/salesforce_attach_options.test
+# description: P2.2 cycle 2 -- per-catalog ATTACH overrides (query_mode,
+#              transport, bulk_chunks). Options validated at ATTACH; they
+#              override session settings per catalog so concurrent catalogs
+#              cannot leak scan mode into each other.
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+
+# default (session 'query'): scan hits /query (query sequence)
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"r1","Name":"A"}]}';
+
+statement ok
+ATTACH 'salesforce://clean' AS clean (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query T
+SELECT Name FROM clean.Account LIMIT 1;
+----
+A
+
+statement ok
+DETACH clean;
+
+# ATTACH with query_mode='queryAll': scan hits /queryAll (queryAll sequence)
+# without any session-level SET -- the per-catalog override wins
+statement ok
+SET sf_mock_queryall_body = '{"done":true,"records":[{"Id":"r1","Name":"A"},{"Id":"r2","Name":"B"}]}';
+
+statement ok
+ATTACH 'salesforce://sweep' AS sweep (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', query_mode 'queryAll');
+
+query T
+SELECT Name FROM sweep.Account LIMIT 1;
+----
+A
+
+statement ok
+DETACH sweep;
+
+# invalid option values are rejected at ATTACH time
+statement error
+ATTACH 'salesforce://bad1' AS bad1 (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', query_mode 'wrong');
+----
+
+statement error
+ATTACH 'salesforce://bad2' AS bad2 (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', transport 'pigeon');
+----
+
+statement error
+ATTACH 'salesforce://bad3' AS bad3 (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', bulk_chunks 99);
+----
+
+# unknown option still rejected (list grew, strictness kept)
+statement error
+ATTACH 'salesforce://bad4' AS bad4 (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', typo_opt 1);
+----
+

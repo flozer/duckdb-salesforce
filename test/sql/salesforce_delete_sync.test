@@ -1,0 +1,48 @@
+# name: test/sql/salesforce_delete_sync.test
+# description: P2.2 cycle 2 -- salesforce_deleted_ids. Two sources by window:
+#              <= 15 min uses Replication API getDeleted() (exact deleted_date,
+#              source='getDeleted'); wider windows fall back to a queryAll
+#              IsDeleted scan (deleted_date NULL, source='queryAll'). Mock-only.
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Lead","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Lead","fields":[{"name":"Id","type":"id","filterable":true}]}';
+
+# === narrow window -> getDeleted; the router matches /deleted/ to the count
+# sequence (shared with COUNT fixtures) ===
+statement ok
+SET sf_mock_count_body = '{"deletedRecords":[{"id":"00Q1","deletedDate":"2026-09-30T10:00:00.000Z"},{"id":"00Q2","deletedDate":"2026-09-30T11:30:00.000Z"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query TT
+SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-30T10:00:00', until := '2026-09-30T10:05:00') ORDER BY id;
+----
+00Q1	2026-09-30T10:00:00
+00Q2	2026-09-30T11:30:00
+
+# wide window -> queryAll fallback: the path matches /queryAll, which routes
+# to the queryAll sequence (sf_mock_queryall_body)
+statement ok
+SET sf_mock_queryall_body = '{"done":true,"records":[{"Id":"00Q1"},{"Id":"00Q9"}]}';
+
+query TT
+SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-01T00:00:00') ORDER BY id;
+----
+00Q1	NULL
+00Q9	NULL
+
+statement ok
+DETACH sf;

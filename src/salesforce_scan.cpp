@@ -326,6 +326,10 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 	if (transport != "rest" && transport != "bulk" && transport != "auto") {
 		throw BinderException("sf_force_transport must be 'rest', 'bulk' or 'auto' (got '%s').", transport);
 	}
+	// Per-catalog ATTACH override wins over the session setting.
+	if (!bind.config.transport.empty()) {
+		transport = StringUtil::Lower(bind.config.transport);
+	}
 
 	// Read mode (#v0.9 §1): 'query' (default) or 'queryAll' (incl. archived +
 	// soft-deleted). Applied to REST, Bulk, and the COUNT()/MIN-MAX probes.
@@ -336,6 +340,11 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 	}
 	if (query_mode != "query" && query_mode != "queryall") {
 		throw BinderException("sf_query_mode must be 'query' or 'queryAll' (got '%s').", query_mode);
+	}
+	// Per-catalog ATTACH override wins over the session setting (P2.2
+	// follow-up): concurrent catalogs on one connection cannot leak scan mode.
+	if (!bind.config.query_mode.empty()) {
+		query_mode = StringUtil::Lower(bind.config.query_mode);
 	}
 	gstate->query_all = (query_mode == "queryall");
 
@@ -592,7 +601,9 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 		// (quota-gated per job), streamed via §8.
 		int64_t chunks = 1;
 		Value cv;
-		if (context.TryGetCurrentSetting("sf_bulk_chunks", cv) && !cv.IsNull()) {
+		if (bind.config.bulk_chunks > 0) {
+			chunks = bind.config.bulk_chunks; // per-catalog ATTACH override
+		} else if (context.TryGetCurrentSetting("sf_bulk_chunks", cv) && !cv.IsNull()) {
 			chunks = cv.GetValue<int64_t>();
 		}
 		if (chunks < 1) {

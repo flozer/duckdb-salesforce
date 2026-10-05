@@ -13,6 +13,7 @@
 #include "salesforce_reldiag.hpp"
 #include "salesforce_aggregate.hpp"
 #include "salesforce_agg_optimizer.hpp"
+#include "salesforce_delete_sync.hpp"
 #include "salesforce_metadata.hpp"
 
 #include "duckdb.hpp"
@@ -253,6 +254,18 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// refresh (#v1.3 §10): clears the attached catalog's in-memory schema +
 	// object-listing cache so the next reference re-describes. Empty object =
 	// global; a named object clears only that object. No data/disk cache.
+	// Delete-sync primitive: ids deleted in the org within a window, so a
+	// watermark-based incremental load can pair its upsert with a delete
+	// sweep (deletes do not update SystemModstamp).
+	RegisterDescribed(loader, GetSalesforceDeletedIdsFunction(), {"catalog", "object"},
+	                  "Returns the ids deleted in the org for an sObject within a time window, so a "
+	                  "watermark-based incremental load can sweep deletes (deletes do not update "
+	                  "SystemModstamp). Windows up to 15 minutes use the Replication API getDeleted() "
+	                  "with exact deleted_date; wider windows fall back to a queryAll IsDeleted scan "
+	                  "(deleted_date NULL; the recycle bin holds rows ~15 days).",
+	                  {"SELECT * FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-30T00:00:00');"},
+	                  {"sync"});
+
 	RegisterDescribed(loader, GetSalesforceRefreshMetadataFunction(), {"catalog"},
 	                  "Invalidates the in-memory metadata cache of an attached catalog - the whole "
 	                  "catalog when no object is given, only the named object otherwise - so the next "

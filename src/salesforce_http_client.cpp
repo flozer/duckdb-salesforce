@@ -272,6 +272,12 @@ public:
 		if (request.url.find("/describe") != string::npos) {
 			return Step(describe_statuses_, describe_bodies_, describe_index_);
 		}
+		// Delete-sync (P2.2 cycle 2): GET /sobjects/<obj>/deleted/ -> count
+		// sequence (the deletedRecords fixture lives in sf_mock_count_body).
+		// Matched BEFORE /sobjects, which the deleted path also contains.
+		if (request.url.find("/deleted/") != string::npos) {
+			return Step(count_statuses_, count_bodies_, count_index_);
+		}
 		if (request.url.find("/sobjects") != string::npos) {
 			return Step(global_statuses_, global_bodies_, global_index_);
 		}
