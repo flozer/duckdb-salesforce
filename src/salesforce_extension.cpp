@@ -11,8 +11,10 @@
 #include "salesforce_quota.hpp"
 #include "salesforce_diag.hpp"
 #include "salesforce_reldiag.hpp"
+#include "salesforce_scan.hpp"
 #include "salesforce_aggregate.hpp"
 #include "salesforce_agg_optimizer.hpp"
+#include "salesforce_bulk_resume.hpp"
 #include "salesforce_delete_sync.hpp"
 #include "salesforce_metadata.hpp"
 
@@ -279,6 +281,29 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                  "(deleted_date NULL; the recycle bin holds rows ~15 days).",
 	                  {"SELECT * FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-30T00:00:00');"},
 	                  {"sync"});
+
+	// User-callable scan (backlog B): salesforce_scan(catalog, object
+	// [, where]) with per-call named-parameter overrides (query_mode/
+	// transport/chunks). Schema from the describe at bind; plan pushdown and
+	// safety rules identical to catalog tables; where is validated raw SOQL.
+	RegisterDescribed(loader, GetSalesforceScanUserFunction(), {"catalog", "object", "where"},
+	                  "Scans an sObject directly using the credentials of an attached catalog, "
+	                  "without the catalog table layer. The optional where argument is raw SOQL "
+	                  "appended to the query (no ';', no nested SELECT); projection and plan "
+	                  "predicates push down as on catalog tables. Named parameters query_mode "
+	                  "('query'/'queryAll'), transport ('rest'/'bulk'/'auto') and chunks (1-8) "
+	                  "override per call without touching session settings.",
+	                  {"SELECT * FROM salesforce_scan('sf', 'Lead', where := 'Status 'Open'') LIMIT 10;"}, {"query"});
+
+	// Bulk job resume: re-stream the results of an existing Bulk API 2.0
+	// query job by id (recovery when a load dies mid-stream of a job that
+	// already completed server-side). Columns = the job's CSV header (VARCHAR).
+	RegisterDescribed(loader, GetSalesforceBulkResumeFunction(), {"catalog", "job_id"},
+	                  "Re-streams the result rows of an existing Bulk API 2.0 query job by id, so a "
+	                  "load that died mid-stream can resume without re-running the query. Columns "
+	                  "come from the job's CSV header (VARCHAR); rows stream page-by-page following "
+	                  "the Sforce-Locator. Read-only; invalid or expired job ids fail fast.",
+	                  {"SELECT * FROM salesforce_bulk_resume('sf', '7504x00000ABCDef');"}, {"bulk"});
 
 	RegisterDescribed(loader, GetSalesforceRefreshMetadataFunction(), {"catalog"},
 	                  "Invalidates the in-memory metadata cache of an attached catalog - the whole "

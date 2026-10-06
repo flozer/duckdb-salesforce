@@ -48,6 +48,7 @@ unique_ptr<FunctionData> SalesforceScanBindData::Copy() const {
 	r->explain_filters = explain_filters;
 	r->explain_captured = explain_captured;
 	r->pushed_aggregates = pushed_aggregates;
+	r->raw_where = raw_where;
 	return std::move(r);
 }
 
@@ -99,6 +100,9 @@ struct ScanGlobalState : public GlobalTableFunctionState {
 	// through `agg_emit_fields` (aliases a0..aN; nulls pass through as NULL,
 	// which is the correct empty-org answer for MIN/MAX — COUNT terms are
 	// null-validated in InitGlobal), then stops.
+	// Combined server-side WHERE (plan-pushed + raw user where), fixed at
+	// InitGlobal and reused by the COUNT()/aggregate pushdowns and diagnostics.
+	string combined_where;
 	bool agg_only = false;
 	string agg_record;
 	vector<SalesforceField> agg_emit_fields;
@@ -312,7 +316,16 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 	//
 	// LIMIT pushdown is not wired: this DuckDB build does not expose the query
 	// LIMIT to a table function, so LIMIT is applied residually by DuckDB.
-	string soql = BuildSelectSoql(bind.object, select_fields, bind.pushed_where, optional_idx());
+	// Raw user SOQL predicate (salesforce_scan(catalog, object, where)):
+	// AND-ed with the plan-pushed predicates so the COUNT()/aggregate pushdowns
+	// and the diagnostics below all see the combined server-side WHERE. (bind
+	// is const here; the combined WHERE lives in the global state.)
+	string pushed_where = bind.pushed_where;
+	if (!bind.raw_where.empty()) {
+		pushed_where = pushed_where.empty() ? bind.raw_where : pushed_where + " AND " + bind.raw_where;
+	}
+	gstate->combined_where = pushed_where;
+	string soql = BuildSelectSoql(bind.object, select_fields, gstate->combined_where, optional_idx());
 	SetLastSoql(soql);
 
 	// Transport: 'rest' (default, lazy), 'bulk' (Bulk API 2.0), or 'auto' (probe
@@ -427,7 +440,7 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 		// so pages = 0, rows = 1, and the count family was served server-side.
 		DiagRecordScan(bind.object, agg_soql, "rest", 1, "aggregate pushdown",
 		               static_cast<int64_t>(bind.pushed_aggregates.size()), static_cast<int64_t>(bind.fields.size()),
-		               bind.pushed_filter_count, bind.residual_filter_count, bind.pushed_where, false, 0, true,
+		               bind.pushed_filter_count, bind.residual_filter_count, gstate->combined_where, false, 0, true,
 		               gstate->query_all ? "queryAll" : "query");
 		vector<DiagExplainItem> items;
 		for (const auto &pa : bind.pushed_aggregates) {
@@ -473,8 +486,8 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 				// COUNT() with the SAME pushed WHERE, so the estimate matches
 				// what the scan will read. One REST call, zero row egress.
 				string count_soql = "SELECT COUNT() FROM " + bind.object;
-				if (!bind.pushed_where.empty()) {
-					count_soql += " WHERE " + bind.pushed_where;
+				if (!gstate->combined_where.empty()) {
+					count_soql += " WHERE " + gstate->combined_where;
 				}
 				int64_t n = 0;
 				if (gstate->session->TryEstimateCount(count_soql, n)) {
@@ -512,7 +525,7 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 	// sf_bulk_require_predicate is enabled, fail fast before creating the job so
 	// a planned large backfill must prove a pushed CreatedDate/SystemModstamp
 	// window first.
-	if (effective == "bulk" && bind.pushed_where.empty()) {
+	if (effective == "bulk" && gstate->combined_where.empty()) {
 		Value rpv;
 		if (context.TryGetCurrentSetting("sf_bulk_require_predicate", rpv) && !rpv.IsNull() && rpv.GetValue<bool>()) {
 			throw BinderException("Bulk read on '%s' has no pushed predicate (full-object extraction). "
@@ -532,8 +545,8 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 	int64_t reported_pages = 0;
 	if (aggregate_only && bind.residual_filter_count == 0 && effective != "bulk") {
 		string count_soql = "SELECT COUNT() FROM " + bind.object;
-		if (!bind.pushed_where.empty()) {
-			count_soql += " WHERE " + bind.pushed_where;
+		if (!gstate->combined_where.empty()) {
+			count_soql += " WHERE " + gstate->combined_where;
 		}
 		int64_t n = 0;
 		if (gstate->session->TryEstimateCount(count_soql, n)) {
@@ -551,7 +564,7 @@ static unique_ptr<GlobalTableFunctionState> ScanInitGlobal(ClientContext &contex
 	// pages = 0 for REST/COUNT, NULL (-1) for Bulk (Bulk paging is internal).
 	DiagRecordScan(bind.object, reported_soql, effective, est_rows, reason, static_cast<int64_t>(select_fields.size()),
 	               static_cast<int64_t>(bind.fields.size()), bind.pushed_filter_count, bind.residual_filter_count,
-	               bind.pushed_where, effective == "bulk", reported_pages, gstate->count_only,
+	               gstate->combined_where, effective == "bulk", reported_pages, gstate->count_only,
 	               gstate->query_all ? "queryAll" : "query");
 
 	// Explain capture (#v1.6, diagnostic-only). Written AFTER DiagRecordScan
@@ -1006,6 +1019,34 @@ TableFunction GetSalesforceScanFunction() {
 	TableFunction fn("salesforce_scan", {}, ScanFunction, ScanBind, ScanInitGlobal, ScanInitLocal);
 	fn.projection_pushdown = true;                          // DuckDB-level column projection
 	fn.pushdown_complex_filter = ScanPushdownComplexFilter; // SOQL WHERE, residual-safe
+	return fn;
+}
+
+// User-callable scan (cycle 2 backlog B): same engine, user-side bind. The
+// wrapper adapts the generic bind signature to the user-bind builder; the
+// where string is combined into the SOQL at InitGlobal (see InitGlobal's
+// raw_where handling). Projection/predicate pushdown identical.
+static unique_ptr<FunctionData> ScanUserBind(ClientContext &context, TableFunctionBindInput &input,
+                                             vector<LogicalType> &return_types, vector<string> &names) {
+	// The user bind defines its own output schema from the describe; the
+	// builder returns the bind data and the schema is (re)derived by the same
+	// code path the catalog entry uses (fields -> column_names/types), so we
+	// overwrite the bind-data supplied schema here.
+	auto bind_data = BuildUserScanBindData(context, input);
+	return_types = bind_data->column_types;
+	names = bind_data->column_names;
+	return std::move(bind_data);
+}
+
+TableFunction GetSalesforceScanUserFunction() {
+	TableFunction fn("salesforce_scan", {LogicalType::VARCHAR, LogicalType::VARCHAR}, ScanFunction, ScanUserBind,
+	                 ScanInitGlobal, ScanInitLocal);
+	fn.projection_pushdown = true;
+	fn.pushdown_complex_filter = ScanPushdownComplexFilter;
+	fn.named_parameters["filter"] = LogicalType::VARCHAR;
+	fn.named_parameters["query_mode"] = LogicalType::VARCHAR;
+	fn.named_parameters["transport"] = LogicalType::VARCHAR;
+	fn.named_parameters["chunks"] = LogicalType::BIGINT;
 	return fn;
 }
 

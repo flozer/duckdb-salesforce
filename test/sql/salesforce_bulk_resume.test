@@ -1,0 +1,44 @@
+# name: test/sql/salesforce_bulk_resume.test
+# description: P2.2 backlog A -- salesforce_bulk_resume(catalog, job_id)
+#              re-streams the CSV result pages of an existing Bulk API 2.0
+#              query job (locator-following); columns from the CSV header
+#              (VARCHAR); invalid job ids fail fast. Mock-only.
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true}]}';
+
+# results: single page (the mock's locator sequence is per-client; bind and
+# init build separate clients, so a loc-2 fixture would repeat page 1).
+# Locator-following itself is covered by the salesforce_bulk tests.
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Name
+001,A
+002,B';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === resume streams the job's rows, columns from the CSV header =============
+query TT
+SELECT Id, Name FROM salesforce_bulk_resume('sf', '7504x00000ABCDef') ORDER BY Id;
+----
+001	A
+002	B
+
+# === invalid job id fails at bind ===========================================
+statement error
+SELECT * FROM salesforce_bulk_resume('sf', 'not-a-job');
+----
+
+
+statement ok
+DETACH sf;

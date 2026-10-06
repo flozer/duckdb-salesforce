@@ -51,6 +51,11 @@ struct SalesforceScanBindData : public FunctionData {
 		SalesforceField emit;
 	};
 	vector<SalesforcePushedAggregate> pushed_aggregates;
+	// Raw user SOQL predicate (salesforce_scan(catalog, object, where) user
+	// function; cycle 2 backlog B): appended to pushed_where at InitGlobal.
+	// Validated at bind (no ';', no nested SELECT, <= 4000 chars). Empty for
+	// catalog-table scans.
+	string raw_where;
 
 	unique_ptr<FunctionData> Copy() const override;
 	bool Equals(const FunctionData &other) const override;
@@ -59,5 +64,17 @@ struct SalesforceScanBindData : public FunctionData {
 // The catalog scan TableFunction. Used only via the catalog (bind_data is
 // pre-built by GetScanFunction); calling it standalone is unsupported.
 TableFunction GetSalesforceScanFunction();
+
+// User-callable scan (cycle 2 backlog B): salesforce_scan(catalog, object
+// [, where]) with per-call named-parameter overrides (query_mode/transport/
+// chunks). Schema from the sObject describe at bind (flat fields; no
+// relationship STRUCT expansion - use catalog tables for that). Plan
+// pushdown + safety rules identical to catalog tables.
+TableFunction GetSalesforceScanUserFunction();
+
+// Bind-time builder for the user-callable scan (implemented in
+// salesforce_scan_user.cpp): creds from the attached catalog, describe at
+// bind, per-call overrides, raw where validated.
+unique_ptr<SalesforceScanBindData> BuildUserScanBindData(ClientContext &context, TableFunctionBindInput &input);
 
 } // namespace duckdb
