@@ -21,6 +21,7 @@ include_directories(src/include)
 set(EXTENSION_SOURCES
     src/salesforce_extension.cpp
     src/salesforce_agg_optimizer.cpp
+    src/salesforce_delete_sync.cpp
     src/salesforce_storage.cpp
     src/salesforce_config.cpp
     src/salesforce_auth.cpp

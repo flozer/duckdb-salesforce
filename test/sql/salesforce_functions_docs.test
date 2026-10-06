@@ -7,7 +7,7 @@
 
 require salesforce
 
-# All 25 registered functions (24 table + 1 scalar) carry a description and at
+# All 26 registered functions (25 table + 1 scalar) carry a description and at
 # least one example. Update both counts when adding a function.
 query II
 SELECT count(*) AS total,
@@ -15,7 +15,7 @@ SELECT count(*) AS total,
 FROM duckdb_functions()
 WHERE function_name LIKE 'salesforce%' OR function_name = 'sf_url_encode'
 ----
-25	25
+26	26
 
 # No positional parameter keeps the col0/col1 placeholder name (issue metric:
 # real parameter names on every function that takes arguments).

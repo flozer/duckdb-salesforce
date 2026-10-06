@@ -223,10 +223,13 @@ SalesforceConfig SalesforceConfig::ParseAndValidate(const string &path, AttachIn
 		if (!StringUtil::CIEquals(key, "auth_source") && !StringUtil::CIEquals(key, "client_id") &&
 		    !StringUtil::CIEquals(key, "client_secret") && !StringUtil::CIEquals(key, "refresh_token") &&
 		    !StringUtil::CIEquals(key, "username") && !StringUtil::CIEquals(key, "private_key_file") &&
-		    !StringUtil::CIEquals(key, "login_url") && !StringUtil::CIEquals(key, "api_version")) {
+		    !StringUtil::CIEquals(key, "login_url") && !StringUtil::CIEquals(key, "api_version") &&
+		    !StringUtil::CIEquals(key, "query_mode") && !StringUtil::CIEquals(key, "transport") &&
+		    !StringUtil::CIEquals(key, "bulk_chunks")) {
 			throw BinderException("salesforce ATTACH: unknown option '%s'. Valid options: "
 			                      "auth_source, client_id, client_secret, refresh_token, "
-			                      "username, private_key_file, login_url, api_version.",
+			                      "username, private_key_file, login_url, api_version, "
+			                      "query_mode, transport, bulk_chunks.",
 			                      key);
 		}
 		opts[key] = kv.second.ToString();
@@ -301,6 +304,34 @@ SalesforceConfig SalesforceConfig::ParseAndValidate(const string &path, AttachIn
 		cfg.api_version = NormaliseApiVersion(ver_it->second);
 	} else {
 		cfg.api_version = kDefaultApiVersion;
+	}
+
+	// --- per-catalog scan overrides (P2.2 follow-up: no session leaks) ------
+	auto qm = opts.find("query_mode");
+	if (qm != opts.end() && !Trimmed(qm->second).empty()) {
+		cfg.query_mode = StringUtil::Lower(Trimmed(qm->second));
+		if (cfg.query_mode != "query" && cfg.query_mode != "queryall") {
+			throw BinderException("salesforce ATTACH: query_mode must be 'query' or 'queryAll' (got '%s').",
+			                      qm->second);
+		}
+		if (cfg.query_mode == "queryall") {
+			cfg.query_mode = "queryAll";
+		}
+	}
+	auto tp = opts.find("transport");
+	if (tp != opts.end() && !Trimmed(tp->second).empty()) {
+		cfg.transport = StringUtil::Lower(Trimmed(tp->second));
+		if (cfg.transport != "rest" && cfg.transport != "bulk" && cfg.transport != "auto") {
+			throw BinderException("salesforce ATTACH: transport must be 'rest', 'bulk' or 'auto' (got '%s').",
+			                      tp->second);
+		}
+	}
+	auto bc = opts.find("bulk_chunks");
+	if (bc != opts.end() && !Trimmed(bc->second).empty()) {
+		cfg.bulk_chunks = std::strtoll(Trimmed(bc->second).c_str(), nullptr, 10);
+		if (cfg.bulk_chunks < 1 || cfg.bulk_chunks > 8) {
+			throw BinderException("salesforce ATTACH: bulk_chunks must be between 1 and 8 (got '%s').", bc->second);
+		}
 	}
 
 	return cfg;

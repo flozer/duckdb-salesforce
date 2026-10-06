@@ -894,7 +894,7 @@ SET sf_relationship_depth = 2;
 SELECT Account.Owner.Name FROM sf.Contact LIMIT 10;
 ```
 
-### `sf_query_mode`
+### `salesforce_deleted_ids(catalog, object [, since] [, until])`
 
 #
 
@@ -905,6 +905,51 @@ com uma varredura periódica de deletados: `SET sf_query_mode = 'queryAll';
 SELECT Id FROM sf.Object WHERE IsDeleted = true` (as linhas ficam varríveis
 por ~15 dias), ou use a API de replicação getDeleted() do Salesforce para
 timestamps exatos de deleção.
+
+### O que faz
+
+Retorna os ids deletados na org para um sObject dentro de uma janela de tempo —
+o primitivo de sincronia que cargas incrementais por watermark precisam, porque
+**deletes não atualizam `SystemModstamp`**.
+
+#### Como funciona
+
+- Argumentos: `catalog` anexado, `object`; parâmetros nomeados opcionais
+  `since` / `until` em ISO-8601 (padrão: últimos 15 minutos até agora).
+- Janela ≤ 15 minutos: atendida pela API de replicação `getDeleted()` —
+  `deleted_date` exato por id, `source = 'getDeleted'`.
+- Janela maior: um scan `queryAll` (`WHERE IsDeleted = true AND SystemModstamp
+  >= since`) — `deleted_date` é NULL (o Salesforce não expõe o timestamp de
+  deleção ali), `source = 'queryAll'`; a lixeira retém linhas por ~15 dias,
+  então varra periodicamente.
+- Colunas de saída: `id`, `deleted_date`, `source`.
+
+#### Para que serve
+
+O padrão de upsert por watermark perde deletes silenciosamente (a deleção não
+avança o stamp). Combine-o com uma varredura periódica: faça o upsert das
+linhas alteradas e depois marque/remova os ids que esta função retorna.
+
+#### Uso no dia a dia
+
+```sql
+-- janela exata (getDeleted)
+SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead',
+    since := '2026-09-30T00:00:00', until := '2026-09-30T00:15:00');
+
+-- horizonte maior (varredura queryAll, retenção ~15 dias)
+SELECT id FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-20T00:00:00');
+```
+
+### `sf_query_mode`
+
+#
+
+**Overrides por catálogo no ATTACH:** `query_mode`, `transport` e `bulk_chunks`
+também podem ser definidos como opções do ATTACH — `ATTACH 'salesforce://org'
+AS sf (TYPE salesforce, ..., query_mode 'queryAll')` — e valem apenas para
+aquele catálogo, independente das settings de sessão (catálogos concorrentes na
+mesma conexão não vazam modo de scan entre si).
 
 ### O que faz
 

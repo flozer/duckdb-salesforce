@@ -145,20 +145,55 @@ SalesforceQuotaSnapshot SalesforceSession::QueryLimits() {
 	return s;
 }
 
+// Remedy hints for the well-known Salesforce error codes (consumer feedback
+// #5): each hint names the diagnostic surface or the concrete fix, in the same
+// spirit as the blob/TLS/quota errors. Secret-free by construction.
+static string SalesforceRemedyHint(const string &code, int status) {
+	if (code == "INVALID_SESSION_ID") {
+		return "session re-authenticated once already; if this recurs, the refresh "
+		       "token may have been revoked - re-issue it from the Connected App";
+	}
+	if (code == "REQUEST_LIMIT_EXCEEDED") {
+		return "daily API quota exhausted - inspect salesforce_last_quota() and "
+		       "salesforce_query_cost() to find the over-fetching scan";
+	}
+	if (code == "QUERY_TIMEOUT") {
+		return "query too selective for Salesforce - add a pushed filter on an "
+		       "indexed field (check salesforce_query_explain() for residual filters)";
+	}
+	if (code == "INVALID_FIELD") {
+		return "field unknown to this sObject - check salesforce_metadata_fields()";
+	}
+	if (code == "INVALID_TYPE") {
+		return "object unknown or not queryable - check salesforce_metadata_objects()";
+	}
+	if (code == "OPERATION_TOO_LARGE" || code == "ENTITY_NOT_QUERYABLE") {
+		return "object not supported by this API path - try sf_force_transport "
+		       "adjustments or a narrower window";
+	}
+	if (status == 429) {
+		return "rate limited - the client retries automatically; consider raising "
+		       "sf_retry_backoff_ms";
+	}
+	return "";
+}
+
 string SalesforceSession::AuthorizedGet(const string &path) {
 	HttpResponse resp = AuthorizedSend(false, path, "");
 	if (resp.status == 200) {
 		return resp.body;
 	}
 	// Salesforce REST errors come back as [{"errorCode":"...","message":"..."}].
-	// Surface only those fields — never the body wholesale, never a secret.
+	// Surface only those fields — never the body wholesale, never a secret —
+	// plus a remedy hint for the well-known codes (consumer feedback #5).
 	string code = sfjson::GetString(resp.body, "errorCode");
 	string msg = sfjson::GetString(resp.body, "message");
 	if (code.empty()) {
 		code = "error";
 	}
-	throw IOException("salesforce: request to %s failed (HTTP %d): %s%s%s.", path, resp.status, code,
-	                  msg.empty() ? "" : " - ", msg);
+	string hint = SalesforceRemedyHint(code, resp.status);
+	throw IOException("salesforce: request to %s failed (HTTP %d): %s%s%s%s%s.", path, resp.status, code,
+	                  msg.empty() ? "" : " - ", msg, hint.empty() ? "" : " HINT: ", hint);
 }
 
 bool SalesforceSession::TryEstimateCount(const string &count_soql, int64_t &out_rows) {

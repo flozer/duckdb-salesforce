@@ -132,6 +132,17 @@ public:
 	// /services/data/<api_version>/query?q=<url-encoded>.
 	string QueryPath(const string &soql) const;
 
+	// Raw API version of the owning config ("vNN.N"). Read-only surface for
+	// session helpers that build non-query endpoints (delete-sync).
+	string ApiVersion() const {
+		return config_.api_version;
+	}
+
+	// Authenticated GET returning the 200 body, or throwing a clear,
+	// secret-free error (errorCode/message surfaced). Used by describe/query
+	// and by non-query helpers (delete-sync).
+	string AuthorizedGet(const string &path);
+
 	// Fetch ONE page — the initial query path or an opaque nextRecordsUrl —
 	// authenticated GET with 401 -> refresh -> retry. The caller owns
 	// pagination state + loop guards (the lazy scan in #11 uses this).
@@ -176,10 +187,6 @@ private:
 	// response (status + body + headers); the caller decides what is an error.
 	// Authorization is never logged.
 	HttpResponse AuthorizedSend(bool post, const string &path, const string &json_body);
-
-	// Authenticated GET returning the 200 body, or throwing a clear,
-	// secret-free error (used by describe/query).
-	string AuthorizedGet(const string &path);
 
 	SalesforceConfig config_;
 	SalesforceHttpClient &client_;
