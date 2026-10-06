@@ -1,0 +1,68 @@
+# name: test/sql/salesforce_scan_user.test
+# description: P2.2 backlog B -- user-callable salesforce_scan(catalog, object
+#              [, where]) with per-call named-parameter overrides
+#              (query_mode/transport/chunks). where is validated raw SOQL
+#              appended server-side; projection pushdown applies. Mock-only.
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Lead","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Lead","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true},{"name":"Company","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"00Q1","Name":"Alice","Company":"Acme"},{"Id":"00Q2","Name":"Bob","Company":"Bravo"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# === basic scan: schema from describe, rows streamed =========================
+query TT
+SELECT Name, Company FROM salesforce_scan('sf', 'Lead') ORDER BY Name;
+----
+Alice	Acme
+Bob	Bravo
+
+# === where: validated raw SOQL, appended server-side ========================
+# (the mock ignores WHERE and returns both records; the SOQL assertion is the
+# contract - the filter was pushed into the server-side query)
+query T
+SELECT Name FROM salesforce_scan('sf', 'Lead', filter := 'Company = ''Acme''');
+----
+Alice
+Bob
+
+query T
+SELECT soql FROM salesforce_last_soql();
+----
+SELECT Name FROM LEAD WHERE Company = 'Acme'
+
+# === per-call query_mode override (queryAll sequence) ========================
+statement ok
+SET sf_mock_queryall_body = '{"done":true,"records":[{"Id":"00Q1","Name":"Alice"},{"Id":"00Q2","Name":"Bob"},{"Id":"00Q3","Name":"Gone","IsDeleted":true}]}';
+
+query I
+SELECT count(*) FROM salesforce_scan('sf', 'Lead', query_mode := 'queryAll');
+----
+3
+
+# === where safety: ';' and nested SELECT rejected ===========================
+statement error
+SELECT * FROM salesforce_scan('sf', 'Lead', filter := 'Id = ''x''; DELETE');
+----
+
+statement error
+SELECT * FROM salesforce_scan('sf', 'Lead', filter := 'Id IN (SELECT Id FROM User)');
+----
+
+statement ok
+DETACH sf;
