@@ -92,6 +92,9 @@ enum class Method { GET, POST };
 
 class LiveHttpClient final : public SalesforceHttpClient {
 public:
+	LiveHttpClient(int retry_max, int backoff_ms) : retry_max_(retry_max), backoff_ms_(backoff_ms) {
+	}
+
 	HttpResponse Post(const HttpRequest &request) override {
 		return Send(Method::POST, request);
 	}
@@ -100,8 +103,14 @@ public:
 	}
 
 private:
-	static void Backoff(int attempt) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(200 * attempt));
+	// Transient-failure retry tuning (sf_retry_max / sf_retry_backoff_ms):
+	// attempts for 429/5xx/connection errors, and the linear backoff base
+	// (sleep = backoff_ms * attempt).
+	int retry_max_;
+	int backoff_ms_;
+
+	void Backoff(int attempt) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(backoff_ms_) * attempt));
 	}
 
 	static HttpResponse TransportError(const string &msg) {
@@ -127,8 +136,8 @@ private:
 			}
 		}
 
-		constexpr int kMaxAttempts = 3;
-		for (int attempt = 1; attempt <= kMaxAttempts; attempt++) {
+		const int max_attempts = retry_max_;
+		for (int attempt = 1; attempt <= max_attempts; attempt++) {
 			httplib::SSLClient cli(url.host, url.port);
 			cli.set_connection_timeout(10, 0);
 			cli.set_read_timeout(60, 0);
@@ -140,7 +149,7 @@ private:
 			                                               : cli.Get(url.path, headers);
 
 			if (res) {
-				if (IsTransientStatus(res->status) && attempt < kMaxAttempts) {
+				if (IsTransientStatus(res->status) && attempt < max_attempts) {
 					Backoff(attempt);
 					continue;
 				}
@@ -170,7 +179,7 @@ private:
 				return TransportError("TLS certificate verification failed");
 #endif
 			}
-			if (attempt < kMaxAttempts) {
+			if (attempt < max_attempts) {
 				Backoff(attempt);
 				continue;
 			}
@@ -391,8 +400,8 @@ static string SettingStr(ClientContext &ctx, const char *key) {
 
 } // namespace
 
-unique_ptr<SalesforceHttpClient> CreateLiveHttpClient() {
-	return make_uniq_base<SalesforceHttpClient, LiveHttpClient>();
+unique_ptr<SalesforceHttpClient> CreateLiveHttpClient(int retry_max, int backoff_ms) {
+	return make_uniq_base<SalesforceHttpClient, LiveHttpClient>(retry_max, backoff_ms);
 }
 
 unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &context) {
@@ -469,7 +478,20 @@ unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &contex
 		    std::move(c_status), std::move(c_body), std::move(l_status), std::move(l_body), std::move(t_status),
 		    std::move(t_body), std::move(qa_status), std::move(qa_body), std::move(bulk), std::move(report));
 	}
-	return CreateLiveHttpClient();
+	// Transient-retry tuning, read once per client (clients are built per scan).
+	int retry_max = static_cast<int>(SettingInt(context, "sf_retry_max", 3));
+	if (retry_max < 1) {
+		retry_max = 1;
+	} else if (retry_max > 10) {
+		retry_max = 10;
+	}
+	int backoff_ms = static_cast<int>(SettingInt(context, "sf_retry_backoff_ms", 200));
+	if (backoff_ms < 0) {
+		backoff_ms = 0;
+	} else if (backoff_ms > 60000) {
+		backoff_ms = 60000;
+	}
+	return CreateLiveHttpClient(retry_max, backoff_ms);
 }
 
 } // namespace duckdb
