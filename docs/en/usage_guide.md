@@ -744,6 +744,65 @@ Scope and caveats:
   snapshot — it only exposes the Salesforce read capability for that scan.
 - The `salesforce_query()` utility is query-only and ignores this setting.
 
+### 11.1 The delete-sync pattern for incremental loads
+
+**Deletes do not update `SystemModstamp`.** A watermark-based incremental
+load (`WHERE SystemModstamp > :last_watermark`) never notices them — deleted
+rows stay alive in your target table forever. Pair the watermark with a
+periodic delete sweep:
+
+```sql
+-- option 1: delete sweep via queryAll (server-side predicate; rows stay
+-- sweepable for ~15 days in the recycle bin)
+SET sf_query_mode='queryAll';
+SELECT Id FROM sf.Lead WHERE IsDeleted = true;
+-- -> mark `is_deleted = true` (or delete) these ids in your target, then
+--    reset sf_query_mode='query'
+
+-- option 2: exact window via the Replication API (getDeleted), with
+-- deletion timestamps (windows up to 15 minutes per call)
+SELECT id, deleted_date, source
+FROM salesforce_deleted_ids('sf', 'Lead',
+    since := '2026-09-30T00:00:00', until := '2026-09-30T00:15:00');
+
+-- longer horizon: queryAll fallback, deleted_date is NULL (~15-day retention)
+SELECT id FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-20T00:00:00');
+```
+
+Run the sweep on a schedule (e.g. daily): upsert the changed rows from the
+watermark load, then mark/remove the ids the sweep returns.
+
+### 11.2 Direct scans without the catalog layer
+
+`salesforce_scan(catalog, object)` scans an sObject using an attached
+catalog's credentials — useful for per-query configuration without touching
+session settings (e.g. from orchestrators that share connections):
+
+```sql
+-- raw SOQL predicate appended server-side (validated: no ';', no nested
+-- SELECT, <= 4000 chars)
+SELECT Name FROM salesforce_scan('sf', 'Lead', filter := 'Status = ''Open''')
+LIMIT 10;
+
+-- per-call mode/transport/chunks overrides
+SELECT count(*) FROM salesforce_scan('sf', 'Lead', query_mode := 'queryAll');
+SELECT Id FROM salesforce_scan('sf', 'Account', transport := 'bulk', chunks := 4);
+```
+
+Projection and plan-predicate pushdown work exactly as on catalog tables,
+and the generated SOQL is visible via `salesforce_last_soql()`.
+
+### 11.3 Resuming a completed Bulk job
+
+If a load dies mid-stream of a Bulk job that already completed server-side,
+`salesforce_bulk_resume(catalog, job_id)` re-streams the result rows without
+re-running the query. Columns come from the job's CSV header (VARCHAR):
+
+```sql
+SELECT Id, Name
+FROM salesforce_bulk_resume('sf', '7504x00000ABCDef');
+```
+
 ## 12. Diagnostics
 
 The extension ships user-facing table functions that explain what the last

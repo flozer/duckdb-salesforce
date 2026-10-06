@@ -894,6 +894,36 @@ SET sf_relationship_depth = 2;
 SELECT Account.Owner.Name FROM sf.Contact LIMIT 10;
 ```
 
+### `salesforce_bulk_resume(catalog, job_id)`
+
+#### O que faz
+
+Re-emite as linhas de resultado de um job de consulta Bulk API 2.0 existente,
+por id — o caminho de recuperação quando uma carga morre no meio do stream de
+um job que já concluiu no Salesforce (o retry não recria o job nem reexecuta a
+consulta).
+
+#### Como funciona
+
+- Argumentos: `catalog` anexado, `job_id` do Bulk (15-32 caracteres
+  alfanuméricos).
+- A primeira página de resultados é buscada no bind; o header CSV define o
+  schema de saída (uma coluna VARCHAR por campo — o CSV do Bulk não traz tipos).
+- As linhas fazem stream página a página seguindo o Sforce-Locator.
+- Ids de job inválidos ou expirados falham rápido com o errorCode + dica.
+
+#### Para que serve
+
+Uma carga Bulk que morre no meio do stream não força mais a reexecução
+completa: aponte esta função para o job concluído e continue.
+
+#### Uso no dia a dia
+
+```sql
+SELECT Id, Name
+FROM salesforce_bulk_resume('sf', '7504x00000ABCDef');
+```
+
 ### `salesforce_deleted_ids(catalog, object [, since] [, until])`
 
 #

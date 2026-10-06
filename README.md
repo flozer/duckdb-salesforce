@@ -254,7 +254,7 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.18.0** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
+Own-repo release: **v0.19.0** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
 Community baseline: **v0.15.0**, merged in
 [`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710);
 the `v0.15.1` update was submitted as
@@ -293,6 +293,9 @@ resolves a report's base object from the official `reportTypeMetadata`.
 | Official DuckDB v1.5.6 support declaration | Done (CI matrix v1.5.4/v1.5.5/v1.5.6 × 3 platforms; release-assets build against v1.5.6) |
 | Relationship-graph child recursion (`max_depth`) | Done (P2.3) |
 | Report Bridge base object via `reportTypeMetadata` (cut 2) | Done (P2.2) |
+| Delete sync (`salesforce_deleted_ids`: getDeleted + queryAll sweep) | Done |
+| Bulk job resume (`salesforce_bulk_resume(catalog, job_id)`) | Done |
+| User-callable `salesforce_scan(catalog, object [, filter])` with per-call overrides | Done |
 | DuckDB 2.0 support | Future: tracked for when 2.0 ships GA (pass already dual-compiles; migration surface mapped) |
 | Salesforce writes / Metadata API deploy | Out of scope |
 

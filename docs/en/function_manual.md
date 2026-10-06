@@ -792,6 +792,35 @@ SET sf_relationship_depth = 2;
 SELECT Account.Owner.Name FROM sf.Contact LIMIT 10;
 ```
 
+### `salesforce_bulk_resume(catalog, job_id)`
+
+#### What it does
+
+Re-streams the result rows of an existing Bulk API 2.0 query job by id — the
+recovery path when a load dies mid-stream of a job that already completed
+server-side (the retry does not re-create the job or re-run the query).
+
+#### How it works
+
+- Arguments: attached `catalog`, Bulk `job_id` (15-32 alphanumeric chars).
+- The first result page is fetched at bind; its CSV header defines the output
+  schema (one VARCHAR column per field — Bulk CSV carries no type metadata).
+- Rows stream lazily page-by-page following the Sforce-Locator.
+- Invalid or expired job ids fail fast with the surfaced errorCode + remedy
+  hint.
+
+#### Why use it
+
+A Bulk load that dies mid-stream no longer forces a full re-run: point this
+function at the completed job and keep going.
+
+#### Daily use
+
+```sql
+SELECT Id, Name
+FROM salesforce_bulk_resume('sf', '7504x00000ABCDef');
+```
+
 ### `salesforce_deleted_ids(catalog, object [, since] [, until])`
 
 #

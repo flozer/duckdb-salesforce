@@ -1057,6 +1057,66 @@ Caveat: isto **não** é histórico, CDC nem replicação, e não é um snapshot
 local — apenas expõe a capacidade de leitura do Salesforce naquele scan. A
 utility `salesforce_query()` é sempre `query` e ignora `sf_query_mode`.
 
+### 12.1 O padrão de delete-sync para cargas incrementais
+
+**Deletes não atualizam `SystemModstamp`.** Uma carga incremental por
+watermark (`WHERE SystemModstamp > :ultimo_watermark`) nunca os percebe — as
+linhas deletadas ficam vivas na tabela de destino para sempre. Combine o
+watermark com uma varredura periódica de deletados:
+
+```sql
+-- opção 1: varredura via queryAll (predicado server-side; as linhas ficam
+-- varríveis por ~15 dias na lixeira)
+SET sf_query_mode='queryAll';
+SELECT Id FROM sf.Lead WHERE IsDeleted = true;
+-- -> marque `is_deleted = true` (ou exclua) esses ids no destino e volte
+--    sf_query_mode='query'
+
+-- opção 2: janela exata pela API de replicação (getDeleted), com timestamp
+-- de deleção (janelas de até 15 minutos por chamada)
+SELECT id, deleted_date, source
+FROM salesforce_deleted_ids('sf', 'Lead',
+    since := '2026-09-30T00:00:00', until := '2026-09-30T00:15:00');
+
+-- horizonte maior: fallback queryAll, deleted_date NULL (retenção ~15 dias)
+SELECT id FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-20T00:00:00');
+```
+
+Agende a varredura (ex.: diária): faça o upsert das linhas alteradas pela
+carga por watermark e depois marque/remova os ids que a varredura retornar.
+
+### 12.2 Scans diretos sem a camada de catálogo
+
+`salesforce_scan(catalog, object)` faz um scan de um sObject usando as
+credenciais de um catálogo anexado — útil para configuração por consulta sem
+tocar nas settings de sessão (ex.: orquestradores que compartilham conexão):
+
+```sql
+-- predicado SOQL bruto anexado server-side (validado: sem ';', sem SELECT
+-- aninhado, <= 4000 caracteres)
+SELECT Name FROM salesforce_scan('sf', 'Lead', filter := 'Status = ''Open''')
+LIMIT 10;
+
+-- overrides de modo/transporte/chunks por chamada
+SELECT count(*) FROM salesforce_scan('sf', 'Lead', query_mode := 'queryAll');
+SELECT Id FROM salesforce_scan('sf', 'Account', transport := 'bulk', chunks := 4);
+```
+
+Projeção e pushdown de predicados do plano funcionam exatamente como nas
+tabelas de catálogo, e o SOQL gerado aparece em `salesforce_last_soql()`.
+
+### 12.3 Retomando um job Bulk concluído
+
+Se uma carga morre no meio do stream de um job Bulk que já concluiu no
+Salesforce, `salesforce_bulk_resume(catalog, job_id)` re-emite as linhas de
+resultado sem reexecutar a consulta. As colunas vêm do header CSV do job
+(VARCHAR):
+
+```sql
+SELECT Id, Name
+FROM salesforce_bulk_resume('sf', '7504x00000ABCDef');
+```
+
 ## 13. Report Bridge (opt-in)
 
 Liga **relatórios** do Salesforce ao DuckDB para descoberta e validação — não

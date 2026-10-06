@@ -12,6 +12,27 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.19.0](docs/RELEASE_NOTES_v0.19.0.md) — 2026-10-06
+
+- **`salesforce_deleted_ids(catalog, object [, since] [, until])`** (delete-sync
+  primitive #1): ids deleted in the org within a window — ≤ 15-minute windows
+  via Replication API `getDeleted()` (exact deleted_date), wider windows via a
+  queryAll `IsDeleted` scan (NULL date, ~15-day bin). Closes the watermark/
+  delete correctness gap (deletes never update `SystemModstamp`).
+- **`salesforce_bulk_resume(catalog, job_id)`** (#4): re-streams results of an
+  existing Bulk API 2.0 query job (recovery without re-running the query);
+  CSV-header schema (VARCHAR), lazy locator streaming.
+- **User-callable `salesforce_scan(catalog, object [, filter])`** (#3b) with
+  per-call named overrides (`query_mode`/`transport`/`chunks`) and a validated
+  raw `filter` (no ';'/SELECT, ≤ 4000 chars) AND-ed into the server-side WHERE.
+- **`sf_retry_max` / `sf_retry_backoff_ms`** (#2): transient-retry tuning
+  (was hardcoded 3 × 200 ms).
+- **Error remedy hints** (#5): well-known errorCodes surface with embedded
+  fix/diagnostic hints.
+- **Delete-sync pitfall docs** (#6) + usage-guide sections (delete sweep,
+  direct scans, job resume) + live delete-sweep smoke.
+- Minor bump (new features). Functions: 25 → 28 (guard 28/28).
+
 ## [v0.18.0](docs/RELEASE_NOTES_v0.18.0.md) — 2026-09-30
 
 - **Child-direction recursion** in `salesforce_relationship_graph` (P2.3):
