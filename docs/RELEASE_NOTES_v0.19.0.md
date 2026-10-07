@@ -104,6 +104,6 @@ Per-branch pre-merge runs also 9/9: #82 → 37382058302, #83 → 37389982231,
 
 - Community update: **submitted with maintainer OK** on 2026-10-06 —
   [duckdb/community-extensions#2948](https://github.com/duckdb/community-extensions/pull/2948)
-  (single jump v0.18.0 → v0.19.0, \`repo.ref\` pinned to \`af02412\`). The live
-  \`docs/community/description.yml\` mirror stays at v0.18.0 until that PR
+  (single jump v0.18.0 → v0.19.0, `repo.ref` pinned to `af02412`). The live
+  `docs/community/description.yml` mirror stays at v0.18.0 until that PR
   merges.
