@@ -102,8 +102,10 @@ Per-branch pre-merge runs also 9/9: #82 → 37382058302, #83 → 37389982231,
 
 ## Gates
 
-- Community update: **submitted with maintainer OK** on 2026-10-06 —
+- Community update: **MERGED** —
   [duckdb/community-extensions#2948](https://github.com/duckdb/community-extensions/pull/2948)
-  (single jump v0.18.0 → v0.19.0, `repo.ref` pinned to `af02412`). The live
-  `docs/community/description.yml` mirror stays at v0.18.0 until that PR
-  merges.
+  (2026-10-08, commit `73c8cffe`-prefix `73c8c95a`; single jump v0.18.0 →
+  v0.19.0, `repo.ref` pinned to `af02412`). The live
+  `docs/community/description.yml` mirror now carries the v0.19.0 descriptor:
+  `INSTALL salesforce FROM community;` serves this release, with official
+  support for DuckDB v1.5.4/v1.5.5/v1.5.6.

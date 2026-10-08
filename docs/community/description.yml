@@ -5,14 +5,14 @@
 # duckdb/community-extensions and open a PR. The community CI builds + signs the
 # extension for every supported platform from the pinned repo ref below.
 #
-# LIVE in duckdb/community-extensions. Current community ref: v0.18.0
-# (single jump from v0.15.1, merged via duckdb/community-extensions#2875,
-# 2026-10-01, commit 9b731ffecb8067b41f9d5d78d45fefa7f6a22b1c).
+# LIVE in duckdb/community-extensions. Current community ref: v0.19.0
+# (single jump from v0.18.0, merged via duckdb/community-extensions#2948,
+# 2026-10-08, commit 73c8c95adfe70e40bcb682ff54acdd0730b6dcae).
 
 extension:
   name: salesforce
   description: Read-only access to Salesforce orgs as DuckDB SQL tables over the official REST and Bulk APIs — OAuth refresh-token or JWT-bearer auth (credentials from inline options, environment variables, or an SFDX auth URL), native ATTACH, projection + predicate pushdown, COUNT pushdown, explicit server-side aggregates with GROUP BY, lazy/auto/Bulk transports with PK chunking (Bulk blob/base64 compatibility guard), a per-job API quota governor, parent + grandparent relationship STRUCT columns with diagnostics, queryAll (archived + deleted), Tooling-API fast schema, and metadata helpers (manual cache refresh, picklist values, record types). Requires DuckDB v1.5.4 or newer.
-  version: 0.18.0
+  version: 0.19.0
   language: C++
   build: cmake
   license: MIT
@@ -28,8 +28,8 @@ extension:
 repo:
   github: flozer/duckdb-salesforce
   # community-extensions CI checks out exactly this ref to build + sign.
-  # tag v0.18.0
-  ref: 6a03b024e62f4e98781267786a5d46800edea8f8
+  # tag v0.19.0
+  ref: af02412221eabff0fbcadf1b40544ac47248f238
 
 docs:
   hello_world: |
@@ -70,3 +70,12 @@ docs:
     is unambiguous. Built and tested against DuckDB v1.5.4, v1.5.5 and
     v1.5.6 (v1.5.2/v1.5.3 support was dropped in v0.15.0 — see CHANGELOG.md).
     Full change history in this repo's CHANGELOG.md.
+    Since v0.19.0, salesforce_deleted_ids(catalog, object, since, until)
+    surfaces the ids deleted in the org within a window (Replication API
+    getDeleted for exact deletion timestamps; a queryAll IsDeleted scan as
+    fallback for wider windows), salesforce_bulk_resume(catalog, job_id)
+    re-streams the results of an existing Bulk query job (recovery without
+    re-running it), salesforce_scan(catalog, object, filter, ...) scans an
+    sObject directly with per-call overrides, transient HTTP failures retry
+    with tunable sf_retry_max/sf_retry_backoff_ms, and well-known Salesforce
+    errorCodes surface with embedded remedy hints.
