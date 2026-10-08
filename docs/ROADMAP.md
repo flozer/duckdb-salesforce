@@ -1,6 +1,6 @@
 # duckdb-salesforce Roadmap
 
-Status: post-`v0.17.0` roadmap. Own-repo release `v0.17.0` is live (GitHub Release with Linux/Windows assets; official CI green across DuckDB v1.5.4/v1.5.5 — v1.5.6 joining the supported matrix — on `linux_amd64`, `windows_amd64`, and `osx_arm64`), and the DuckDB community catalog pins `v0.15.0` via [`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710) with a `v0.15.1` update submitted as [`duckdb/community-extensions#2850`](https://github.com/duckdb/community-extensions/pull/2850) and later updates gated behind the project's explicit-submission rule. This file records the strategic direction after the connector reached feature maturity, cross-platform CI, public documentation, and community publication.
+Status: post-`v0.19.0` roadmap. Own-repo release `v0.19.0` is live (GitHub Release with Linux/Windows assets; official CI 9/9 green across DuckDB v1.5.4/v1.5.5/v1.5.6 on `linux_amd64`, `windows_amd64`, and `osx_arm64`), and the DuckDB community catalog is in sync at `v0.19.0` (update merged via [`duckdb/community-extensions#2948`](https://github.com/duckdb/community-extensions/pull/2948), 2026-10-08; lineage #2850 → #2875 → #2948). This file records the strategic direction after the connector reached feature maturity, cross-platform CI, public documentation, and community publication.
 
 The core mission is to provide the best bridge between Salesforce and DuckDB for
 analytics. The extension should expose Salesforce data safely, efficiently, and
