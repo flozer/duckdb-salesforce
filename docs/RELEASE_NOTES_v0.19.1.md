@@ -47,7 +47,18 @@ no supported-version change.
 
 ### Official CI run record
 
-TO BE FILLED BEFORE TAGGING.
+`MainDistributionPipeline.yml` run
+[37984427959](https://github.com/flozer/duckdb-salesforce/actions/runs/37984427959)
+(2026-10-09, `workflow_dispatch` against release-prep `main` @ `59737c3`) —
+**9/9 green**:
+
+| DuckDB | linux_amd64 | windows_amd64 | osx_arm64 |
+|---|---|---|---|
+| v1.5.4 | Pass | Pass | Pass |
+| v1.5.5 | Pass | Pass | Pass |
+| v1.5.6 | Pass | Pass | Pass |
+
+Fix-branch pre-merge run also 9/9: [37980413759](https://github.com/flozer/duckdb-salesforce/actions/runs/37980413759).
 
 ## Gates
 
