@@ -1,28 +1,35 @@
-// Delete-sync primitive (consumer feedback #1; roadmap cycle 2).
+// Delete-sync primitive (consumer feedback #1; roadmap cycle 2 + fix cycle).
 //
-// salesforce_deleted_ids(catalog, object [, since] [, until]) surfaces the
-// ids deleted in the org within a time window, so a watermark-based
-// incremental load can pair its upsert with a delete sweep. WITHOUT this, a
-// watermark load never notices deletes: deletion does not update
-// SystemModstamp, and live-row queries exclude the deleted rows.
+// salesforce_deleted_ids(catalog, object [, since] [, until] [, source])
+// surfaces the ids deleted in the org within a time window, so a
+// watermark-based incremental load can pair its upsert with a delete sweep.
+// WITHOUT this, a watermark load never notices deletes: deletion does not
+// update SystemModstamp, and live-row queries exclude the deleted rows.
 //
-// Two sources, chosen by window width:
-//  - window <= 15 minutes: Replication API getDeleted()
-//    (GET /sobjects/<object>/deleted/?start=<ISO>&end=<ISO>) — exact
-//    deletedDate per id, source='getDeleted';
-//  - wider window: queryAll scan `WHERE IsDeleted = true AND SystemModstamp
-//    >= since` — one call, but the deletion timestamp is NOT recoverable
-//    (emitted as NULL, source='queryAll') and the recycle bin holds rows
-//    only ~15 days, so run the sweep periodically.
+// PRIMARY source (default): Replication API getDeleted()
+//   GET /sobjects/<object>/deleted/?start=<ISO>&end=<ISO>
+// Works for ANY window width (live-proven 2026-10-05: a 15-day window is
+// accepted in one call; the 15-minute cap was an incorrect design assumption
+// on our side), works for objects with no IsDeleted field (e.g. User), and
+// carries exact deletedDate per id. Salesforce may cover less than the
+// requested window on large result sets — the response's latestDateCovered
+// says how far it got, and this function loops from there until the window is
+// fully covered (bounded iterations).
 //
-// Read-only. Credentials come from the attached catalog (auth_source any).
+// OPT-IN source ('queryAll'): single queryAll scan
+//   WHERE IsDeleted = true AND SystemModstamp >= since
+// — deletion timestamps are NOT exposed (emitted NULL); PAGINATED via
+// nextRecordsUrl (the v0.19.0 release truncated at 2,000 rows — fixed here);
+// recycle-bin retention ~15 days; objects with no IsDeleted field (User)
+// fail with INVALID_FIELD.
+//
+// Read-only; credentials from the attached catalog.
 
 #include "salesforce_delete_sync.hpp"
 #include "salesforce_config.hpp"
-#include "salesforce_json.hpp"
-#include "salesforce_metadata_engine.hpp"
-#include "salesforce_session.hpp"
 #include "salesforce_http.hpp"
+#include "salesforce_json.hpp"
+#include "salesforce_session.hpp"
 #include "salesforce_storage.hpp"
 
 #include "duckdb/common/exception.hpp"
@@ -30,8 +37,8 @@
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_context.hpp"
 
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <ctime>
 #include <mutex>
 
@@ -39,12 +46,15 @@ namespace duckdb {
 
 namespace {
 
+constexpr int kGetDeletedMaxLoops = 10000;  // latestDateCovered loop guard
+constexpr idx_t kQueryAllMaxPages = 100000; // pagination loop guard
+
 struct DeletedIdsBindData : public TableFunctionData {
 	string alias;
 	string object;
-	string since; // ISO-8601 (already normalized/validated at bind)
-	string until;
-	bool use_get_deleted = false; // window <= 15 minutes
+	string since;                 // ISO-8601 (normalized/validated at bind)
+	string until;                 // ISO-8601
+	string source = "getDeleted"; // "getDeleted" (default) | "queryAll" (opt-in)
 
 	unique_ptr<FunctionData> Copy() const override {
 		auto r = make_uniq<DeletedIdsBindData>();
@@ -52,12 +62,13 @@ struct DeletedIdsBindData : public TableFunctionData {
 		r->object = object;
 		r->since = since;
 		r->until = until;
-		r->use_get_deleted = use_get_deleted;
+		r->source = source;
 		return std::move(r);
 	}
 	bool Equals(const FunctionData &other_p) const override {
 		auto &other = other_p.Cast<DeletedIdsBindData>();
-		return alias == other.alias && object == other.object && since == other.since && until == other.until;
+		return alias == other.alias && object == other.object && since == other.since && until == other.until &&
+		       source == other.source;
 	}
 };
 
@@ -66,11 +77,12 @@ struct DeletedIdsGlobalState : public GlobalTableFunctionState {
 	unique_ptr<SalesforceSession> session;
 	string api_version;
 
-	vector<pair<string, string>> rows; // (id, deleted_date; date empty in queryAll fallback)
-	size_t cursor = 0;
+	vector<pair<string, string>> rows; // (id, deleted_date; date empty in queryAll)
+	string source;                     // per-row constant, mirrored from bind
 	bool loaded = false;
 	bool failed = false;
 	string error;
+	idx_t cursor = 0;
 	idx_t max_threads = 1;
 	idx_t MaxThreads() const override {
 		return max_threads;
@@ -141,28 +153,27 @@ string ToIsoUtc(std::chrono::system_clock::time_point tp) {
 }
 
 // Trim an API timestamp ("2026-09-30T12:34:56.000+0000") to second precision
-// UTC-ish output for the deleted_date column.
+// for the deleted_date column.
 string NormalizeDeletedDate(const string &raw) {
 	if (raw.size() < 19) {
 		return raw;
 	}
-	// "YYYY-MM-DDTHH:MM:SS" prefix passes through; keep as-is (ISO-8601).
 	return raw.substr(0, 19);
 }
 
 unique_ptr<FunctionData> DeletedIdsBind(ClientContext &context, TableFunctionBindInput &input,
                                         vector<LogicalType> &return_types, vector<string> &names) {
-	auto &args = input.inputs;
-	if (args.size() < 2 || args.size() > 4) {
-		throw BinderException("salesforce_deleted_ids(catalog, object [, since] [, until]) takes 2 to 4 arguments.");
+	if (input.inputs.size() != 2) {
+		throw BinderException("salesforce_deleted_ids(catalog, object) takes exactly 2 arguments "
+		                      "(since/until/source are named parameters).");
 	}
-	for (auto &a : args) {
+	for (auto &a : input.inputs) {
 		if (a.IsNull()) {
 			throw BinderException("salesforce_deleted_ids: arguments must not be NULL.");
 		}
 	}
-	string alias = StringUtil::Lower(args[0].ToString());
-	string object = StringUtil::Upper(args[1].ToString());
+	string alias = StringUtil::Lower(input.inputs[0].ToString());
+	string object = StringUtil::Upper(input.inputs[1].ToString());
 	bool safe_object = !object.empty();
 	for (auto &ch : object) {
 		if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') {
@@ -177,8 +188,6 @@ unique_ptr<FunctionData> DeletedIdsBind(ClientContext &context, TableFunctionBin
 	auto now = std::chrono::system_clock::now();
 	auto until_tp = now;
 	auto since_tp = now - std::chrono::minutes(15);
-	// since/until are NAMED parameters — they arrive via named_parameters,
-	// never through the positional input list.
 	auto since_it = input.named_parameters.find("since");
 	if (since_it != input.named_parameters.end() && !since_it->second.IsNull()) {
 		since_tp = ParseIsoUtc(since_it->second.ToString(), "since");
@@ -196,9 +205,17 @@ unique_ptr<FunctionData> DeletedIdsBind(ClientContext &context, TableFunctionBin
 	data->object = object;
 	data->since = ToIsoUtc(since_tp);
 	data->until = ToIsoUtc(until_tp);
-	// getDeleted() windows are capped at 15 minutes by Salesforce; wider
-	// windows switch to the queryAll fallback (single call, no exact dates).
-	data->use_get_deleted = (until_tp - since_tp) <= std::chrono::minutes(15);
+	data->source = "getDeleted"; // queryAll available via the named source param
+	auto src = input.named_parameters.find("source");
+	if (src != input.named_parameters.end() && !src->second.IsNull()) {
+		string v = StringUtil::Lower(src->second.ToString());
+		if (v != "getdeleted" && v != "queryall") {
+			throw BinderException("salesforce_deleted_ids: source must be 'getDeleted' or "
+			                      "'queryAll' (got '%s').",
+			                      src->second.ToString());
+		}
+		data->source = v == "queryall" ? "queryAll" : "getDeleted";
+	}
 
 	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
 	names = {"id", "deleted_date", "source"};
@@ -215,77 +232,103 @@ unique_ptr<GlobalTableFunctionState> DeletedIdsInit(ClientContext &context, Tabl
 	gstate->session = make_uniq<SalesforceSession>(*config, *gstate->client);
 	gstate->session->SetToken(token);
 	gstate->api_version = config->api_version;
+	gstate->source = bind.source;
 	return std::move(gstate);
+}
+
+// getDeleted: loop [since, until) in API-served slices via latestDateCovered.
+// Salesforce may cover less than requested on large result sets; the response
+// tells us how far it got, so we resume from there until the window is fully
+// covered (bounded by kGetDeletedMaxLoops).
+void LoadViaGetDeleted(DeletedIdsGlobalState &g, const DeletedIdsBindData &bind) {
+	auto since = ParseIsoUtc(bind.since, "since");
+	auto until = ParseIsoUtc(bind.until, "until");
+	std::set<string> seen; // boundary dedup across latestDateCovered resumes
+	for (int loop = 0; loop < kGetDeletedMaxLoops && since < until; loop++) {
+		string path = "/services/data/" + g.api_version + "/sobjects/" + bind.object +
+		              "/deleted/?start=" + ToIsoUtc(since) + "&end=" + ToIsoUtc(until);
+		string body = g.session->AuthorizedGet(path);
+		for (auto &rec : sfjson::GetObjectArray(body, "deletedRecords")) {
+			string id = sfjson::GetString(rec, "id");
+			// Boundary dedup: a resume slice can re-report a record already
+			// emitted when latestDateCovered lands between slices.
+			if (seen.count(id)) {
+				continue;
+			}
+			seen.insert(id);
+			g.rows.emplace_back(std::move(id), NormalizeDeletedDate(sfjson::GetString(rec, "deletedDate")));
+		}
+		// Resume from the covered frontier (falls back to `until` when absent).
+		string covered = sfjson::GetString(body, "latestDateCovered");
+		if (covered.empty()) {
+			break;
+		}
+		auto covered_tp = ParseIsoUtc(NormalizeDeletedDate(covered) + "Z", "latestDateCovered");
+		if (covered_tp <= since) {
+			break; // no forward progress
+		}
+		if (covered_tp >= until) {
+			break; // window fully covered
+		}
+		since = covered_tp;
+	}
+}
+
+// queryAll sweep (opt-in source): FetchPage-based, so > 2,000 ids paginate via
+// nextRecordsUrl (the v0.19.0 release truncated here — fixed).
+void LoadViaQueryAll(DeletedIdsGlobalState &g, const DeletedIdsBindData &bind) {
+	string soql = "SELECT Id FROM " + bind.object + " WHERE IsDeleted = true AND SystemModstamp >= " + bind.since;
+	string next = "/services/data/" + g.api_version + "/queryAll/?q=" + StringUtil::URLEncode(soql);
+	for (idx_t page = 0; page < kQueryAllMaxPages; page++) {
+		auto pg = g.session->FetchPage(next);
+		for (auto &rec : pg.records) {
+			g.rows.emplace_back(sfjson::GetString(rec, "Id"), "");
+		}
+		if (pg.done || pg.next_path.empty()) {
+			return;
+		}
+		next = pg.next_path; // opaque nextRecordsUrl, used verbatim
+	}
+	throw IOException("salesforce_deleted_ids: queryAll sweep exceeded %llu pages; "
+	                  "narrow the window (source := 'getDeleted' with shorter since/until).",
+	                  (unsigned long long)kQueryAllMaxPages);
 }
 
 void DeletedIdsFunction(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &bind = data.bind_data->Cast<DeletedIdsBindData>();
-	auto &gstate = data.global_state->Cast<DeletedIdsGlobalState>();
+	auto &g = data.global_state->Cast<DeletedIdsGlobalState>();
 
-	if (!gstate.loaded) {
-		gstate.loaded = true;
-		if (bind.use_get_deleted) {
-			// Slice [since, until] into <=15-minute getDeleted calls.
-			auto since = ParseIsoUtc(bind.since, "since");
-			auto until = ParseIsoUtc(bind.until, "until");
-			const std::chrono::minutes kWindow(15);
-			for (auto start = since; start < until; start += kWindow) {
-				auto end = (until - start) < kWindow ? until : start + kWindow;
-				string path = "/services/data/" + gstate.api_version + "/sobjects/" + bind.object +
-				              "/deleted/?start=" + ToIsoUtc(start) + "&end=" + ToIsoUtc(end);
-				string body;
-				try {
-					body = gstate.session->AuthorizedGet(path);
-				} catch (std::exception &ex) {
-					gstate.failed = true;
-					gstate.error = ex.what();
-					break;
-				}
-				for (auto &rec : sfjson::GetObjectArray(body, "deletedRecords")) {
-					gstate.rows.emplace_back(sfjson::GetString(rec, "id"),
-					                         NormalizeDeletedDate(sfjson::GetString(rec, "deletedDate")));
-				}
+	if (!g.loaded) {
+		g.loaded = true;
+		g.source = bind.source;
+		try {
+			if (bind.source == "getDeleted") {
+				LoadViaGetDeleted(g, bind);
+			} else {
+				LoadViaQueryAll(g, bind);
 			}
-		} else {
-			// queryAll fallback: one call; deletion timestamp not exposed by
-			// Salesforce in query results (only the old SystemModstamp).
-			string soql =
-			    "SELECT Id FROM " + bind.object + " WHERE IsDeleted = true AND SystemModstamp >= " + bind.since;
-			string path = "/services/data/" + gstate.api_version + "/queryAll/?q=" + StringUtil::URLEncode(soql);
-			string body;
-			try {
-				body = gstate.session->AuthorizedGet(path);
-			} catch (std::exception &ex) {
-				gstate.failed = true;
-				gstate.error = ex.what();
-			}
-			if (!gstate.failed) {
-				for (auto &rec : sfjson::GetObjectArray(body, "records")) {
-					gstate.rows.emplace_back(sfjson::GetString(rec, "Id"), "");
-				}
-			}
+		} catch (std::exception &ex) {
+			g.failed = true;
+			g.error = ex.what();
 		}
-		if (gstate.failed) {
-			throw IOException("salesforce_deleted_ids failed: %s "
-			                  "(fallback: SET sf_query_mode = 'queryAll'; and sweep "
-			                  "WHERE IsDeleted = true yourself).",
-			                  gstate.error);
+		if (g.failed) {
+			throw IOException("salesforce_deleted_ids failed for '%s' (%s %s -> %s): %s", bind.object, bind.source,
+			                  bind.since, bind.until, g.error);
 		}
 	}
 
 	idx_t row = 0;
-	while (row < STANDARD_VECTOR_SIZE && gstate.cursor < gstate.rows.size()) {
-		auto &id = gstate.rows[gstate.cursor].first;
-		auto &deleted_date = gstate.rows[gstate.cursor].second;
+	while (row < STANDARD_VECTOR_SIZE && g.cursor < g.rows.size()) {
+		auto &id = g.rows[g.cursor].first;
+		auto &deleted_date = g.rows[g.cursor].second;
 		FlatVector::GetData<string_t>(output.data[0])[row] = StringVector::AddString(output.data[0], id);
 		if (deleted_date.empty()) {
 			FlatVector::SetNull(output.data[1], row, true);
 		} else {
 			FlatVector::GetData<string_t>(output.data[1])[row] = StringVector::AddString(output.data[1], deleted_date);
 		}
-		FlatVector::GetData<string_t>(output.data[2])[row] =
-		    StringVector::AddString(output.data[2], bind.use_get_deleted ? "getDeleted" : "queryAll");
-		gstate.cursor++;
+		FlatVector::GetData<string_t>(output.data[2])[row] = StringVector::AddString(output.data[2], g.source);
+		g.cursor++;
 		row++;
 	}
 	output.SetCardinality(row);
@@ -298,6 +341,7 @@ TableFunction GetSalesforceDeletedIdsFunction() {
 	                 DeletedIdsBind, DeletedIdsInit);
 	fn.named_parameters["since"] = LogicalType::VARCHAR;
 	fn.named_parameters["until"] = LogicalType::VARCHAR;
+	fn.named_parameters["source"] = LogicalType::VARCHAR;
 	return fn;
 }
 
