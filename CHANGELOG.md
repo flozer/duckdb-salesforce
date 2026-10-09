@@ -12,6 +12,16 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.19.1](docs/RELEASE_NOTES_v0.19.1.md) — 2026-10-09
+
+- **Fix `salesforce_deleted_ids()`** — three real-world gaps: queryAll sweep
+  truncated at exactly 2,000 ids (no pagination); getDeleted never used for
+  windows > 15 minutes (the cap does not exist — live-proven); objects with
+  no IsDeleted field (User) failed under the fallback. getDeleted is now the
+  primary source for ANY window (latestDateCovered resume + boundary dedup);
+  queryAll sweep is opt-in (`source := 'queryAll'`) and paginated.
+- Test rewritten (21 assertions); suite 55 files, 1641 assertions, 0 failures.
+
 ## [v0.19.0](docs/RELEASE_NOTES_v0.19.0.md) — 2026-10-06
 
 - **`salesforce_deleted_ids(catalog, object [, since] [, until])`** (delete-sync

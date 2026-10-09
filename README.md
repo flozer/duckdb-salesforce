@@ -254,7 +254,7 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.19.0** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
+Own-repo release: **v0.19.1** (DuckDB v1.5.4+ baseline, v1.5.2/v1.5.3 dropped).
 Community baseline: **v0.15.0**, merged in
 [`duckdb/community-extensions#2710`](https://github.com/duckdb/community-extensions/pull/2710);
 the `v0.15.1` update was submitted as
