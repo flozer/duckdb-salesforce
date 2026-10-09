@@ -62,8 +62,8 @@ Fix-branch pre-merge run also 9/9: [37980413759](https://github.com/flozer/duckd
 
 ## Gates
 
-- Community update: **submitted with maintainer OK** on 2026-10-06 — the
-  v0.19.1 descriptor update goes out as a follow-up PR on
-  [duckdb/community-extensions#2948](https://github.com/duckdb/community-extensions/pull/2948)'s
-  lineage (single jump v0.18.0 → v0.19.1), also gated on the same explicit
-  maintainer OK already given for this cycle.
+- Community update: **submitted with maintainer OK** on 2026-10-09 —
+  [duckdb/community-extensions#3015](https://github.com/duckdb/community-extensions/pull/3015)
+  (single jump v0.18.0 → v0.19.1, `repo.ref` pinned to `af02412`). The live
+  `docs/community/description.yml` mirror stays at v0.18.0 until that PR
+  merges.
