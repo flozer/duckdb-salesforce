@@ -924,17 +924,49 @@ SELECT Id, Name
 FROM salesforce_bulk_resume('sf', '7504x00000ABCDef');
 ```
 
-### `salesforce_deleted_ids(catalog, object [, since] [, until])`
+### `salesforce_deleted_ids(catalog, object [, since] [, until] [, source])`
 
-#
+#### O que faz
 
-**Aviso para cargas incrementais:** deletes **não** atualizam
-`SystemModstamp`, então uma carga incremental por watermark nunca os percebe —
-as linhas deletadas ficam vivas no destino para sempre. Combine o watermark
-com uma varredura periódica de deletados: `SET sf_query_mode = 'queryAll';
-SELECT Id FROM sf.Object WHERE IsDeleted = true` (as linhas ficam varríveis
-por ~15 dias), ou use a API de replicação getDeleted() do Salesforce para
-timestamps exatos de deleção.
+Retorna os ids deletados na org para um sObject dentro de uma janela de tempo —
+o primitivo de sincronia que cargas incrementais por watermark precisam, porque
+**deletes não atualizam `SystemModstamp`**.
+
+#### Como funciona
+
+- Argumentos: `catalog` anexado, `object`; parâmetros nomeados opcionais
+  `since` / `until` em ISO-8601 (padrão: últimos 15 minutos até agora); e
+  `source` opcional.
+- Fonte padrão (`getDeleted`): API de replicação `getDeleted()` —
+  `deleted_date` exato por id, **qualquer largura de janela** (o Salesforce
+  atende a janela e a função retoma de `latestDateCovered` até cobri-la por
+  completo), e funciona para objetos sem campo `IsDeleted` (ex.: `User`). Ids
+  duplicados entre fatias de retomada são deduplicados.
+- Fonte opt-in (`source := 'queryAll'`): um scan `queryAll` paginado
+  (`WHERE IsDeleted = true AND SystemModstamp >= since`) — `deleted_date` é
+  NULL (o Salesforce não expõe o timestamp de deleção ali); a lixeira retém
+  linhas por ~15 dias, então varra periodicamente. Objetos sem campo
+  `IsDeleted` (ex.: `User`) falham com `INVALID_FIELD` — use a fonte padrão
+  para eles.
+- Colunas de saída: `id`, `deleted_date`, `source`.
+
+#### Para que serve
+
+O padrão de upsert por watermark perde deletes silenciosamente (a deleção não
+avança o stamp). Combine-o com uma varredura periódica: faça o upsert das
+linhas alteradas e depois marque/remova os ids que esta função retorna.
+
+#### Uso no dia a dia
+
+```sql
+-- qualquer janela (getDeleted, datas exatas)
+SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead',
+    since := '2026-09-15T00:00:00');
+
+-- estilo varredura (queryAll, sem datas exatas)
+SELECT id FROM salesforce_deleted_ids('sf', 'Lead',
+    since := '2026-09-20T00:00:00', source := 'queryAll');
+```
 
 ### O que faz
 

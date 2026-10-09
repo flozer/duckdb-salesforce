@@ -293,7 +293,7 @@ resolves a report's base object from the official `reportTypeMetadata`.
 | Official DuckDB v1.5.6 support declaration | Done (CI matrix v1.5.4/v1.5.5/v1.5.6 × 3 platforms; release-assets build against v1.5.6) |
 | Relationship-graph child recursion (`max_depth`) | Done (P2.3) |
 | Report Bridge base object via `reportTypeMetadata` (cut 2) | Done (P2.2) |
-| Delete sync (`salesforce_deleted_ids`: getDeleted + queryAll sweep) | Done |
+| Delete sync (`salesforce_deleted_ids`: getDeleted any window + paginated queryAll sweep) | Done |
 | Bulk job resume (`salesforce_bulk_resume(catalog, job_id)`) | Done |
 | User-callable `salesforce_scan(catalog, object [, filter])` with per-call overrides | Done |
 | DuckDB 2.0 support | Future: tracked for when 2.0 ships GA (pass already dual-compiles; migration surface mapped) |

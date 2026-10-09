@@ -821,16 +821,49 @@ SELECT Id, Name
 FROM salesforce_bulk_resume('sf', '7504x00000ABCDef');
 ```
 
-### `salesforce_deleted_ids(catalog, object [, since] [, until])`
+### `salesforce_deleted_ids(catalog, object [, since] [, until] [, source])`
 
-#
+#### What it does
 
-**Incremental-load warning:** deletes do **not** update `SystemModstamp`, so a
-watermark-based incremental load never notices them — deleted rows stay alive
-in the target forever. Pair the watermark with a periodic delete sweep:
-`SET sf_query_mode = 'queryAll'; SELECT Id FROM sf.Object WHERE IsDeleted =
-true` (rows stay sweepable for ~15 days), or use Salesforce's getDeleted()
-Replication API for exact deletion timestamps.
+Returns the ids deleted in the org for an sObject within a time window — the
+sync primitive that watermark-based incremental loads need, because **deletes
+do not update `SystemModstamp`**.
+
+#### How it works
+
+- Arguments: attached `catalog`, sObject `object`; optional named `since` /
+  `until` ISO-8601 timestamps (defaults: last 15 minutes → now); optional
+  `source` override.
+- Default source (`getDeleted`): Replication API `getDeleted()` — exact
+  `deleted_date` per id, **any window width** (Salesforce serves the window
+  and the function resumes from `latestDateCovered` until fully covered), and
+  works for objects with no `IsDeleted` field (e.g. `User`). Duplicate ids
+  across resume slices are deduplicated.
+- Opt-in source (`source := 'queryAll'`): one paginated `queryAll` scan
+  (`WHERE IsDeleted = true AND SystemModstamp >= since`) — `deleted_date` is
+  NULL (Salesforce does not expose deletion timestamps there); the recycle
+  bin holds rows only ~15 days, so sweep periodically. Objects with no
+  `IsDeleted` field (e.g. `User`) fail with `INVALID_FIELD` — use the
+  default source for those.
+- Output columns: `id`, `deleted_date`, `source`.
+
+#### Why use it
+
+The watermark upsert pattern misses deletes silently (deletion never advances
+the stamp). Pair it with a periodic delete sweep: upsert the changed rows, then
+mark/remove the ids this function returns.
+
+#### Daily use
+
+```sql
+-- any window (getDeleted, exact dates)
+SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead',
+    since := '2026-09-15T00:00:00');
+
+-- sweep-style (queryAll, no exact dates)
+SELECT id FROM salesforce_deleted_ids('sf', 'Lead',
+    since := '2026-09-20T00:00:00', source := 'queryAll');
+```
 
 ### What it does
 
