@@ -68,3 +68,16 @@ statement error
 ATTACH 'salesforce://bad4' AS bad4 (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', typo_opt 1);
 ----
 
+
+# === P5a: READ_ONLY accepted and ignored (extension is read-only by design;
+#     policy-standardized sources attach READ_ONLY at every data source) =====
+statement ok
+ATTACH 'salesforce://ro' AS ro (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r', READ_ONLY);
+
+query T
+SELECT Name FROM ro.Account LIMIT 1;
+----
+A
+
+statement ok
+DETACH ro;

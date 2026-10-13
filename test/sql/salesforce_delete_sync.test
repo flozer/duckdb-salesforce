@@ -27,11 +27,11 @@ SET sf_mock_count_body = '{"deletedRecords":[{"id":"00Q1","deletedDate":"2026-09
 statement ok
 ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
 
-query TT
-SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-30T10:00:00', until := '2026-09-30T10:05:00') ORDER BY id;
+query TTTT
+SELECT id, deleted_date, source, latest_date_covered FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-30T10:00:00', until := '2026-09-30T10:05:00') ORDER BY id;
 ----
-00Q1	2026-09-30T10:00:00
-00Q2	2026-09-30T11:30:00
+00Q1	2026-09-30T10:00:00	getDeleted	2026-09-30T12:00:00
+00Q2	2026-09-30T11:30:00	getDeleted	2026-09-30T12:00:00
 
 # === WIDE window -> getDeleted too (the 15-min cap was our own assumption) ===
 statement ok
@@ -55,11 +55,11 @@ SELECT id FROM salesforce_deleted_ids('sf', 'User', since := '2026-09-15T00:00:0
 statement ok
 SET sf_mock_queryall_body = '{"done":false,"records":[{"Id":"00Q1"}],"nextRecordsUrl":"/services/data/v60.0/queryAll/00QNEXT"}|~|{"done":true,"records":[{"Id":"00Q9"}]}';
 
-query TT
-SELECT id, source FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-01T00:00:00', source := 'queryAll') ORDER BY id;
+query TTT
+SELECT id, source, latest_date_covered FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-01T00:00:00', source := 'queryAll') ORDER BY id;
 ----
-00Q1	queryAll
-00Q9	queryAll
+00Q1	queryAll	NULL
+00Q9	queryAll	NULL
 
 # === invalid source rejected ==================================================
 statement error

@@ -3,8 +3,12 @@
 // salesforce_deleted_ids(catalog, object [, since] [, until] [, source])
 // surfaces the ids deleted in the org within a time window, so a
 // watermark-based incremental load can pair its upsert with a delete sweep.
-// WITHOUT this, a watermark load never notices deletes: deletion does not
-// update SystemModstamp, and live-row queries exclude the deleted rows.
+// A delete DOES update SystemModstamp (to the deletion time) and the deleted
+// row stays visible via queryAll until purged — a watermark + queryAll load
+// inside the ~15-day retention window captures them. What this primitive
+// adds: exact deletedDate per id, coverage for objects with no IsDeleted
+// field (e.g. User), and purge-safety when the next load is delayed past the
+// bin.
 //
 // PRIMARY source (default): Replication API getDeleted()
 //   GET /sobjects/<object>/deleted/?start=<ISO>&end=<ISO>
@@ -79,6 +83,8 @@ struct DeletedIdsGlobalState : public GlobalTableFunctionState {
 
 	vector<pair<string, string>> rows; // (id, deleted_date; date empty in queryAll)
 	string source;                     // per-row constant, mirrored from bind
+	string latest_covered;             // max latestDateCovered seen (getDeleted; empty in queryAll)
+	std::chrono::system_clock::time_point latest_covered_tp {};
 	bool loaded = false;
 	bool failed = false;
 	string error;
@@ -217,8 +223,8 @@ unique_ptr<FunctionData> DeletedIdsBind(ClientContext &context, TableFunctionBin
 		data->source = v == "queryall" ? "queryAll" : "getDeleted";
 	}
 
-	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
-	names = {"id", "deleted_date", "source"};
+	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
+	names = {"id", "deleted_date", "source", "latest_date_covered"};
 	return std::move(data);
 }
 
@@ -264,6 +270,11 @@ void LoadViaGetDeleted(DeletedIdsGlobalState &g, const DeletedIdsBindData &bind)
 			break;
 		}
 		auto covered_tp = ParseIsoUtc(NormalizeDeletedDate(covered) + "Z", "latestDateCovered");
+		// P4: surface the API's own coverage frontier (max across slices).
+		if (covered_tp > g.latest_covered_tp) {
+			g.latest_covered_tp = covered_tp;
+			g.latest_covered = NormalizeDeletedDate(covered);
+		}
 		if (covered_tp <= since) {
 			break; // no forward progress
 		}
@@ -328,6 +339,12 @@ void DeletedIdsFunction(ClientContext &context, TableFunctionInput &data, DataCh
 			FlatVector::GetData<string_t>(output.data[1])[row] = StringVector::AddString(output.data[1], deleted_date);
 		}
 		FlatVector::GetData<string_t>(output.data[2])[row] = StringVector::AddString(output.data[2], g.source);
+		if (g.latest_covered.empty()) {
+			FlatVector::SetNull(output.data[3], row, true);
+		} else {
+			FlatVector::GetData<string_t>(output.data[3])[row] =
+			    StringVector::AddString(output.data[3], g.latest_covered);
+		}
 		g.cursor++;
 		row++;
 	}

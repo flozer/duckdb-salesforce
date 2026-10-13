@@ -100,6 +100,12 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          "for runs over flaky links; the 401 refresh path is separate and "
 	                          "always applies.",
 	                          LogicalType::BIGINT, Value::BIGINT(3));
+	config.AddExtensionOption("sf_timeout_read_s",
+	                          "HTTP read timeout in seconds per attempt (default 60). Raise it when a "
+	                          "server-side COUNT() or scan on a very large object exceeds the default "
+	                          "instead of failing; each transient retry waits up to this timeout, so "
+	                          "budget attempts x timeout when tuning with sf_retry_max.",
+	                          LogicalType::BIGINT, Value::BIGINT(60));
 	config.AddExtensionOption("sf_retry_backoff_ms",
 	                          "Linear backoff base between transient HTTP retries: attempt N sleeps "
 	                          "backoff_ms * N before retrying. Clamped to [0,60000]. Default 200.",
@@ -272,13 +278,16 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// global; a named object clears only that object. No data/disk cache.
 	// Delete-sync primitive: ids deleted in the org within a window, so a
 	// watermark-based incremental load can pair its upsert with a delete
-	// sweep (deletes do not update SystemModstamp).
+	// sweep (a delete updates SystemModstamp and the row stays visible via
+	// queryAll until the recycle-bin purge — this primitive adds exact
+	// deletedDate, no-IsDeleted objects and purge-safety).
 	RegisterDescribed(loader, GetSalesforceDeletedIdsFunction(), {"catalog", "object"},
 	                  "Returns the ids deleted in the org for an sObject within a time window, so a "
-	                  "watermark-based incremental load can sweep deletes (deletes do not update "
-	                  "SystemModstamp). Windows up to 15 minutes use the Replication API getDeleted() "
-	                  "with exact deleted_date; wider windows fall back to a queryAll IsDeleted scan "
-	                  "(deleted_date NULL; the recycle bin holds rows ~15 days).",
+	                  "watermark-based incremental load can sweep deletes. Uses the Replication API "
+	                  "getDeleted() for any window width (exact deleted_date, latestDateCovered resume "
+	                  "with boundary dedup) and covers objects with no IsDeleted field (e.g. User); "
+	                  "opt-in source := 'queryAll' is a paginated IsDeleted sweep (deleted_date NULL, "
+	                  "~15-day recycle bin).",
 	                  {"SELECT * FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-30T00:00:00');"},
 	                  {"sync"});
 

@@ -7,6 +7,7 @@
 // always correct; pushdown is purely an over-fetch optimisation.
 
 #include "salesforce_soql.hpp"
+#include <cstdio>
 #include "salesforce_describe.hpp"
 
 #include "duckdb/common/exception.hpp"
@@ -157,6 +158,53 @@ static constexpr idx_t kMaxInItems = 200;
 
 // Translate one conjunct into a SOQL predicate. Returns false (=> residual) for
 // anything outside the safe subset. Sets `exact` true only when the SOQL clause
+// P5b (consumer feedback): an =/!=/IN literal compared against an Id-type
+// field must be a syntactically valid Salesforce Id (15 or 18 alphanumeric
+// chars) - anything else is rejected server-side with
+// INVALID_QUERY_FILTER_OPERATOR. Fail at plan time with a clear message
+// instead (live-proven 2026-10-06: 3/10-char prefixes and junk are rejected;
+// only full 15/18-char ids are accepted).
+static bool IsValidSalesforceIdText(const string &s) {
+	if (s.size() != 15 && s.size() != 18) {
+		return false;
+	}
+	for (char c : s) {
+		if (!std::isalnum(static_cast<unsigned char>(c))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static const SalesforceField *FieldStructFor(const vector<SalesforceField> &fields, const string &name) {
+	for (auto &f : fields) {
+		if (StringUtil::CIEquals(f.name, name)) {
+			return &f;
+		}
+	}
+	return nullptr;
+}
+
+static void CheckIdLiterals(const vector<SalesforceField> &fields, const string &field,
+                            const vector<const Value *> &literals) {
+	const SalesforceField *fld = FieldStructFor(fields, field);
+	if (!fld || StringUtil::Lower(fld->sf_type) != "id") {
+		return; // not an Id-type field: nothing to validate
+	}
+	for (auto *v : literals) {
+		if (v->IsNull()) {
+			continue; // = null is valid SOQL (means IS NULL for the field)
+		}
+		string text = v->ToString();
+		if (!IsValidSalesforceIdText(text)) {
+			throw BinderException("salesforce: invalid Salesforce Id '%s' for field '%s' - expected "
+			                      "15 or 18 alphanumeric characters (Salesforce rejects this predicate "
+			                      "with INVALID_QUERY_FILTER_OPERATOR).",
+			                      text, field);
+		}
+	}
+}
+
 // matches DuckDB semantics exactly (safe to remove from the residual filter set);
 // false when it is a SUPERSET prefilter (IN/LIKE/OR) that MUST stay residual so
 // DuckDB refines the result. Never throws.
@@ -190,6 +238,10 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
 			string op;
 			if (!ComparisonOp(cmp, op)) {
 				return false;
+			}
+			if (cmp == ExpressionType::COMPARE_EQUAL || cmp == ExpressionType::COMPARE_NOTEQUAL) {
+				auto &v = constant->Cast<BoundConstantExpression>().value;
+				CheckIdLiterals(fields, field, {&v});
 			}
 			out = field + " " + op + " " + SoqlLiteral(constant->Cast<BoundConstantExpression>().value);
 			return true;
@@ -259,15 +311,18 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
 				return false; // huge IN -> residual
 			}
 			string list;
+			vector<const Value *> in_values;
 			for (idx_t k = 1; k < oe.children.size(); k++) {
 				if (oe.children[k]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
 					return false;
 				}
+				in_values.push_back(&oe.children[k]->Cast<BoundConstantExpression>().value);
 				if (k > 1) {
 					list += ", ";
 				}
 				list += SoqlLiteral(oe.children[k]->Cast<BoundConstantExpression>().value);
 			}
+			CheckIdLiterals(fields, field, in_values);
 			out = field + " IN (" + list + ")";
 			exact = false;
 			return true;
@@ -330,6 +385,11 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
 		}
 
 		return false; // functions/casts/NOT/regex/... -> residual
+	} catch (const BinderException &) {
+		// Validation errors (malformed Id literal on an id-type field) are
+		// plan-time user errors, not translation failures: rethrow so the
+		// query fails with the clear message instead of silently scanning.
+		throw;
 	} catch (...) {
 		return false;
 	}

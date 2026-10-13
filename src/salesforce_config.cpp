@@ -225,13 +225,17 @@ SalesforceConfig SalesforceConfig::ParseAndValidate(const string &path, AttachIn
 		    !StringUtil::CIEquals(key, "username") && !StringUtil::CIEquals(key, "private_key_file") &&
 		    !StringUtil::CIEquals(key, "login_url") && !StringUtil::CIEquals(key, "api_version") &&
 		    !StringUtil::CIEquals(key, "query_mode") && !StringUtil::CIEquals(key, "transport") &&
-		    !StringUtil::CIEquals(key, "bulk_chunks")) {
+		    !StringUtil::CIEquals(key, "bulk_chunks") && !StringUtil::CIEquals(key, "read_only")) {
 			throw BinderException("salesforce ATTACH: unknown option '%s'. Valid options: "
 			                      "auth_source, client_id, client_secret, refresh_token, "
 			                      "username, private_key_file, login_url, api_version, "
-			                      "query_mode, transport, bulk_chunks.",
+			                      "query_mode, transport, bulk_chunks, read_only.",
 			                      key);
 		}
+		// read_only: accepted and ignored (consumer feedback P5a). The
+		// extension is read-only by design — every mutating catalog operation
+		// throws — so the flag is a no-op kept for policy standardization
+		// (sources that always attach READ_ONLY).
 		opts[key] = kv.second.ToString();
 	}
 
