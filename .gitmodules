@@ -1,6 +1,12 @@
 [submodule "extension-ci-tools"]
 	path = extension-ci-tools
 	url = https://github.com/duckdb/extension-ci-tools.git
+	# main (default): Dependabot propõe bumps da main; cada um entra como
+	# bump ALINHADO (submódulo + workflow ref/ci_tools_version juntos).
+	branch = main
 [submodule "duckdb"]
 	path = duckdb
 	url = https://github.com/duckdb/duckdb.git
+	# Linha 1.5.x de manutenção: mantém o Dependabot longe da linha v2.x
+	# (version-lock — bumps v2.x são fechados; ver ROADMAP.MD/AGENTS.md).
+	branch = v1.5-variegata
