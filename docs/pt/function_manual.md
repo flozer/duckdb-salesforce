@@ -509,6 +509,33 @@ SET sf_retry_max = 5;            -- mais tentativas
 SET sf_retry_backoff_ms = 1000;  -- backoff de 1s, 2s, 3s, 4s, 5s
 ```
 
+### `sf_timeout_read_s`
+
+#### O que faz
+
+Timeout de leitura HTTP em segundos **por tentativa** (padrão `60`, limitado
+a `[1,3600]`). Aumente quando um `COUNT()` server-side ou um scan em um objeto
+muito grande excede o padrão e falha em vez de completar.
+
+#### Como funciona
+
+Aplicado a cada tentativa HTTP, retries incluídos: uma chamada ajustada com
+`sf_retry_max` espera até `sf_timeout_read_s` por tentativa, então o pior caso
+de tempo total é aproximadamente `sf_retry_max x sf_timeout_read_s`.
+
+#### Para que serve
+
+Um COUNT() legítimo sobre um objeto com milhões de linhas pode levar minutos
+no servidor. Sem aumentar o timeout, a tentativa é cortada em 60s e, esgotado
+o orçamento de retries, a query inteira falha mesmo com a org ainda
+trabalhando.
+
+#### Uso no dia a dia
+
+```sql
+SET sf_timeout_read_s = 300;  -- dá a um COUNT() pesado até 5 min por tentativa
+```
+
 ### `sf_bulk_chunks`
 
 #### O que faz
@@ -929,8 +956,14 @@ FROM salesforce_bulk_resume('sf', '7504x00000ABCDef');
 #### O que faz
 
 Retorna os ids deletados na org para um sObject dentro de uma janela de tempo —
-o primitivo de sincronia que cargas incrementais por watermark precisam, porque
-**deletes não atualizam `SystemModstamp`**.
+o primitivo de sincronia que cargas incrementais por watermark precisam. **Uma
+deleção atualiza o `SystemModstamp`** para o horário da exclusão, e a linha
+deletada permanece visível via `queryAll` (`IsDeleted = true`) até a purga
+(~15 dias) — então uma carga por watermark rodando `queryAll` dentro dessa
+janela captura os deletes no próprio watermark. O que ela perde: **purgas**
+(lixeira esvaziada antes da próxima carga), objetos sem campo `IsDeleted`
+(ex.: `User`) e timestamps exatos de deleção — cobertos pela fonte
+getDeleted() desta função.
 
 #### Como funciona
 
@@ -948,13 +981,17 @@ o primitivo de sincronia que cargas incrementais por watermark precisam, porque
   linhas por ~15 dias, então varra periodicamente. Objetos sem campo
   `IsDeleted` (ex.: `User`) falham com `INVALID_FIELD` — use a fonte padrão
   para eles.
-- Colunas de saída: `id`, `deleted_date`, `source`.
+- Colunas de saída: `id`, `deleted_date`, `source`, `latest_date_covered`
+  (a fronteira de cobertura confirmada pela API; NULL na fonte queryAll —
+  um valor anterior a `until` significa que a janela NÃO foi totalmente
+  coberta).
 
 #### Para que serve
 
-O padrão de upsert por watermark perde deletes silenciosamente (a deleção não
-avança o stamp). Combine-o com uma varredura periódica: faça o upsert das
-linhas alteradas e depois marque/remova os ids que esta função retorna.
+A carga por watermark captura os deletes dentro da janela quando roda
+`queryAll`, mas perde **purgas** e objetos sem `IsDeleted`. Combine-a com uma
+varredura periódica: faça o upsert das linhas alteradas e depois marque/remova
+os ids que esta função retorna.
 
 #### Uso no dia a dia
 
@@ -966,41 +1003,6 @@ SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead',
 -- estilo varredura (queryAll, sem datas exatas)
 SELECT id FROM salesforce_deleted_ids('sf', 'Lead',
     since := '2026-09-20T00:00:00', source := 'queryAll');
-```
-
-### O que faz
-
-Retorna os ids deletados na org para um sObject dentro de uma janela de tempo —
-o primitivo de sincronia que cargas incrementais por watermark precisam, porque
-**deletes não atualizam `SystemModstamp`**.
-
-#### Como funciona
-
-- Argumentos: `catalog` anexado, `object`; parâmetros nomeados opcionais
-  `since` / `until` em ISO-8601 (padrão: últimos 15 minutos até agora).
-- Janela ≤ 15 minutos: atendida pela API de replicação `getDeleted()` —
-  `deleted_date` exato por id, `source = 'getDeleted'`.
-- Janela maior: um scan `queryAll` (`WHERE IsDeleted = true AND SystemModstamp
-  >= since`) — `deleted_date` é NULL (o Salesforce não expõe o timestamp de
-  deleção ali), `source = 'queryAll'`; a lixeira retém linhas por ~15 dias,
-  então varra periodicamente.
-- Colunas de saída: `id`, `deleted_date`, `source`.
-
-#### Para que serve
-
-O padrão de upsert por watermark perde deletes silenciosamente (a deleção não
-avança o stamp). Combine-o com uma varredura periódica: faça o upsert das
-linhas alteradas e depois marque/remova os ids que esta função retorna.
-
-#### Uso no dia a dia
-
-```sql
--- janela exata (getDeleted)
-SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead',
-    since := '2026-09-30T00:00:00', until := '2026-09-30T00:15:00');
-
--- horizonte maior (varredura queryAll, retenção ~15 dias)
-SELECT id FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-20T00:00:00');
 ```
 
 ### `sf_query_mode`

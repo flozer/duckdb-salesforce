@@ -121,6 +121,11 @@ Use `login_url 'https://test.salesforce.com'` for a sandbox. To obtain the
 in your org and complete the OAuth flow as described in
 [docs/CONNECTED_APP.md](../CONNECTED_APP.md).
 
+For policy standardization the connector also accepts `read_only` as an
+`ATTACH` option (e.g. when your tooling appends `READ_ONLY TRUE` to every
+source). It is accepted and ignored: the catalog is read-only by design -
+every mutating operation throws - so the flag changes nothing.
+
 ### Auth sources
 
 The `auth_source` `ATTACH` option chooses *where* the OAuth credentials come
@@ -328,6 +333,11 @@ WHERE Name = 'Acme'
 LIMIT 10;
 ```
 
+Id literals in filters are validated locally at plan time: an `=`, `!=`, or
+`IN` literal compared to an Id-type field must be a real Salesforce Id (15 or
+18 alphanumeric characters). A malformed value fails immediately with a clear
+error instead of Salesforce's generic `INVALID_QUERY_FILTER_OPERATOR`.
+
 Schema is resolved lazily on first reference. To list the objects you can
 query, run a single global describe via:
 
@@ -526,6 +536,17 @@ the connector guesses at.
 Practical guidance: if you must handle a numeric/epoch time value, transform it
 **outside the scanner** — for example fetch the raw number some other way and
 apply DuckDB's `to_timestamp` to it.
+
+### Retries and read timeout
+
+Transient HTTP failures (429, 5xx, connection errors) are retried
+automatically: `sf_retry_max` attempts (default 3) with `sf_retry_backoff_ms`
+linear backoff (default 200 ms). Each attempt waits at most
+`sf_timeout_read_s` seconds (default 60, cap 3600) for the server's response.
+
+Raise the timeout when a legitimate server-side `COUNT()` or a scan on a very
+large object exceeds it and fails instead of completing - for example
+`SET sf_timeout_read_s = 300`. See the function manual for the full semantics.
 
 ## 7. Large extractions: Bulk + PK chunking
 
@@ -746,7 +767,7 @@ Scope and caveats:
 
 ### 11.1 The delete-sync pattern for incremental loads
 
-**Deletes do not update `SystemModstamp`.** A watermark-based incremental
+**A delete updates `SystemModstamp`** to the deletion time, and the deleted row stays visible via `queryAll` (`IsDeleted = true`) until purged (~15 days) — a watermark load running `queryAll` inside that window captures deletes within the watermark itself. What it misses: **purges** (bin emptied before the next load) and objects with no `IsDeleted` field (e.g. `User`) — covered by `salesforce_deleted_ids()` (getDeleted source). A watermark-based incremental
 load (`WHERE SystemModstamp > :last_watermark`) never notices them — deleted
 rows stay alive in your target table forever. Pair the watermark with a
 periodic delete sweep:
