@@ -60,14 +60,18 @@ remains v1.5.4/v1.5.5/v1.5.6).
   rewritten for the 4th column (27), `salesforce_attach_options.test` +5
   (read_only accepted; invalid values still rejected).
 - `clang-format` (project pin 11.0.1) clean.
-- Official `MainDistributionPipeline.yml`: recorded after the release-prep
-  push (see run record below).
+- Official `MainDistributionPipeline.yml` on the release-prep branch: 9/9
+  green (run
+  [38452235441](https://github.com/flozer/duckdb-salesforce/actions/runs/38452235441));
+  post-merge `main` run recorded below.
 
 ### Official CI run record
 
 `MainDistributionPipeline.yml` run
-[PENDING-CI](https://github.com/flozer/duckdb-salesforce/actions) (2026-10-13,
-against release-prep `main`) — **9/9 green**:
+[38452235441](https://github.com/flozer/duckdb-salesforce/actions/runs/38452235441)
+(2026-10-13, `workflow_dispatch` against release-prep branch
+`feat/v0.19.2-feedback-cycle`, PR
+[#88](https://github.com/flozer/duckdb-salesforce/pull/88)) — **9/9 green**:
 
 | DuckDB | linux_amd64 | windows_amd64 | osx_arm64 |
 |---|---|---|---|
