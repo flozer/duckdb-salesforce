@@ -62,22 +62,29 @@ remains v1.5.4/v1.5.5/v1.5.6).
 - `clang-format` (project pin 11.0.1) clean.
 - Official `MainDistributionPipeline.yml` on the release-prep branch: 9/9
   green (run
-  [38452235441](https://github.com/flozer/duckdb-salesforce/actions/runs/38452235441));
-  post-merge `main` run recorded below.
+  [38452235441](https://github.com/flozer/duckdb-salesforce/actions/runs/38452235441),
+  PR
+  [#88](https://github.com/flozer/duckdb-salesforce/pull/88)); post-merge
+  `main` run recorded below.
 
 ### Official CI run record
 
-`MainDistributionPipeline.yml` run
-[38452235441](https://github.com/flozer/duckdb-salesforce/actions/runs/38452235441)
-(2026-10-13, `workflow_dispatch` against release-prep branch
-`feat/v0.19.2-feedback-cycle`, PR
-[#88](https://github.com/flozer/duckdb-salesforce/pull/88)) — **9/9 green**:
+Post-merge `main`: run
+[38552907137](https://github.com/flozer/duckdb-salesforce/actions/runs/38552907137)
+(2026-10-14, `workflow_dispatch` against `main` @ `d524500`, after PR
+[#88](https://github.com/flozer/duckdb-salesforce/pull/88) merged) — **9/9
+green**:
 
 | DuckDB | linux_amd64 | windows_amd64 | osx_arm64 |
 |---|---|---|---|
 | v1.5.4 | Pass | Pass | Pass |
 | v1.5.5 | Pass | Pass | Pass |
 | v1.5.6 | Pass | Pass | Pass |
+
+Release-prep branch pre-merge run also 9/9:
+[38452235441](https://github.com/flozer/duckdb-salesforce/actions/runs/38452235441)
+(2026-10-13, PR
+[#88](https://github.com/flozer/duckdb-salesforce/pull/88)).
 
 ## Gates
 
