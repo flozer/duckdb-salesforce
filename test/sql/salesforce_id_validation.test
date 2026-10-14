@@ -1,0 +1,49 @@
+# name: test/sql/salesforce_id_validation.test
+# description: P5b -- Id-format validation. An =/!=/IN literal compared to an
+#              Id-type field must be a valid Salesforce Id (15 or 18
+#              alphanumeric chars); anything else fails at plan time with a
+#              clear error instead of Salesforce's
+#              INVALID_QUERY_FILTER_OPERATOR. Live-proven 2026-10-06: 3/10-char
+#              prefixes and non-alphanumeric junk are rejected server-side.
+# group: [salesforce]
+
+require salesforce
+
+statement ok
+SET sf_mock_token_status = 200;
+
+statement ok
+SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+
+statement ok
+SET sf_mock_sobjects_body = '{"sobjects":[{"name":"Account","queryable":true}]}';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Account","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+
+statement ok
+SET sf_mock_query_body = '{"done":true,"records":[{"Id":"0014x00000kXpSEAAU","Name":"A"}]}';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+# valid 15-char Id: pushed normally (count via COUNT pushdown)
+statement ok
+SELECT count(*) FROM sf.Account WHERE Id = '0014x00000kXpSE';
+
+# invalid literal: clear plan-time error instead of Salesforce's
+# INVALID_QUERY_FILTER_OPERATOR
+statement error
+SELECT count(*) FROM sf.Account WHERE Id = 'x';
+----
+
+statement error
+SELECT count(*) FROM sf.Account WHERE Id = '0014x00000kXpSE!';
+----
+
+statement error
+SELECT count(*) FROM sf.Account WHERE Id IN ('0014x00000kXpSE', 'nope');
+----
+
+statement ok
+DETACH sf;

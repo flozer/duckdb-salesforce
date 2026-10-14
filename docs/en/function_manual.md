@@ -505,6 +505,33 @@ SET sf_retry_max = 5;            -- more attempts
 SET sf_retry_backoff_ms = 1000;  -- 1s, 2s, 3s, 4s, 5s backoff
 ```
 
+### `sf_timeout_read_s`
+
+#### What it does
+
+HTTP read timeout in seconds **per attempt** (default `60`, clamped to
+`[1,3600]`). Raise it when a server-side `COUNT()` or a scan on a very large
+object exceeds the default and fails instead of completing.
+
+#### How it works
+
+Applied to every HTTP attempt, retries included: a call tuned with
+`sf_retry_max` waits up to `sf_timeout_read_s` per attempt, so the worst-case
+wall time is roughly `sf_retry_max x sf_timeout_read_s`.
+
+#### Why use it
+
+A legitimate heavy COUNT() on a multi-million-row object can take minutes
+server-side. Without raising the timeout the attempt is cut at 60s and, once
+the retry budget is spent, the whole query fails even though the org was
+still working.
+
+#### Daily use
+
+```sql
+SET sf_timeout_read_s = 300;  -- give a heavy COUNT() up to 5 min per attempt
+```
+
 ### API-quota governor
 
 The governor consults the Salesforce `/limits` resource and the
@@ -826,8 +853,13 @@ FROM salesforce_bulk_resume('sf', '7504x00000ABCDef');
 #### What it does
 
 Returns the ids deleted in the org for an sObject within a time window — the
-sync primitive that watermark-based incremental loads need, because **deletes
-do not update `SystemModstamp`**.
+sync primitive that watermark-based incremental loads need. **A delete updates
+`SystemModstamp`** to the deletion time, and the deleted row stays visible via
+`queryAll` (`IsDeleted = true`) until purged (~15 days) — so a watermark load
+running `queryAll` inside that window captures deletes within the watermark
+itself. What it misses: **purges** (bin emptied before the next load), objects
+with no `IsDeleted` field (e.g. `User`), and exact deletion timestamps —
+covered by this function's getDeleted() source.
 
 #### How it works
 
@@ -845,13 +877,16 @@ do not update `SystemModstamp`**.
   bin holds rows only ~15 days, so sweep periodically. Objects with no
   `IsDeleted` field (e.g. `User`) fail with `INVALID_FIELD` — use the
   default source for those.
-- Output columns: `id`, `deleted_date`, `source`.
+- Output columns: `id`, `deleted_date`, `source`, `latest_date_covered`
+  (the coverage frontier the API confirmed; NULL for the queryAll source —
+  a value earlier than `until` means the window was NOT fully covered).
 
 #### Why use it
 
-The watermark upsert pattern misses deletes silently (deletion never advances
-the stamp). Pair it with a periodic delete sweep: upsert the changed rows, then
-mark/remove the ids this function returns.
+The watermark upsert pattern captures in-window deletes when running
+`queryAll`, but misses **purges** and objects without `IsDeleted`. Pair it
+with a periodic delete sweep: upsert the changed rows, then mark/remove the
+ids this function returns.
 
 #### Daily use
 
@@ -863,41 +898,6 @@ SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead',
 -- sweep-style (queryAll, no exact dates)
 SELECT id FROM salesforce_deleted_ids('sf', 'Lead',
     since := '2026-09-20T00:00:00', source := 'queryAll');
-```
-
-### What it does
-
-Returns the ids deleted in the org for an sObject within a time window — the
-sync primitive that watermark-based incremental loads need, because **deletes
-do not update `SystemModstamp`**.
-
-#### How it works
-
-- Arguments: attached `catalog`, sObject `object`; optional named `since` /
-  `until` ISO-8601 timestamps (defaults: last 15 minutes → now).
-- Window ≤ 15 minutes: served by the Replication API `getDeleted()` — exact
-  `deleted_date` per id, `source = 'getDeleted'`.
-- Wider window: one `queryAll` scan (`WHERE IsDeleted = true AND
-  SystemModstamp >= since`) — `deleted_date` is NULL (Salesforce does not
-  expose deletion timestamps there), `source = 'queryAll'`; the recycle bin
-  holds rows only ~15 days, so sweep periodically.
-- Output columns: `id`, `deleted_date`, `source`.
-
-#### Why use it
-
-The watermark upsert pattern misses deletes silently (deletion never advances
-the stamp). Pair it with a periodic delete sweep: upsert the changed rows, then
-mark/remove the ids this function returns.
-
-#### Daily use
-
-```sql
--- exact window (getDeleted)
-SELECT id, deleted_date FROM salesforce_deleted_ids('sf', 'Lead',
-    since := '2026-09-30T00:00:00', until := '2026-09-30T00:15:00');
-
--- longer horizon (queryAll sweep, ~15-day retention)
-SELECT id FROM salesforce_deleted_ids('sf', 'Lead', since := '2026-09-20T00:00:00');
 ```
 
 ### `sf_query_mode`

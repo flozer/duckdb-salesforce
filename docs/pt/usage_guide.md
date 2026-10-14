@@ -123,6 +123,11 @@ o `client_id`, o `client_secret` e o `refresh_token`, configure um
 Connected App na sua org e conclua o fluxo OAuth conforme descrito em
 [docs/CONNECTED_APP.pt-BR.md](../CONNECTED_APP.pt-BR.md).
 
+Para padronização de política, o conector também aceita `read_only` como
+opção de `ATTACH` (ex.: quando sua ferramenta anexa `READ_ONLY TRUE` a toda
+fonte). Ele é aceito e ignorado: o catálogo é somente leitura por design -
+toda operação de escrita lança erro - então a flag não muda nada.
+
 ### 3.1 Fontes de autenticação
 
 Por padrão, o `ATTACH` lê as credenciais das próprias opções do comando
@@ -305,6 +310,12 @@ FROM sf.Account
 WHERE Name = 'Acme'
 LIMIT 10;
 ```
+
+Literais de Id em filtros são validados localmente em tempo de plano: um
+literal de `=`, `!=` ou `IN` comparado a um campo do tipo Id precisa ser um Id
+Salesforce real (15 ou 18 caracteres alfanuméricos). Um valor malformado falha
+de imediato com um erro claro em vez do genérico
+`INVALID_QUERY_FILTER_OPERATOR` do Salesforce.
 
 O schema é resolvido sob demanda (lazy) na primeira referência. Para listar
 os objetos que você pode consultar, execute um único describe global via:
@@ -522,6 +533,19 @@ exemplo**, não como algo que o conector deva adivinhar. Se você precisar
 trabalhar com um valor de tempo numérico/epoch, faça a transformação **fora do
 scanner** — por exemplo, aplique `to_timestamp` do DuckDB sobre o número bruto
 obtido por outro caminho.
+
+### Retries e timeout de leitura
+
+Falhas HTTP transientes (429, 5xx, erros de conexão) são retentadas
+automaticamente: `sf_retry_max` tentativas (padrão 3) com backoff linear
+`sf_retry_backoff_ms` (padrão 200 ms). Cada tentativa espera no máximo
+`sf_timeout_read_s` segundos (padrão 60, teto 3600) pela resposta do
+servidor.
+
+Aumente o timeout quando um `COUNT()` server-side legítimo ou um scan em um
+objeto muito grande o excede e falha em vez de completar - por exemplo
+`SET sf_timeout_read_s = 300`. Veja o manual de funções para a semântica
+completa.
 
 ## 7. Extrações grandes: Bulk + PK chunking
 
@@ -1059,10 +1083,12 @@ utility `salesforce_query()` é sempre `query` e ignora `sf_query_mode`.
 
 ### 12.1 O padrão de delete-sync para cargas incrementais
 
-**Deletes não atualizam `SystemModstamp`.** Uma carga incremental por
-watermark (`WHERE SystemModstamp > :ultimo_watermark`) nunca os percebe — as
-linhas deletadas ficam vivas na tabela de destino para sempre. Combine o
-watermark com uma varredura periódica de deletados:
+**Uma deleção atualiza o `SystemModstamp`** para o horário da exclusão, e a
+linha deletada permanece visível via `queryAll` (`IsDeleted = true`) até a
+purga da lixeira (~15 dias) — então uma carga por watermark rodando `queryAll`
+dentro dessa janela captura os deletes no próprio watermark. O que a carga
+por watermark **não** captura: a purga (lixeira esvaziada antes da próxima
+carga) — daí a varredura periódica de deletados:
 
 ```sql
 -- opção 1: varredura via queryAll (predicado server-side; as linhas ficam

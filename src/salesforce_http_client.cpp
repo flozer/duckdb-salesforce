@@ -92,7 +92,8 @@ enum class Method { GET, POST };
 
 class LiveHttpClient final : public SalesforceHttpClient {
 public:
-	LiveHttpClient(int retry_max, int backoff_ms) : retry_max_(retry_max), backoff_ms_(backoff_ms) {
+	LiveHttpClient(int retry_max, int backoff_ms, int read_timeout_s)
+	    : retry_max_(retry_max), backoff_ms_(backoff_ms), read_timeout_s_(read_timeout_s) {
 	}
 
 	HttpResponse Post(const HttpRequest &request) override {
@@ -107,6 +108,7 @@ private:
 	// attempts for 429/5xx/connection errors, and the linear backoff base
 	// (sleep = backoff_ms * attempt).
 	int retry_max_;
+	int read_timeout_s_;
 	int backoff_ms_;
 
 	void Backoff(int attempt) {
@@ -140,7 +142,7 @@ private:
 		for (int attempt = 1; attempt <= max_attempts; attempt++) {
 			httplib::SSLClient cli(url.host, url.port);
 			cli.set_connection_timeout(10, 0);
-			cli.set_read_timeout(60, 0);
+			cli.set_read_timeout(read_timeout_s_, 0);
 			cli.set_write_timeout(60, 0);
 			cli.enable_server_certificate_verification(true); // never disabled
 			ApplyTrustStore(cli);
@@ -406,8 +408,13 @@ static string SettingStr(ClientContext &ctx, const char *key) {
 
 } // namespace
 
-unique_ptr<SalesforceHttpClient> CreateLiveHttpClient(int retry_max, int backoff_ms) {
-	return make_uniq_base<SalesforceHttpClient, LiveHttpClient>(retry_max, backoff_ms);
+unique_ptr<SalesforceHttpClient> CreateLiveHttpClient(int retry_max, int backoff_ms, int read_timeout_s) {
+	if (read_timeout_s < 1) {
+		read_timeout_s = 1;
+	} else if (read_timeout_s > 3600) {
+		read_timeout_s = 3600;
+	}
+	return make_uniq_base<SalesforceHttpClient, LiveHttpClient>(retry_max, backoff_ms, read_timeout_s);
 }
 
 unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &context) {
@@ -497,7 +504,16 @@ unique_ptr<SalesforceHttpClient> BuildHttpClientForContext(ClientContext &contex
 	} else if (backoff_ms > 60000) {
 		backoff_ms = 60000;
 	}
-	return CreateLiveHttpClient(retry_max, backoff_ms);
+	// P1 mitigation (consumer feedback): configurable HTTP read timeout, so a
+	// slow server-side COUNT() on a very large object can be waited out
+	// instead of failing the call. Default preserves the 60s behavior.
+	int read_timeout_s = static_cast<int>(SettingInt(context, "sf_timeout_read_s", 60));
+	if (read_timeout_s < 1) {
+		read_timeout_s = 1;
+	} else if (read_timeout_s > 3600) {
+		read_timeout_s = 3600;
+	}
+	return CreateLiveHttpClient(retry_max, backoff_ms, read_timeout_s);
 }
 
 } // namespace duckdb

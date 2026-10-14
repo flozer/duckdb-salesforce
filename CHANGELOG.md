@@ -12,6 +12,31 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.19.2](docs/RELEASE_NOTES_v0.19.2.md) — 2026-10-13
+
+- **Doc fix: deletes DO update `SystemModstamp`** — the v0.19.0 pitfall
+  statement ("deletes do not update SystemModstamp") was wrong (live-proven:
+  a watermark queryAll load carried 8,576/8,576 deleted rows). What actually
+  escapes a watermark load: recycle-bin purges before the next load and
+  objects with no `IsDeleted` field (e.g. `User`). Corrected in EN/PT usage
+  guides, function manuals, and the in-binary function description.
+- **`salesforce_deleted_ids()` returns `latest_date_covered`** (4th column,
+  consumer feedback P4): the Replication API coverage frontier, so a sweep
+  can checkpoint how far getDeleted actually covered on large windows.
+- **`read_only` ATTACH option accepted** (P5a): a no-op kept for policy
+  standardization with tooling that appends `READ_ONLY TRUE` to every source
+  (the catalog is read-only by design).
+- **Id literal validation** (P5b): an `=`/`!=`/`IN` literal compared to an
+  Id-type field must be a valid Salesforce Id (15 or 18 alphanumeric chars);
+  malformed values fail at plan time with a clear error instead of
+  Salesforce's generic `INVALID_QUERY_FILTER_OPERATOR`.
+- **`sf_timeout_read_s` setting** (P1 mitigation): per-attempt HTTP read
+  timeout (default 60, clamp [1,3600]) so a legitimate heavy server-side
+  COUNT() can be given minutes instead of failing at 60s.
+- New tests: Id validation (11), attach options +5 (read_only), delete-sync
+  rewritten for the 4th column (27); suite 59 files, 1657 assertions,
+  0 failures.
+
 ## [v0.19.1](docs/RELEASE_NOTES_v0.19.1.md) — 2026-10-09
 
 - **Fix `salesforce_deleted_ids()`** — three real-world gaps: queryAll sweep
