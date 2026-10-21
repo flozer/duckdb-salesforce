@@ -5,6 +5,7 @@
 // persistence, and no secret value ever appears in an error message.
 
 #include "salesforce_config.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"

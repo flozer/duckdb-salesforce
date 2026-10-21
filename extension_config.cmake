@@ -8,4 +8,8 @@ duckdb_extension_load(salesforce
 
 # v2 (cyanoptera): static linkage is opt-in; without this the unittest/shell
 # binaries do not register salesforce and every test skips on 'require'.
-duckdb_extension_statically_link(salesforce)
+# 2.0 makes static linkage opt-in; 1.5.x links every built extension and does
+# not know this function.
+if(COMMAND duckdb_extension_statically_link)
+    duckdb_extension_statically_link(salesforce)
+endif()

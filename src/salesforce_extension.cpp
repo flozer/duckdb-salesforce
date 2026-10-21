@@ -17,6 +17,7 @@
 #include "salesforce_bulk_resume.hpp"
 #include "salesforce_delete_sync.hpp"
 #include "salesforce_metadata.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"

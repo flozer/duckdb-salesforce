@@ -4,6 +4,7 @@
 // field / relationship names, which are the user's own schema).
 
 #include "salesforce_reldiag.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/string_util.hpp"
 
@@ -59,7 +60,7 @@ struct RelationshipsGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> RelationshipsBind(ClientContext &, TableFunctionBindInput &, vector<LogicalType> &return_types,
-                                           vector<Identifier> &names) {
+                                           sf_compat::names_t &names) {
 	names = {"row_type",
 	         "object",
 	         "relationships_mode",
@@ -97,7 +98,7 @@ unique_ptr<GlobalTableFunctionState> RelationshipsInit(ClientContext &, TableFun
 }
 
 void SetStr(DataChunk &out, idx_t col, idx_t row, const string &v) {
-	FlatVector::GetDataMutable<string_t>(out.data[col])[row] = StringVector::AddString(out.data[col], v);
+	sf_compat::flat_data_mutable<string_t>(out.data[col])[row] = StringVector::AddString(out.data[col], v);
 }
 void SetStrOrNull(DataChunk &out, idx_t col, idx_t row, const string &v) {
 	if (v.empty()) {
@@ -107,7 +108,7 @@ void SetStrOrNull(DataChunk &out, idx_t col, idx_t row, const string &v) {
 	}
 }
 void SetInt(DataChunk &out, idx_t col, idx_t row, int64_t v) {
-	FlatVector::GetDataMutable<int64_t>(out.data[col])[row] = v;
+	sf_compat::flat_data_mutable<int64_t>(out.data[col])[row] = v;
 }
 void SetIntOrNull(DataChunk &out, idx_t col, idx_t row, int64_t v) {
 	if (v < 0) {

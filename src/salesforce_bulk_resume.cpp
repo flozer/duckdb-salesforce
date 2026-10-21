@@ -18,6 +18,7 @@
 #include "salesforce_http.hpp"
 #include "salesforce_session.hpp"
 #include "salesforce_storage.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/client_context.hpp"
@@ -68,7 +69,7 @@ struct BulkResumeGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> BulkResumeBind(ClientContext &context, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<Identifier> &names) {
+                                        vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	if (input.inputs.size() != 2) {
 		throw BinderException("salesforce_bulk_resume(catalog, job_id) takes exactly 2 arguments.");
 	}
@@ -145,7 +146,7 @@ void BulkResumeFunction(ClientContext &context, TableFunctionInput &data, DataCh
 				auto &cells = gstate.page.rows[gstate.cursor];
 				for (idx_t c = 0; c < output.ColumnCount(); c++) {
 					if (c < cells.size() && !cells[c].empty()) {
-						FlatVector::GetDataMutable<string_t>(output.data[c])[row] =
+						sf_compat::flat_data_mutable<string_t>(output.data[c])[row] =
 						    StringVector::AddString(output.data[c], cells[c]);
 					} else {
 						FlatVector::SetNull(output.data[c], row, true);
@@ -172,8 +173,8 @@ void BulkResumeFunction(ClientContext &context, TableFunctionInput &data, DataCh
 TableFunction GetSalesforceBulkResumeFunction() {
 	TableFunction fn("salesforce_bulk_resume", {LogicalType::VARCHAR, LogicalType::VARCHAR}, BulkResumeFunction,
 	                 BulkResumeBind, BulkResumeInit);
-	fn.GetSignature().GetParameter(0).SetName(Identifier("catalog"));
-	fn.GetSignature().GetParameter(1).SetName(Identifier("job_id"));
+	sf_compat::set_param_name(fn, 0, "catalog");
+	sf_compat::set_param_name(fn, 1, "job_id");
 
 	return fn;
 }

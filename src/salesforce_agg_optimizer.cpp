@@ -39,6 +39,7 @@
 
 #include "salesforce_agg_optimizer.hpp"
 #include "salesforce_scan.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/config.hpp"
