@@ -166,7 +166,7 @@ struct AggGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> AggBind(ClientContext &context, TableFunctionBindInput &input,
-                                 vector<LogicalType> &return_types, vector<string> &names) {
+                                 vector<LogicalType> &return_types, vector<Identifier> &names) {
 	auto &args = input.inputs;
 	if (args.size() < 3 || args.size() > 5) {
 		throw BinderException("salesforce_aggregate(catalog, object, aggregates [, filter [, "
@@ -216,14 +216,14 @@ unique_ptr<FunctionData> AggBind(ClientContext &context, TableFunctionBindInput 
 		AggColumn col;
 		col.name = field;
 		col.key = field;
-		names.push_back(col.name);
+		names.push_back(Identifier(col.name));
 		return_types.push_back(LogicalType::VARCHAR);
 		bind->columns.push_back(std::move(col));
 	}
 	idx_t unaliased = 0;
 	for (auto &term : SplitTopLevelCommas(aggregates)) {
 		AggColumn col = ParseTerm(term, unaliased);
-		names.push_back(col.name);
+		names.push_back(Identifier(col.name));
 		return_types.push_back(LogicalType::VARCHAR);
 		bind->columns.push_back(std::move(col));
 	}
@@ -287,7 +287,8 @@ void AggFunction(ClientContext &context, TableFunctionInput &data, DataChunk &ou
 			if (!found || is_null) {
 				FlatVector::SetNull(output.data[c], produced, true);
 			} else {
-				FlatVector::GetData<string_t>(output.data[c])[produced] = StringVector::AddString(output.data[c], val);
+				FlatVector::GetDataMutable<string_t>(output.data[c])[produced] =
+				    StringVector::AddString(output.data[c], val);
 			}
 		}
 		gs.cursor++;
@@ -301,7 +302,11 @@ void AggFunction(ClientContext &context, TableFunctionInput &data, DataChunk &ou
 TableFunction GetSalesforceAggregateFunction() {
 	TableFunction fn("salesforce_aggregate", {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
 	                 AggFunction, AggBind, AggInit);
-	fn.varargs = LogicalType::VARCHAR; // optional 4th arg: filter
+	fn.GetSignature().GetParameter(0).SetName(Identifier("catalog"));
+	fn.GetSignature().GetParameter(1).SetName(Identifier("object"));
+	fn.GetSignature().GetParameter(2).SetName(Identifier("aggregates"));
+
+	fn.GetSignature().AddArgs(Identifier("filter"), LogicalType::VARCHAR); // optional 4th arg: filter
 	return fn;
 }
 

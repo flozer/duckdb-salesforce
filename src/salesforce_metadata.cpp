@@ -48,7 +48,7 @@ struct PicklistBindData : public TableFunctionData {
 };
 
 unique_ptr<FunctionData> PicklistBind(ClientContext &, TableFunctionBindInput &input, vector<LogicalType> &return_types,
-                                      vector<string> &names) {
+                                      vector<Identifier> &names) {
 	CheckArgs(input, 3, "salesforce_picklist_values(catalog, object, field) takes 3 arguments.");
 	auto bind = make_uniq<PicklistBindData>();
 	bind->alias = TrimArg(input.inputs[0]);
@@ -92,7 +92,7 @@ struct RecordTypesBindData : public TableFunctionData {
 };
 
 unique_ptr<FunctionData> RecordTypesBind(ClientContext &, TableFunctionBindInput &input,
-                                         vector<LogicalType> &return_types, vector<string> &names) {
+                                         vector<LogicalType> &return_types, vector<Identifier> &names) {
 	CheckArgs(input, 2, "salesforce_record_types(catalog, object) takes 2 arguments.");
 	auto bind = make_uniq<RecordTypesBindData>();
 	bind->alias = TrimArg(input.inputs[0]);
@@ -143,14 +143,21 @@ void MetaFunction(ClientContext &context, TableFunctionInput &data, DataChunk &o
 } // namespace
 
 TableFunction GetSalesforcePicklistValuesFunction() {
-	return TableFunction("salesforce_picklist_values",
-	                     {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                     MetaFunction<PicklistBindData, PicklistBuild>, PicklistBind, MetaInit);
+	TableFunction fn =
+	    TableFunction("salesforce_picklist_values", {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
+	                  MetaFunction<PicklistBindData, PicklistBuild>, PicklistBind, MetaInit);
+	fn.GetSignature().GetParameter(0).SetName(Identifier("catalog"));
+	fn.GetSignature().GetParameter(1).SetName(Identifier("object"));
+	fn.GetSignature().GetParameter(2).SetName(Identifier("field"));
+	return fn;
 }
 
 TableFunction GetSalesforceRecordTypesFunction() {
-	return TableFunction("salesforce_record_types", {LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                     MetaFunction<RecordTypesBindData, RecordTypesBuild>, RecordTypesBind, MetaInit);
+	TableFunction fn = TableFunction("salesforce_record_types", {LogicalType::VARCHAR, LogicalType::VARCHAR},
+	                                 MetaFunction<RecordTypesBindData, RecordTypesBuild>, RecordTypesBind, MetaInit);
+	fn.GetSignature().GetParameter(0).SetName(Identifier("catalog"));
+	fn.GetSignature().GetParameter(1).SetName(Identifier("object"));
+	return fn;
 }
 
 } // namespace duckdb

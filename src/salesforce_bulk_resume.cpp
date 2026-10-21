@@ -68,7 +68,7 @@ struct BulkResumeGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> BulkResumeBind(ClientContext &context, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<string> &names) {
+                                        vector<LogicalType> &return_types, vector<Identifier> &names) {
 	if (input.inputs.size() != 2) {
 		throw BinderException("salesforce_bulk_resume(catalog, job_id) takes exactly 2 arguments.");
 	}
@@ -111,7 +111,10 @@ unique_ptr<FunctionData> BulkResumeBind(ClientContext &context, TableFunctionBin
 		data->column_types.push_back(LogicalType::VARCHAR);
 	}
 	return_types = data->column_types;
-	names = data->column_names;
+	names.clear();
+	for (auto &n : data->column_names) {
+		names.push_back(Identifier(n));
+	}
 	return std::move(data);
 }
 
@@ -142,7 +145,7 @@ void BulkResumeFunction(ClientContext &context, TableFunctionInput &data, DataCh
 				auto &cells = gstate.page.rows[gstate.cursor];
 				for (idx_t c = 0; c < output.ColumnCount(); c++) {
 					if (c < cells.size() && !cells[c].empty()) {
-						FlatVector::GetData<string_t>(output.data[c])[row] =
+						FlatVector::GetDataMutable<string_t>(output.data[c])[row] =
 						    StringVector::AddString(output.data[c], cells[c]);
 					} else {
 						FlatVector::SetNull(output.data[c], row, true);
@@ -169,6 +172,9 @@ void BulkResumeFunction(ClientContext &context, TableFunctionInput &data, DataCh
 TableFunction GetSalesforceBulkResumeFunction() {
 	TableFunction fn("salesforce_bulk_resume", {LogicalType::VARCHAR, LogicalType::VARCHAR}, BulkResumeFunction,
 	                 BulkResumeBind, BulkResumeInit);
+	fn.GetSignature().GetParameter(0).SetName(Identifier("catalog"));
+	fn.GetSignature().GetParameter(1).SetName(Identifier("job_id"));
+
 	return fn;
 }
 

@@ -12,6 +12,7 @@
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/common/vector/struct_vector.hpp"
 
 #include <cctype>
 
@@ -90,14 +91,16 @@ static void AppendRelationshipStruct(Vector &vec, idx_t row, const SalesforceFie
 	auto &entries = StructVector::GetEntries(vec);
 	string nested = sfjson::ExtractObject(record_json, field.relationship_name);
 	if (nested.empty()) {
-		FlatVector::SetNull(vec, row, true); // parent null/missing -> null struct
+		// 2.0: writing a struct child clears the parent's null flag - null the
+		// children FIRST, the parent validity LAST.
 		for (auto &child : entries) {
-			FlatVector::SetNull(*child, row, true);
+			FlatVector::SetNull(child, row, true);
 		}
+		FlatVector::SetNull(vec, row, true); // parent null/missing -> null struct
 		return;
 	}
 	for (idx_t c = 0; c < field.children.size() && c < entries.size(); c++) {
-		AppendJsonValue(*entries[c], row, field.children[c], nested);
+		AppendJsonValue(entries[c], row, field.children[c], nested);
 	}
 }
 
@@ -141,7 +144,7 @@ void AppendTypedCell(Vector &vec, idx_t row, const SalesforceField &field, const
 	// String/blob go through the vector's own string heap (the correct
 	// vectorized path — SetValue would build a malformed string_t here).
 	if (type.id() == LogicalTypeId::VARCHAR) {
-		FlatVector::GetData<string_t>(vec)[row] = StringVector::AddString(vec, raw);
+		FlatVector::GetDataMutable<string_t>(vec)[row] = StringVector::AddString(vec, raw);
 		return;
 	}
 	if (type.id() == LogicalTypeId::BLOB) {
@@ -149,7 +152,8 @@ void AppendTypedCell(Vector &vec, idx_t row, const SalesforceField &field, const
 		// is not swallowed/replaced by the generic decode error.
 		try {
 			string bytes = DecodeBase64(raw);
-			FlatVector::GetData<string_t>(vec)[row] = StringVector::AddStringOrBlob(vec, bytes.data(), bytes.size());
+			FlatVector::GetDataMutable<string_t>(vec)[row] =
+			    StringVector::AddStringOrBlob(vec, bytes.data(), bytes.size());
 			return;
 		} catch (const std::exception &) {
 			// A blob body comes back as a URL reference (#v1.3 §11a): clear,
@@ -219,7 +223,7 @@ struct DecodeGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> DecodeBind(ClientContext &, TableFunctionBindInput &input,
-                                           vector<LogicalType> &return_types, vector<string> &names) {
+                                           vector<LogicalType> &return_types, vector<Identifier> &names) {
 	if (input.inputs.size() < 2) {
 		throw BinderException("salesforce_decode(fields_json, records_json) requires two arguments");
 	}
@@ -232,7 +236,7 @@ static unique_ptr<FunctionData> DecodeBind(ClientContext &, TableFunctionBindInp
 		throw BinderException("salesforce_decode: fields_json described no fields");
 	}
 	for (auto &f : bind->fields) {
-		names.push_back(f.name);
+		names.push_back(Identifier(f.name));
 		return_types.push_back(f.duckdb_type);
 	}
 	return std::move(bind);
@@ -261,8 +265,11 @@ static void DecodeFunction(ClientContext &, TableFunctionInput &data, DataChunk 
 } // namespace
 
 TableFunction GetSalesforceDecodeFunction() {
-	return TableFunction("salesforce_decode", {LogicalType::VARCHAR, LogicalType::VARCHAR}, DecodeFunction, DecodeBind,
-	                     DecodeInitGlobal);
+	TableFunction fn = TableFunction("salesforce_decode", {LogicalType::VARCHAR, LogicalType::VARCHAR}, DecodeFunction,
+	                                 DecodeBind, DecodeInitGlobal);
+	fn.GetSignature().GetParameter(0).SetName(Identifier("fields_json"));
+	fn.GetSignature().GetParameter(1).SetName(Identifier("records_json"));
+	return fn;
 }
 
 } // namespace duckdb

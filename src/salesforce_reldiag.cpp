@@ -59,7 +59,7 @@ struct RelationshipsGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> RelationshipsBind(ClientContext &, TableFunctionBindInput &, vector<LogicalType> &return_types,
-                                           vector<string> &names) {
+                                           vector<Identifier> &names) {
 	names = {"row_type",
 	         "object",
 	         "relationships_mode",
@@ -97,7 +97,7 @@ unique_ptr<GlobalTableFunctionState> RelationshipsInit(ClientContext &, TableFun
 }
 
 void SetStr(DataChunk &out, idx_t col, idx_t row, const string &v) {
-	FlatVector::GetData<string_t>(out.data[col])[row] = StringVector::AddString(out.data[col], v);
+	FlatVector::GetDataMutable<string_t>(out.data[col])[row] = StringVector::AddString(out.data[col], v);
 }
 void SetStrOrNull(DataChunk &out, idx_t col, idx_t row, const string &v) {
 	if (v.empty()) {
@@ -107,7 +107,7 @@ void SetStrOrNull(DataChunk &out, idx_t col, idx_t row, const string &v) {
 	}
 }
 void SetInt(DataChunk &out, idx_t col, idx_t row, int64_t v) {
-	FlatVector::GetData<int64_t>(out.data[col])[row] = v;
+	FlatVector::GetDataMutable<int64_t>(out.data[col])[row] = v;
 }
 void SetIntOrNull(DataChunk &out, idx_t col, idx_t row, int64_t v) {
 	if (v < 0) {

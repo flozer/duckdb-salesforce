@@ -168,7 +168,7 @@ string NormalizeDeletedDate(const string &raw) {
 }
 
 unique_ptr<FunctionData> DeletedIdsBind(ClientContext &context, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<string> &names) {
+                                        vector<LogicalType> &return_types, vector<Identifier> &names) {
 	if (input.inputs.size() != 2) {
 		throw BinderException("salesforce_deleted_ids(catalog, object) takes exactly 2 arguments "
 		                      "(since/until/source are named parameters).");
@@ -332,17 +332,18 @@ void DeletedIdsFunction(ClientContext &context, TableFunctionInput &data, DataCh
 	while (row < STANDARD_VECTOR_SIZE && g.cursor < g.rows.size()) {
 		auto &id = g.rows[g.cursor].first;
 		auto &deleted_date = g.rows[g.cursor].second;
-		FlatVector::GetData<string_t>(output.data[0])[row] = StringVector::AddString(output.data[0], id);
+		FlatVector::GetDataMutable<string_t>(output.data[0])[row] = StringVector::AddString(output.data[0], id);
 		if (deleted_date.empty()) {
 			FlatVector::SetNull(output.data[1], row, true);
 		} else {
-			FlatVector::GetData<string_t>(output.data[1])[row] = StringVector::AddString(output.data[1], deleted_date);
+			FlatVector::GetDataMutable<string_t>(output.data[1])[row] =
+			    StringVector::AddString(output.data[1], deleted_date);
 		}
-		FlatVector::GetData<string_t>(output.data[2])[row] = StringVector::AddString(output.data[2], g.source);
+		FlatVector::GetDataMutable<string_t>(output.data[2])[row] = StringVector::AddString(output.data[2], g.source);
 		if (g.latest_covered.empty()) {
 			FlatVector::SetNull(output.data[3], row, true);
 		} else {
-			FlatVector::GetData<string_t>(output.data[3])[row] =
+			FlatVector::GetDataMutable<string_t>(output.data[3])[row] =
 			    StringVector::AddString(output.data[3], g.latest_covered);
 		}
 		g.cursor++;
@@ -356,9 +357,14 @@ void DeletedIdsFunction(ClientContext &context, TableFunctionInput &data, DataCh
 TableFunction GetSalesforceDeletedIdsFunction() {
 	TableFunction fn("salesforce_deleted_ids", {LogicalType::VARCHAR, LogicalType::VARCHAR}, DeletedIdsFunction,
 	                 DeletedIdsBind, DeletedIdsInit);
-	fn.named_parameters["since"] = LogicalType::VARCHAR;
-	fn.named_parameters["until"] = LogicalType::VARCHAR;
-	fn.named_parameters["source"] = LogicalType::VARCHAR;
+	fn.GetSignature().GetParameter(0).SetName(Identifier("catalog"));
+	fn.GetSignature().GetParameter(1).SetName(Identifier("object"));
+
+	fn.GetSignature().WithTypedKwargs("options", [](TypedKwargs &kwargs) {
+		kwargs.Add("since", LogicalType::VARCHAR)
+		    .Add("until", LogicalType::VARCHAR)
+		    .Add("source", LogicalType::VARCHAR);
+	});
 	return fn;
 }
 
