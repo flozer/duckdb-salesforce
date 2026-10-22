@@ -41,7 +41,8 @@ jobs:
         # v1.5.2/v1.5.3 dropped 2026-09-14: Windows build fails on DuckDB's
         # vendored fmt vs the current MSVC toolchain (R-003); scope reduction,
         # not a code fix -- see README.md "Current Status" for detail.
-        duckdb_version: ["v1.5.4", "v1.5.5", "v1.5.6"]
+        # v2.0.0 added v0.20.0 (dual-line: one source tree, SF_DUCKDB_V2 gated).
+        duckdb_version: ["v1.5.4", "v1.5.5", "v1.5.6", "v2.0.0"]
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@8d2a39a7902396427e09f6aae4b0f60dc17cb94b
     with:
       extension_name: salesforce
