@@ -23,6 +23,10 @@
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression/bound_operator_expression.hpp"
 
+namespace duckdb {
+class Catalog; // forward decl: kept incomplete here on purpose (see get_catalog)
+} // namespace duckdb
+
 namespace sf_compat {
 
 // The names vector of a table-function bind callback: vector<string> on
@@ -163,15 +167,22 @@ inline duckdb::ColumnDefinition column_def(const std::string &name, const duckdb
 	return duckdb::ColumnDefinition(name, type);
 #endif
 }
-// get_catalog as a template: the Catalog type comes from the caller's TU
-// (including duckdb/catalog/catalog.hpp here breaks include order on 2.0/GCC).
+
+// get_catalog: dispatch through a dependent template so GCC parses this
+// header without needing duckdb::Catalog complete (including
+// duckdb/catalog/catalog.hpp here breaks include order on 2.0/GCC); the
+// Catalog type is completed in the caller's TU at instantiation.
+template <typename CatalogT, typename Ctx>
+inline auto &sf_get_catalog_impl(Ctx &context, const std::string &name) {
+#ifdef SF_DUCKDB_V2
+	return CatalogT::GetCatalog(context, duckdb::Identifier(name));
+#else
+	return CatalogT::GetCatalog(context, name);
+#endif
+}
 template <typename Ctx>
 inline auto &get_catalog(Ctx &context, const std::string &name) {
-#ifdef SF_DUCKDB_V2
-	return duckdb::Catalog::GetCatalog(context, duckdb::Identifier(name));
-#else
-	return duckdb::Catalog::GetCatalog(context, name);
-#endif
+	return sf_get_catalog_impl<duckdb::Catalog>(context, name);
 }
 
 // Bound function name as std::string.
