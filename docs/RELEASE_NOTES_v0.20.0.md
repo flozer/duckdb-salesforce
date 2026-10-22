@@ -63,15 +63,25 @@ v0.15.0 (baseline change) was a minor; compat-only additions were patches.
 ### Official CI run record
 
 `MainDistributionPipeline.yml` run
-[PENDING-CI](https://github.com/flozer/duckdb-salesforce/actions) —
-**12/12 green**:
+[39806838617](https://github.com/flozer/duckdb-salesforce/actions/runs/39806838617)
+(+ one failed-job rerun, same result) — **11/12 green**:
 
 | DuckDB | linux_amd64 | windows_amd64 | osx_arm64 |
 |---|---|---|---|
 | v1.5.4 | Pass | Pass | Pass |
 | v1.5.5 | Pass | Pass | Pass |
 | v1.5.6 | Pass | Pass | Pass |
-| v2.0.0 | Pass | Pass | Pass |
+| v2.0.0 | 58/59 suite* | Pass | Pass |
+
+\* **v2.0.0 / linux_amd64, one diagnostic assertion under investigation**:
+`salesforce_transport_auto` reads the `salesforce_last_transport()`
+diagnostic snapshot right after a forced-rest scan; on 2.0/GCC the
+three-field boolean evaluates false deterministically (the scan itself
+chooses `rest` correctly and every data-path assertion in the file
+passes; the same file passes on windows_amd64 and locally on Windows).
+Compile is clean, the offline suite is 58/59 there. Tracked in
+ROADMAP.MD §3.19 as a post-release investigation item; it does not
+affect query results on either line.
 
 ## Gates
 
