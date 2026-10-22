@@ -3,6 +3,7 @@
 // holds a secret (the SOQL is the user's own query text, no bearer/body).
 
 #include "salesforce_diag.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/string_util.hpp"
 
@@ -85,7 +86,7 @@ struct QueryCostGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> QueryCostBind(ClientContext &, TableFunctionBindInput &, vector<LogicalType> &return_types,
-                                       vector<string> &names) {
+                                       sf_compat::names_t &names) {
 	names = {
 	    "object",       "soql",           "transport",        "est_rows",     "transport_reason", "projected_fields",
 	    "total_fields", "pushed_filters", "residual_filters", "where_pushed", "pages_fetched",    "rows_emitted",
@@ -104,13 +105,13 @@ unique_ptr<GlobalTableFunctionState> QueryCostInit(ClientContext &, TableFunctio
 }
 
 void Str(DataChunk &out, idx_t col, const string &v) {
-	FlatVector::GetData<string_t>(out.data[col])[0] = StringVector::AddString(out.data[col], v);
+	sf_compat::flat_data_mutable<string_t>(out.data[col])[0] = StringVector::AddString(out.data[col], v);
 }
 void IntOrNull(DataChunk &out, idx_t col, int64_t v) {
 	if (v < 0) {
 		FlatVector::SetNull(out.data[col], 0, true);
 	} else {
-		FlatVector::GetData<int64_t>(out.data[col])[0] = v;
+		sf_compat::flat_data_mutable<int64_t>(out.data[col])[0] = v;
 	}
 }
 
@@ -130,20 +131,20 @@ void QueryCostFunction(ClientContext &, TableFunctionInput &data, DataChunk &out
 	Str(output, 2, c.transport);
 	IntOrNull(output, 3, c.est_rows);
 	Str(output, 4, c.transport_reason);
-	FlatVector::GetData<int64_t>(output.data[5])[0] = c.projected_fields;
-	FlatVector::GetData<int64_t>(output.data[6])[0] = c.total_fields;
-	FlatVector::GetData<int64_t>(output.data[7])[0] = c.pushed_filters;
-	FlatVector::GetData<int64_t>(output.data[8])[0] = c.residual_filters;
+	sf_compat::flat_data_mutable<int64_t>(output.data[5])[0] = c.projected_fields;
+	sf_compat::flat_data_mutable<int64_t>(output.data[6])[0] = c.total_fields;
+	sf_compat::flat_data_mutable<int64_t>(output.data[7])[0] = c.pushed_filters;
+	sf_compat::flat_data_mutable<int64_t>(output.data[8])[0] = c.residual_filters;
 	Str(output, 9, c.where_pushed);
 	IntOrNull(output, 10, c.pages_fetched);
-	FlatVector::GetData<int64_t>(output.data[11])[0] = c.rows_emitted;
-	FlatVector::GetData<bool>(output.data[12])[0] = c.bulk;
-	FlatVector::GetData<bool>(output.data[13])[0] = c.count_pushdown;
-	FlatVector::GetData<int64_t>(output.data[14])[0] = c.bulk_chunks;
+	sf_compat::flat_data_mutable<int64_t>(output.data[11])[0] = c.rows_emitted;
+	sf_compat::flat_data_mutable<bool>(output.data[12])[0] = c.bulk;
+	sf_compat::flat_data_mutable<bool>(output.data[13])[0] = c.count_pushdown;
+	sf_compat::flat_data_mutable<int64_t>(output.data[14])[0] = c.bulk_chunks;
 	Str(output, 15, c.query_mode);
 	if (c.quota_consulted) {
 		IntOrNull(output, 16, c.quota_remaining);
-		FlatVector::GetData<bool>(output.data[17])[0] = c.quota_allowed;
+		sf_compat::flat_data_mutable<bool>(output.data[17])[0] = c.quota_allowed;
 	} else {
 		FlatVector::SetNull(output.data[16], 0, true);
 		FlatVector::SetNull(output.data[17], 0, true);

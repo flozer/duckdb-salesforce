@@ -23,6 +23,7 @@
 #include "salesforce_session.hpp"
 #include "salesforce_soql.hpp"
 #include "salesforce_reldiag.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include <mutex>
 #include <unordered_map>
@@ -44,6 +45,7 @@
 #include "duckdb/storage/table_storage_info.hpp"
 #include "duckdb/transaction/transaction.hpp"
 #include "duckdb/transaction/transaction_manager.hpp"
+#include "duckdb/planner/logical_operator.hpp"
 
 namespace duckdb {
 
@@ -66,11 +68,20 @@ public:
 	                     SalesforceTokenSet token, vector<SalesforceField> fields)
 	    : TableCatalogEntry(catalog, schema, info), config_(std::move(config)), token_(std::move(token)),
 	      fields_(std::move(fields)) {
-		for (auto &col : columns.Logical()) {
-			column_names_.push_back(col.Name());
+		for (auto &col : info.columns.Logical()) {
+			columns_.AddColumn(ColumnDefinition(col.Name(), col.Type()));
+		}
+		for (auto &col : columns_.Logical()) {
+			column_names_.push_back(sf_compat::name_of(col.Name()));
 			column_types_.push_back(col.Type());
 		}
 	}
+
+#ifdef SF_DUCKDB_V2
+	const ColumnList &GetColumns() const override {
+		return columns_;
+	}
+#endif
 
 	unique_ptr<BaseStatistics> GetStatistics(ClientContext &, column_t) override {
 		return nullptr;
@@ -84,11 +95,11 @@ public:
 		auto data = make_uniq<SalesforceScanBindData>();
 		data->config = config_;
 		data->token = token_;
-		data->object = name;
+		data->object = sf_compat::name_of(name);
 		data->fields = fields_;
 		data->column_names = column_names_;
 		data->column_types = column_types_;
-		data->catalog_alias = ParentCatalog().GetName(); // #v1.6 query_explain
+		data->catalog_alias = sf_compat::name_of(ParentCatalog().GetName()); // #v1.6 query_explain
 		bind_data = std::move(data);
 		return GetSalesforceScanFunction();
 	}
@@ -97,6 +108,7 @@ private:
 	SalesforceConfig config_;
 	SalesforceTokenSet token_;
 	vector<SalesforceField> fields_;
+	ColumnList columns_;
 	vector<string> column_names_;
 	vector<LogicalType> column_types_;
 };
@@ -158,7 +170,7 @@ public:
 			batch.push_back(object);
 			for (auto &kv : listing_) {
 				if (tables_.find(kv.first) == tables_.end() && kv.first != key) {
-					batch.push_back(kv.second->name);
+					batch.push_back(sf_compat::name_of(kv.second->name));
 				}
 			}
 			std::unordered_map<string, SalesforceDescribe> got;
@@ -257,13 +269,18 @@ private:
 	// Build a table entry from a described schema and insert it into the cache.
 	// Caller MUST hold lock_. Drops compound fields; sets NOT NULL constraints.
 	SalesforceTableEntry *BuildAndCacheEntry(const SalesforceDescribe &describe) {
+#ifdef SF_DUCKDB_V2
+		CreateTableInfo info(
+		    QualifiedName(Identifier(catalog.GetName()), Identifier(this->name), Identifier(describe.object_name)));
+#else
 		CreateTableInfo info(catalog.GetName(), this->name, describe.object_name);
+#endif
 		vector<SalesforceField> queryable;
 		for (auto &f : describe.fields) {
 			if (!IsQueryableField(f)) {
 				continue;
 			}
-			info.columns.AddColumn(ColumnDefinition(f.name, f.duckdb_type));
+			info.columns.AddColumn(sf_compat::column_def(f.name, f.duckdb_type));
 			if (!f.nillable) {
 				info.constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(queryable.size())));
 			}
@@ -436,7 +453,11 @@ private:
 			if (tables_.find(key) != tables_.end() || listing_.find(key) != listing_.end()) {
 				continue;
 			}
+#ifdef SF_DUCKDB_V2
+			CreateTableInfo info(QualifiedName(Identifier(catalog.GetName()), Identifier(this->name), Identifier(obj)));
+#else
 			CreateTableInfo info(catalog.GetName(), this->name, obj);
+#endif
 			listing_.emplace(key, make_uniq<SalesforceTableEntry>(catalog, *this, info, config_, token_,
 			                                                      vector<SalesforceField> {}));
 		}
@@ -575,7 +596,11 @@ public:
 		ResetGlobalDescribeCalls(); // DEBUG/TEST: baseline global describe counter
 		ResetToolingCalls();        // DEBUG/TEST: baseline Tooling-query counter
 		CreateSchemaInfo info;
+#ifdef SF_DUCKDB_V2
+		info.SetSchema(SALESFORCE_MAIN_SCHEMA);
+#else
 		info.schema = SALESFORCE_MAIN_SCHEMA;
+#endif
 		info.on_conflict = OnCreateConflict::ERROR_ON_CONFLICT;
 		main_schema_ = make_uniq<SalesforceSchemaEntry>(*this, info, config_, token_);
 	}
@@ -723,7 +748,7 @@ void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias
                                      SalesforceTokenSet &token) {
 	Catalog *catalog = nullptr;
 	try {
-		catalog = &Catalog::GetCatalog(context, alias);
+		catalog = &sf_compat::get_catalog(context, alias);
 	} catch (...) {
 		catalog = nullptr;
 	}
@@ -743,7 +768,7 @@ void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias
 SalesforceMetadataEngine &GetSalesforceCatalogMetadataEngine(ClientContext &context, const string &alias) {
 	Catalog *catalog = nullptr;
 	try {
-		catalog = &Catalog::GetCatalog(context, alias);
+		catalog = &sf_compat::get_catalog(context, alias);
 	} catch (...) {
 		catalog = nullptr;
 	}
@@ -768,7 +793,7 @@ SalesforceMetadataEngine &GetSalesforceCatalogMetadataEngine(ClientContext &cont
 void RefreshSalesforceCatalogMetadata(ClientContext &context, const string &alias, const string &object) {
 	Catalog *catalog = nullptr;
 	try {
-		catalog = &Catalog::GetCatalog(context, alias);
+		catalog = &sf_compat::get_catalog(context, alias);
 	} catch (...) {
 		catalog = nullptr;
 	}
@@ -789,7 +814,7 @@ void RefreshSalesforceCatalogMetadata(ClientContext &context, const string &alia
 string GetSalesforceObjectDescribeJson(ClientContext &context, const string &alias, const string &object) {
 	Catalog *catalog = nullptr;
 	try {
-		catalog = &Catalog::GetCatalog(context, alias);
+		catalog = &sf_compat::get_catalog(context, alias);
 	} catch (...) {
 		catalog = nullptr;
 	}
@@ -819,7 +844,7 @@ struct RefreshMetadataGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> RefreshMetadataBind(ClientContext &, TableFunctionBindInput &input,
-                                             vector<LogicalType> &return_types, vector<string> &names) {
+                                             vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	auto &args = input.inputs;
 	if (args.size() < 1 || args.size() > 2) {
 		throw BinderException("salesforce_refresh_metadata(catalog [, object]) takes 1 or 2 arguments.");
@@ -870,7 +895,9 @@ void RefreshMetadataFunction(ClientContext &context, TableFunctionInput &data, D
 TableFunction GetSalesforceRefreshMetadataFunction() {
 	TableFunction fn("salesforce_refresh_metadata", {LogicalType::VARCHAR}, RefreshMetadataFunction,
 	                 RefreshMetadataBind, RefreshMetadataInit);
-	fn.varargs = LogicalType::VARCHAR; // optional 2nd arg: object
+	sf_compat::set_param_name(fn, 0, "catalog");
+
+	sf_compat::set_varargs(fn, "object", LogicalType::VARCHAR); // optional 2nd arg: object
 	return fn;
 }
 

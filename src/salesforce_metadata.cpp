@@ -7,6 +7,7 @@
 #include "salesforce_metadata.hpp"
 #include "salesforce_storage.hpp"
 #include "salesforce_json.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -48,7 +49,7 @@ struct PicklistBindData : public TableFunctionData {
 };
 
 unique_ptr<FunctionData> PicklistBind(ClientContext &, TableFunctionBindInput &input, vector<LogicalType> &return_types,
-                                      vector<string> &names) {
+                                      sf_compat::names_t &names) {
 	CheckArgs(input, 3, "salesforce_picklist_values(catalog, object, field) takes 3 arguments.");
 	auto bind = make_uniq<PicklistBindData>();
 	bind->alias = TrimArg(input.inputs[0]);
@@ -92,7 +93,7 @@ struct RecordTypesBindData : public TableFunctionData {
 };
 
 unique_ptr<FunctionData> RecordTypesBind(ClientContext &, TableFunctionBindInput &input,
-                                         vector<LogicalType> &return_types, vector<string> &names) {
+                                         vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	CheckArgs(input, 2, "salesforce_record_types(catalog, object) takes 2 arguments.");
 	auto bind = make_uniq<RecordTypesBindData>();
 	bind->alias = TrimArg(input.inputs[0]);
@@ -143,14 +144,21 @@ void MetaFunction(ClientContext &context, TableFunctionInput &data, DataChunk &o
 } // namespace
 
 TableFunction GetSalesforcePicklistValuesFunction() {
-	return TableFunction("salesforce_picklist_values",
-	                     {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                     MetaFunction<PicklistBindData, PicklistBuild>, PicklistBind, MetaInit);
+	TableFunction fn =
+	    TableFunction("salesforce_picklist_values", {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
+	                  MetaFunction<PicklistBindData, PicklistBuild>, PicklistBind, MetaInit);
+	sf_compat::set_param_name(fn, 0, "catalog");
+	sf_compat::set_param_name(fn, 1, "object");
+	sf_compat::set_param_name(fn, 2, "field");
+	return fn;
 }
 
 TableFunction GetSalesforceRecordTypesFunction() {
-	return TableFunction("salesforce_record_types", {LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                     MetaFunction<RecordTypesBindData, RecordTypesBuild>, RecordTypesBind, MetaInit);
+	TableFunction fn = TableFunction("salesforce_record_types", {LogicalType::VARCHAR, LogicalType::VARCHAR},
+	                                 MetaFunction<RecordTypesBindData, RecordTypesBuild>, RecordTypesBind, MetaInit);
+	sf_compat::set_param_name(fn, 0, "catalog");
+	sf_compat::set_param_name(fn, 1, "object");
+	return fn;
 }
 
 } // namespace duckdb

@@ -12,6 +12,30 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.20.0](docs/RELEASE_NOTES_v0.20.0.md) — 2026-10-21
+
+- **DuckDB v2.0.0 support, dual-line** — the same source tree now builds,
+  runs the full offline suite, and is CI-validated against **both**
+  v1.5.4-v1.5.6 (unchanged behavior; suite parity 59/59, 1657 assertions)
+  and v2.0.0 (59/59, 1659 assertions). Version selection is automatic: our
+  CMakeLists flags `SF_DUCKDB_V2` from `DUCKDB_VERSION` and
+  `salesforce_duckdb_compat.hpp` shims the surface differences (bind name
+  vectors, signature kwargs/varargs/parameter names, const-qualified flat
+  data, struct entries, comparison/between as function expressions,
+  catalog-entry plumbing). The 1.5-variegata line's backported
+  `Identifier` carries most of the difference.
+- **Transparent COUNT(DISTINCT) pushdown on 2.0**: the new engine plans it
+  as AGG(COUNT(*)) over AGG(GROUP BY x); the optimizer recognizes that
+  shape and still pushes one server-side `COUNT_DISTINCT(x)`.
+- **Same read-only surface, 28 self-documented functions** — parameter
+  names now surface through the 2.0 function signature (visible in
+  `duckdb_functions()`), preserving the AI-agent discoverability contract.
+- Release assets remain built against **v1.5.6** (production 1.5.x
+  environments); v2.0.0 users install from source or via the community
+  registry once it migrates its build baseline.
+- Suite: v1.5.6 59/59 files (1657 assertions), v2.0.0 59/59 files (1659
+  assertions), 0 failures on both.
+
 ## [v0.19.2](docs/RELEASE_NOTES_v0.19.2.md) — 2026-10-13
 
 - **Doc fix: deletes DO update `SystemModstamp`** — the v0.19.0 pitfall

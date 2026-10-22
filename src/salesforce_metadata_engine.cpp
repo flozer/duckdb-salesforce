@@ -9,8 +9,12 @@
 #include "salesforce_http.hpp"
 #include "salesforce_session.hpp"
 #include "salesforce_soql.hpp" // DEBUG/TEST describe-call counters
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/string_util.hpp"
+#ifdef SF_DUCKDB_V2
+#include "duckdb/common/vector/list_vector.hpp"
+#endif
 
 namespace duckdb {
 
@@ -214,7 +218,7 @@ struct MetaFieldsGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> MetaFieldsBind(ClientContext &context, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<string> &names) {
+                                        vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	if (input.inputs.size() < 2 || input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
 		throw BinderException("salesforce_metadata_fields(catalog, object_name) requires a "
 		                      "non-NULL catalog alias and object name");
@@ -253,15 +257,17 @@ void MetaFieldsFunction(ClientContext &, TableFunctionInput &data, DataChunk &ou
 	idx_t row = 0;
 	while (row < STANDARD_VECTOR_SIZE && gs.cursor < bd.rows.size()) {
 		const auto &f = bd.rows[gs.cursor];
-		FlatVector::GetData<string_t>(output.data[0])[row] = StringVector::AddString(output.data[0], bd.object_name);
-		FlatVector::GetData<string_t>(output.data[1])[row] = StringVector::AddString(output.data[1], f.field_name);
-		FlatVector::GetData<string_t>(output.data[2])[row] = StringVector::AddString(output.data[2], f.type);
-		FlatVector::GetData<bool>(output.data[3])[row] = f.filterable;
-		FlatVector::GetData<bool>(output.data[4])[row] = f.sortable;
+		sf_compat::flat_data_mutable<string_t>(output.data[0])[row] =
+		    StringVector::AddString(output.data[0], bd.object_name);
+		sf_compat::flat_data_mutable<string_t>(output.data[1])[row] =
+		    StringVector::AddString(output.data[1], f.field_name);
+		sf_compat::flat_data_mutable<string_t>(output.data[2])[row] = StringVector::AddString(output.data[2], f.type);
+		sf_compat::flat_data_mutable<bool>(output.data[3])[row] = f.filterable;
+		sf_compat::flat_data_mutable<bool>(output.data[4])[row] = f.sortable;
 		if (f.relationship_name.empty()) {
 			FlatVector::SetNull(output.data[5], row, true);
 		} else {
-			FlatVector::GetData<string_t>(output.data[5])[row] =
+			sf_compat::flat_data_mutable<string_t>(output.data[5])[row] =
 			    StringVector::AddString(output.data[5], f.relationship_name);
 		}
 		gs.cursor++;
@@ -278,8 +284,8 @@ void MetaFieldsFunction(ClientContext &, TableFunctionInput &data, DataChunk &ou
 		}
 		ListVector::Reserve(lvec, total);
 		auto &child = ListVector::GetEntry(lvec);
-		auto child_data = FlatVector::GetData<string_t>(child);
-		auto entries = FlatVector::GetData<list_entry_t>(lvec);
+		auto child_data = sf_compat::flat_data_mutable<string_t>(child);
+		auto entries = sf_compat::flat_data_mutable<list_entry_t>(lvec);
 		idx_t off = 0;
 		for (idx_t r = 0; r < row; r++) {
 			const auto &vals = bd.rows[start + r].*member;
@@ -321,7 +327,7 @@ struct MetaObjectsGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> MetaObjectsBind(ClientContext &context, TableFunctionBindInput &input,
-                                         vector<LogicalType> &return_types, vector<string> &names) {
+                                         vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	if (input.inputs.empty() || input.inputs[0].IsNull()) {
 		throw BinderException("salesforce_metadata_objects(catalog) requires a non-NULL "
 		                      "catalog alias");
@@ -347,8 +353,8 @@ void MetaObjectsFunction(ClientContext &, TableFunctionInput &data, DataChunk &o
 	idx_t row = 0;
 	while (row < STANDARD_VECTOR_SIZE && gs.cursor < bd.rows.size()) {
 		const auto &o = bd.rows[gs.cursor];
-		FlatVector::GetData<string_t>(output.data[0])[row] = StringVector::AddString(output.data[0], o.name);
-		FlatVector::GetData<bool>(output.data[1])[row] = o.queryable;
+		sf_compat::flat_data_mutable<string_t>(output.data[0])[row] = StringVector::AddString(output.data[0], o.name);
+		sf_compat::flat_data_mutable<bool>(output.data[1])[row] = o.queryable;
 		gs.cursor++;
 		row++;
 	}
@@ -434,7 +440,7 @@ static const char *ExplainGuidance(const string &reason) {
 }
 
 unique_ptr<FunctionData> ExplainBind(ClientContext &context, TableFunctionBindInput &,
-                                     vector<LogicalType> &return_types, vector<string> &names) {
+                                     vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	auto bind = make_uniq<ExplainBindData>();
 	DiagExplainSnapshot snap = DiagGetExplain();
 
@@ -606,31 +612,35 @@ void ExplainFunction(ClientContext &, TableFunctionInput &data, DataChunk &outpu
 		if (is_null) {
 			FlatVector::SetNull(output.data[col], r, true);
 		} else {
-			FlatVector::GetData<bool>(output.data[col])[r] = v;
+			sf_compat::flat_data_mutable<bool>(output.data[col])[r] = v;
 		}
 	};
 	while (row < STANDARD_VECTOR_SIZE && gs.cursor < bd.rows.size()) {
 		const auto &rw = bd.rows[gs.cursor];
-		FlatVector::GetData<string_t>(output.data[0])[row] = StringVector::AddString(output.data[0], rw.object);
+		sf_compat::flat_data_mutable<string_t>(output.data[0])[row] =
+		    StringVector::AddString(output.data[0], rw.object);
 		if (rw.field_null) {
 			FlatVector::SetNull(output.data[1], row, true);
 		} else {
-			FlatVector::GetData<string_t>(output.data[1])[row] = StringVector::AddString(output.data[1], rw.field);
+			sf_compat::flat_data_mutable<string_t>(output.data[1])[row] =
+			    StringVector::AddString(output.data[1], rw.field);
 		}
-		FlatVector::GetData<string_t>(output.data[2])[row] = StringVector::AddString(output.data[2], rw.role);
+		sf_compat::flat_data_mutable<string_t>(output.data[2])[row] = StringVector::AddString(output.data[2], rw.role);
 		set_bool_or_null(3, row, rw.resolved_null, rw.resolved);
 		set_bool_or_null(4, row, rw.filterable_null, rw.filterable);
 		set_bool_or_null(5, row, rw.sortable_null, rw.sortable);
 		if (rw.relationship_null) {
 			FlatVector::SetNull(output.data[6], row, true);
 		} else {
-			FlatVector::GetData<string_t>(output.data[6])[row] =
+			sf_compat::flat_data_mutable<string_t>(output.data[6])[row] =
 			    StringVector::AddString(output.data[6], rw.relationship_name);
 		}
-		FlatVector::GetData<bool>(output.data[8])[row] = rw.pushed;
-		FlatVector::GetData<bool>(output.data[9])[row] = rw.residual;
-		FlatVector::GetData<string_t>(output.data[10])[row] = StringVector::AddString(output.data[10], rw.reason);
-		FlatVector::GetData<string_t>(output.data[11])[row] = StringVector::AddString(output.data[11], rw.guidance);
+		sf_compat::flat_data_mutable<bool>(output.data[8])[row] = rw.pushed;
+		sf_compat::flat_data_mutable<bool>(output.data[9])[row] = rw.residual;
+		sf_compat::flat_data_mutable<string_t>(output.data[10])[row] =
+		    StringVector::AddString(output.data[10], rw.reason);
+		sf_compat::flat_data_mutable<string_t>(output.data[11])[row] =
+		    StringVector::AddString(output.data[11], rw.guidance);
 		gs.cursor++;
 		row++;
 	}
@@ -644,8 +654,8 @@ void ExplainFunction(ClientContext &, TableFunctionInput &data, DataChunk &outpu
 		}
 		ListVector::Reserve(lvec, total);
 		auto &child = ListVector::GetEntry(lvec);
-		auto child_data = FlatVector::GetData<string_t>(child);
-		auto entries = FlatVector::GetData<list_entry_t>(lvec);
+		auto child_data = sf_compat::flat_data_mutable<string_t>(child);
+		auto entries = sf_compat::flat_data_mutable<list_entry_t>(lvec);
 		idx_t off = 0;
 		for (idx_t r = 0; r < row; r++) {
 			const auto &vals = bd.rows[start + r].reference_to;
@@ -877,7 +887,7 @@ void RelGraphChildWalk(ClientContext &context, SalesforceMetadataEngine &eng, co
 }
 
 unique_ptr<FunctionData> RelGraphBind(ClientContext &context, TableFunctionBindInput &input,
-                                      vector<LogicalType> &return_types, vector<string> &names) {
+                                      vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	if (input.inputs.size() < 2 || input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
 		throw BinderException("salesforce_relationship_graph(catalog, object [, max_depth]) "
 		                      "requires a non-NULL catalog alias and object name");
@@ -959,30 +969,33 @@ void RelGraphFunction(ClientContext &, TableFunctionInput &data, DataChunk &outp
 	idx_t row = 0;
 	while (row < STANDARD_VECTOR_SIZE && gs.cursor < bd.rows.size()) {
 		const auto &e = bd.rows[gs.cursor];
-		FlatVector::GetData<string_t>(output.data[0])[row] = StringVector::AddString(output.data[0], e.source_object);
+		sf_compat::flat_data_mutable<string_t>(output.data[0])[row] =
+		    StringVector::AddString(output.data[0], e.source_object);
 		if (e.relationship_name.empty()) {
 			FlatVector::SetNull(output.data[1], row, true); // unnamed child relationship
 		} else {
-			FlatVector::GetData<string_t>(output.data[1])[row] =
+			sf_compat::flat_data_mutable<string_t>(output.data[1])[row] =
 			    StringVector::AddString(output.data[1], e.relationship_name);
 		}
-		FlatVector::GetData<string_t>(output.data[2])[row] = StringVector::AddString(output.data[2], e.path);
-		FlatVector::GetData<int32_t>(output.data[3])[row] = static_cast<int32_t>(e.depth_level);
+		sf_compat::flat_data_mutable<string_t>(output.data[2])[row] = StringVector::AddString(output.data[2], e.path);
+		sf_compat::flat_data_mutable<int32_t>(output.data[3])[row] = static_cast<int32_t>(e.depth_level);
 		if (e.target_null) {
 			FlatVector::SetNull(output.data[4], row, true);
 		} else {
-			FlatVector::GetData<string_t>(output.data[4])[row] =
+			sf_compat::flat_data_mutable<string_t>(output.data[4])[row] =
 			    StringVector::AddString(output.data[4], e.target_object);
 		}
 		// col 5 (reference_to LIST) filled after the loop
-		FlatVector::GetData<string_t>(output.data[6])[row] = StringVector::AddString(output.data[6], e.direction);
-		FlatVector::GetData<string_t>(output.data[7])[row] =
+		sf_compat::flat_data_mutable<string_t>(output.data[6])[row] =
+		    StringVector::AddString(output.data[6], e.direction);
+		sf_compat::flat_data_mutable<string_t>(output.data[7])[row] =
 		    StringVector::AddString(output.data[7], e.relationship_type);
-		FlatVector::GetData<string_t>(output.data[8])[row] = StringVector::AddString(output.data[8], e.status);
+		sf_compat::flat_data_mutable<string_t>(output.data[8])[row] = StringVector::AddString(output.data[8], e.status);
 		if (e.caveat_null) {
 			FlatVector::SetNull(output.data[9], row, true);
 		} else {
-			FlatVector::GetData<string_t>(output.data[9])[row] = StringVector::AddString(output.data[9], e.caveat);
+			sf_compat::flat_data_mutable<string_t>(output.data[9])[row] =
+			    StringVector::AddString(output.data[9], e.caveat);
 		}
 		gs.cursor++;
 		row++;
@@ -995,8 +1008,8 @@ void RelGraphFunction(ClientContext &, TableFunctionInput &data, DataChunk &outp
 		}
 		ListVector::Reserve(lvec, total);
 		auto &child = ListVector::GetEntry(lvec);
-		auto child_data = FlatVector::GetData<string_t>(child);
-		auto entries = FlatVector::GetData<list_entry_t>(lvec);
+		auto child_data = sf_compat::flat_data_mutable<string_t>(child);
+		auto entries = sf_compat::flat_data_mutable<list_entry_t>(lvec);
 		idx_t off = 0;
 		for (idx_t r = 0; r < row; r++) {
 			auto &vals = bd.rows[start + r].reference_to;
@@ -1014,13 +1027,18 @@ void RelGraphFunction(ClientContext &, TableFunctionInput &data, DataChunk &outp
 } // namespace
 
 TableFunction GetSalesforceMetadataFieldsFunction() {
-	return TableFunction("salesforce_metadata_fields", {LogicalType::VARCHAR, LogicalType::VARCHAR}, MetaFieldsFunction,
-	                     MetaFieldsBind, MetaFieldsInit);
+	TableFunction fn = TableFunction("salesforce_metadata_fields", {LogicalType::VARCHAR, LogicalType::VARCHAR},
+	                                 MetaFieldsFunction, MetaFieldsBind, MetaFieldsInit);
+	sf_compat::set_param_name(fn, 0, "catalog");
+	sf_compat::set_param_name(fn, 1, "object");
+	return fn;
 }
 
 TableFunction GetSalesforceMetadataObjectsFunction() {
-	return TableFunction("salesforce_metadata_objects", {LogicalType::VARCHAR}, MetaObjectsFunction, MetaObjectsBind,
-	                     MetaObjectsInit);
+	TableFunction fn = TableFunction("salesforce_metadata_objects", {LogicalType::VARCHAR}, MetaObjectsFunction,
+	                                 MetaObjectsBind, MetaObjectsInit);
+	sf_compat::set_param_name(fn, 0, "catalog");
+	return fn;
 }
 
 TableFunction GetSalesforceQueryExplainFunction() {
@@ -1030,13 +1048,15 @@ TableFunction GetSalesforceQueryExplainFunction() {
 TableFunction GetSalesforceRelationshipGraphFunction() {
 	TableFunction fn("salesforce_relationship_graph", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RelGraphFunction,
 	                 RelGraphBind, RelGraphInit);
+	sf_compat::set_param_name(fn, 0, "catalog");
+	sf_compat::set_param_name(fn, 1, "object");
+
 	// Optional third positional arg: max_depth.
-	fn.varargs = LogicalType::INTEGER;
-	// Opt-in child relationships (#v1.6 §18 cut 2); default false.
-	fn.named_parameters["include_children"] = LogicalType::BOOLEAN;
-	// Direction filter (#v1.6 §18): 'parent' | 'child' | 'both'. Wins over
+	sf_compat::set_varargs(fn, "depth", LogicalType::INTEGER);
+	// Opt-in child relationships (#v1.6 §18 cut 2); default false. Direction
+	// filter (#v1.6 §18): 'parent' | 'child' | 'both'. Wins over
 	// include_children; default 'parent'.
-	fn.named_parameters["direction"] = LogicalType::VARCHAR;
+	sf_compat::set_named_params(fn, {{"include_children", LogicalType::BOOLEAN}, {"direction", LogicalType::VARCHAR}});
 	return fn;
 }
 

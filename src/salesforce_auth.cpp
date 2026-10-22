@@ -18,6 +18,7 @@
 #include "salesforce_config.hpp"
 #include "salesforce_http.hpp"
 #include "salesforce_json.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/exception.hpp"
 

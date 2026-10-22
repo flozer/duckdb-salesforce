@@ -16,6 +16,7 @@
 #include "salesforce_session.hpp"
 #include "salesforce_soql.hpp"
 #include "salesforce_value.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include <atomic>
 #include <limits>
@@ -27,6 +28,9 @@
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
+#ifdef SF_DUCKDB_V2
+#include "duckdb/common/vector/struct_vector.hpp"
+#endif
 
 #include <functional>
 #include <set>
@@ -235,7 +239,7 @@ static void EmitRelationshipSoql(const SalesforceField &rel, const string &path,
 }
 
 static unique_ptr<FunctionData> ScanBind(ClientContext &, TableFunctionBindInput &, vector<LogicalType> &,
-                                         vector<string> &) {
+                                         sf_compat::names_t &) {
 	throw InternalException("salesforce_scan is catalog-internal and cannot be called directly");
 }
 
@@ -736,13 +740,15 @@ static bool BulkAdvancePage(ScanGlobalState &g, ScanLocalState &l) {
 // with no populated descendant cell -> null struct; missing/empty cell -> null.
 static void AppendBulkStruct(Vector &vec, idx_t row, const SalesforceField &field, const string &path,
                              const vector<string> &cells, const vector<string> &columns) {
-	auto &entries = StructVector::GetEntries(vec);
+	auto entry = [&](idx_t i) -> duckdb::Vector & {
+		return *sf_compat::struct_entry(vec, i);
+	};
 	bool any = false;
-	for (idx_t c = 0; c < field.children.size() && c < entries.size(); c++) {
+	for (idx_t c = 0; c < field.children.size(); c++) {
 		const auto &child = field.children[c];
 		if (child.is_relationship) {
-			AppendBulkStruct(*entries[c], row, child, path + "." + child.name, cells, columns);
-			if (!FlatVector::IsNull(*entries[c], row)) {
+			AppendBulkStruct(entry(c), row, child, path + "." + child.name, cells, columns);
+			if (!FlatVector::IsNull(entry(c), row)) {
 				any = true;
 			}
 			continue;
@@ -756,9 +762,9 @@ static void AppendBulkStruct(Vector &vec, idx_t row, const SalesforceField &fiel
 			}
 		}
 		if (ci < 0 || static_cast<idx_t>(ci) >= cells.size() || cells[ci].empty()) {
-			FlatVector::SetNull(*entries[c], row, true);
+			FlatVector::SetNull(entry(c), row, true);
 		} else {
-			AppendTypedCell(*entries[c], row, child, cells[ci]);
+			AppendTypedCell(entry(c), row, child, cells[ci]);
 			any = true;
 		}
 	}
@@ -930,7 +936,7 @@ static bool ExplainFieldOf(const Expression &expr, const vector<SalesforceField>
 	std::function<void(const Expression &)> walk = [&](const Expression &e) {
 		if (e.GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
 			auto &c = e.Cast<BoundColumnRefExpression>();
-			idx_t proj = c.binding.column_index;
+			idx_t proj = sf_compat::colref_binding(c).column_index;
 			if (proj < projection_to_field.size()) {
 				idx_t fi = projection_to_field[proj];
 				if (fi < fields.size()) {
@@ -1027,26 +1033,31 @@ TableFunction GetSalesforceScanFunction() {
 // where string is combined into the SOQL at InitGlobal (see InitGlobal's
 // raw_where handling). Projection/predicate pushdown identical.
 static unique_ptr<FunctionData> ScanUserBind(ClientContext &context, TableFunctionBindInput &input,
-                                             vector<LogicalType> &return_types, vector<string> &names) {
+                                             vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	// The user bind defines its own output schema from the describe; the
 	// builder returns the bind data and the schema is (re)derived by the same
 	// code path the catalog entry uses (fields -> column_names/types), so we
 	// overwrite the bind-data supplied schema here.
 	auto bind_data = BuildUserScanBindData(context, input);
 	return_types = bind_data->column_types;
-	names = bind_data->column_names;
+	names.clear();
+	for (auto &n : bind_data->column_names) {
+		sf_compat::add_name(names, n);
+	}
 	return std::move(bind_data);
 }
 
 TableFunction GetSalesforceScanUserFunction() {
 	TableFunction fn("salesforce_scan", {LogicalType::VARCHAR, LogicalType::VARCHAR}, ScanFunction, ScanUserBind,
 	                 ScanInitGlobal, ScanInitLocal);
+	sf_compat::set_param_name(fn, 0, "catalog");
+	sf_compat::set_param_name(fn, 1, "object");
 	fn.projection_pushdown = true;
 	fn.pushdown_complex_filter = ScanPushdownComplexFilter;
-	fn.named_parameters["filter"] = LogicalType::VARCHAR;
-	fn.named_parameters["query_mode"] = LogicalType::VARCHAR;
-	fn.named_parameters["transport"] = LogicalType::VARCHAR;
-	fn.named_parameters["chunks"] = LogicalType::BIGINT;
+	sf_compat::set_named_params(fn, {{"filter", LogicalType::VARCHAR},
+	                                 {"query_mode", LogicalType::VARCHAR},
+	                                 {"transport", LogicalType::VARCHAR},
+	                                 {"chunks", LogicalType::BIGINT}});
 	return fn;
 }
 

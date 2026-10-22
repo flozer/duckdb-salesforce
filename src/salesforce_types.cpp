@@ -5,6 +5,7 @@
 // an unrecognised type degrades to VARCHAR + an unknown flag.
 
 #include "salesforce_types.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/string_util.hpp"
 

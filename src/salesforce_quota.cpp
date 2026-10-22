@@ -6,6 +6,7 @@
 #include "salesforce_quota.hpp"
 #include "salesforce_diag.hpp"
 #include "salesforce_session.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -70,7 +71,7 @@ struct LastQuotaGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> LastQuotaBind(ClientContext &, TableFunctionBindInput &, vector<LogicalType> &return_types,
-                                       vector<string> &names) {
+                                       sf_compat::names_t &names) {
 	names = {"limit_name", "max", "remaining", "threshold", "allowed", "reason"};
 	return_types = {LogicalType::VARCHAR, LogicalType::BIGINT,  LogicalType::BIGINT,
 	                LogicalType::BIGINT,  LogicalType::BOOLEAN, LogicalType::VARCHAR};
@@ -85,7 +86,7 @@ void EmitInt(Vector &vec, int64_t v) {
 	if (v < 0) {
 		FlatVector::SetNull(vec, 0, true);
 	} else {
-		FlatVector::GetData<int64_t>(vec)[0] = v;
+		sf_compat::flat_data_mutable<int64_t>(vec)[0] = v;
 	}
 }
 
@@ -107,12 +108,12 @@ void LastQuotaFunction(ClientContext &, TableFunctionInput &data, DataChunk &out
 		allowed = g_last_allowed;
 		reason = g_last_reason;
 	}
-	FlatVector::GetData<string_t>(output.data[0])[0] = StringVector::AddString(output.data[0], name);
+	sf_compat::flat_data_mutable<string_t>(output.data[0])[0] = StringVector::AddString(output.data[0], name);
 	EmitInt(output.data[1], mx);
 	EmitInt(output.data[2], rem);
 	EmitInt(output.data[3], thr);
-	FlatVector::GetData<bool>(output.data[4])[0] = allowed;
-	FlatVector::GetData<string_t>(output.data[5])[0] = StringVector::AddString(output.data[5], reason);
+	sf_compat::flat_data_mutable<bool>(output.data[4])[0] = allowed;
+	sf_compat::flat_data_mutable<string_t>(output.data[5])[0] = StringVector::AddString(output.data[5], reason);
 	gstate.emitted = true;
 	output.SetCardinality(1);
 }

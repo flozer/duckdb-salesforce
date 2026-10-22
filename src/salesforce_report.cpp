@@ -16,11 +16,18 @@
 #include "salesforce_session.hpp"
 #include "salesforce_soql.hpp"
 #include "salesforce_storage.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include <set>
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#ifdef SF_DUCKDB_V2
+#include "duckdb/common/vector/struct_vector.hpp"
+#endif
+#ifdef SF_DUCKDB_V2
+#include "duckdb/common/vector/list_vector.hpp"
+#endif
 
 #include <unordered_map>
 #include <unordered_set>
@@ -62,7 +69,7 @@ struct ReportsGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> ReportsBind(ClientContext &context, TableFunctionBindInput &input,
-                                            vector<LogicalType> &return_types, vector<string> &names) {
+                                            vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	if (input.inputs.empty()) {
 		throw BinderException("salesforce_reports(catalog) requires the attached Salesforce catalog "
 		                      "alias, e.g. salesforce_reports('sf')");
@@ -112,7 +119,8 @@ static void ReportsFunction(ClientContext &context, TableFunctionInput &data, Da
 			if (!found || is_null) {
 				FlatVector::SetNull(output.data[c], produced, true);
 			} else {
-				FlatVector::GetData<string_t>(output.data[c])[produced] = StringVector::AddString(output.data[c], val);
+				sf_compat::flat_data_mutable<string_t>(output.data[c])[produced] =
+				    StringVector::AddString(output.data[c], val);
 			}
 		}
 		gs.cursor++;
@@ -157,7 +165,7 @@ struct ReportGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> ReportBind(ClientContext &context, TableFunctionBindInput &input,
-                                           vector<LogicalType> &return_types, vector<string> &names) {
+                                           vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	auto &args = input.inputs;
 	if (args.size() < 2) {
 		throw BinderException("salesforce_report(catalog, report_id) requires the attached catalog "
@@ -219,7 +227,7 @@ static unique_ptr<FunctionData> ReportBind(ClientContext &context, TableFunction
 			name = base + "_" + std::to_string(n++);
 		}
 		used.insert(name);
-		names.push_back(name);
+		sf_compat::add_name(names, name);
 		return_types.push_back(LogicalType::VARCHAR);
 	}
 	bind->data_cols = detail_cols.size();
@@ -268,17 +276,17 @@ static void ReportFunction(ClientContext &, TableFunctionInput &data, DataChunk 
 	while (gs.cursor < bd.rows.size() && produced < STANDARD_VECTOR_SIZE) {
 		const auto &vals = bd.rows[gs.cursor];
 		for (idx_t c = 0; c < dc; c++) {
-			FlatVector::GetData<string_t>(output.data[c])[produced] =
+			sf_compat::flat_data_mutable<string_t>(output.data[c])[produced] =
 			    StringVector::AddString(output.data[c], c < vals.size() ? vals[c] : string());
 		}
-		FlatVector::GetData<bool>(output.data[dc + 0])[produced] = bd.truncated;
+		sf_compat::flat_data_mutable<bool>(output.data[dc + 0])[produced] = bd.truncated;
 		if (bd.has_all_data) {
-			FlatVector::GetData<bool>(output.data[dc + 1])[produced] = bd.all_data;
+			sf_compat::flat_data_mutable<bool>(output.data[dc + 1])[produced] = bd.all_data;
 		} else {
 			FlatVector::SetNull(output.data[dc + 1], produced, true);
 		}
-		FlatVector::GetData<int64_t>(output.data[dc + 2])[produced] = kReportMaxRows;
-		FlatVector::GetData<string_t>(output.data[dc + 3])[produced] =
+		sf_compat::flat_data_mutable<int64_t>(output.data[dc + 2])[produced] = kReportMaxRows;
+		sf_compat::flat_data_mutable<string_t>(output.data[dc + 3])[produced] =
 		    StringVector::AddString(output.data[dc + 3], kReportGuidance);
 		gs.cursor++;
 		produced++;
@@ -675,7 +683,7 @@ static string ResolveReportTokenCandidate(ClientContext &context, const string &
 }
 
 static unique_ptr<FunctionData> ReportSoqlBind(ClientContext &context, TableFunctionBindInput &input,
-                                               vector<LogicalType> &return_types, vector<string> &names) {
+                                               vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	auto &args = input.inputs;
 	if (args.size() < 2) {
 		throw BinderException("salesforce_report_soql(catalog, report_id) requires the attached "
@@ -1069,7 +1077,7 @@ static void ReportSoqlFunction(ClientContext &, TableFunctionInput &data, DataCh
 	}
 
 	auto str = [&](idx_t col, const string &v) {
-		FlatVector::GetData<string_t>(output.data[col])[0] = StringVector::AddString(output.data[col], v);
+		sf_compat::flat_data_mutable<string_t>(output.data[col])[0] = StringVector::AddString(output.data[col], v);
 	};
 	str(0, bd.report_id);
 	str(1, bd.report_name);
@@ -1082,12 +1090,12 @@ static void ReportSoqlFunction(ClientContext &, TableFunctionInput &data, DataCh
 		idx_t n = bd.columns.size();
 		ListVector::Reserve(lvec, n);
 		auto &child = ListVector::GetEntry(lvec);
-		auto child_data = FlatVector::GetData<string_t>(child);
+		auto child_data = sf_compat::flat_data_mutable<string_t>(child);
 		for (idx_t k = 0; k < n; k++) {
 			child_data[k] = StringVector::AddString(child, bd.columns[k]);
 		}
 		ListVector::SetListSize(lvec, n);
-		FlatVector::GetData<list_entry_t>(lvec)[0] = list_entry_t(0, n);
+		sf_compat::flat_data_mutable<list_entry_t>(lvec)[0] = list_entry_t(0, n);
 	}
 
 	// filters: LIST<STRUCT(field, op, value)>
@@ -1096,17 +1104,19 @@ static void ReportSoqlFunction(ClientContext &, TableFunctionInput &data, DataCh
 		idx_t m = bd.filters.size();
 		ListVector::Reserve(lvec, m);
 		auto &child = ListVector::GetEntry(lvec); // STRUCT vector
-		auto &entries = StructVector::GetEntries(child);
-		auto fld = FlatVector::GetData<string_t>(*entries[0]);
-		auto op = FlatVector::GetData<string_t>(*entries[1]);
-		auto val = FlatVector::GetData<string_t>(*entries[2]);
+		auto entry = [&](idx_t i) -> duckdb::Vector & {
+			return *sf_compat::struct_entry(child, i);
+		};
+		auto fld = sf_compat::flat_data_mutable<string_t>(entry(0));
+		auto op = sf_compat::flat_data_mutable<string_t>(entry(1));
+		auto val = sf_compat::flat_data_mutable<string_t>(entry(2));
 		for (idx_t k = 0; k < m; k++) {
-			fld[k] = StringVector::AddString(*entries[0], bd.filters[k].field);
-			op[k] = StringVector::AddString(*entries[1], bd.filters[k].op);
-			val[k] = StringVector::AddString(*entries[2], bd.filters[k].value);
+			fld[k] = StringVector::AddString(entry(0), bd.filters[k].field);
+			op[k] = StringVector::AddString(entry(1), bd.filters[k].op);
+			val[k] = StringVector::AddString(entry(2), bd.filters[k].value);
 		}
 		ListVector::SetListSize(lvec, m);
-		FlatVector::GetData<list_entry_t>(lvec)[0] = list_entry_t(0, m);
+		sf_compat::flat_data_mutable<list_entry_t>(lvec)[0] = list_entry_t(0, m);
 	}
 
 	if (bd.translatable) {
@@ -1114,7 +1124,7 @@ static void ReportSoqlFunction(ClientContext &, TableFunctionInput &data, DataCh
 	} else {
 		FlatVector::SetNull(output.data[6], 0, true);
 	}
-	FlatVector::GetData<bool>(output.data[7])[0] = bd.translatable;
+	sf_compat::flat_data_mutable<bool>(output.data[7])[0] = bd.translatable;
 	str(8, bd.caveats);
 
 	// Phase 4 explainability columns.
@@ -1126,16 +1136,16 @@ static void ReportSoqlFunction(ClientContext &, TableFunctionInput &data, DataCh
 		idx_t n = items.size();
 		ListVector::Reserve(lvec, n);
 		auto &child = ListVector::GetEntry(lvec);
-		auto child_data = FlatVector::GetData<string_t>(child);
+		auto child_data = sf_compat::flat_data_mutable<string_t>(child);
 		for (idx_t k = 0; k < n; k++) {
 			child_data[k] = StringVector::AddString(child, items[k]);
 		}
 		ListVector::SetListSize(lvec, n);
-		FlatVector::GetData<list_entry_t>(lvec)[0] = list_entry_t(0, n);
+		sf_compat::flat_data_mutable<list_entry_t>(lvec)[0] = list_entry_t(0, n);
 	};
 	emit_list(12, bd.unresolved_columns);
 	emit_list(13, bd.unresolved_filters);
-	FlatVector::GetData<double>(output.data[14])[0] = bd.translatable ? 1.0 : 0.0;
+	sf_compat::flat_data_mutable<double>(output.data[14])[0] = bd.translatable ? 1.0 : 0.0;
 
 	gs.emitted = true;
 	output.SetCardinality(1);
@@ -1144,17 +1154,26 @@ static void ReportSoqlFunction(ClientContext &, TableFunctionInput &data, DataCh
 } // namespace
 
 TableFunction GetSalesforceReportsFunction() {
-	return TableFunction("salesforce_reports", {LogicalType::VARCHAR}, ReportsFunction, ReportsBind, ReportsInit);
+	TableFunction fn =
+	    TableFunction("salesforce_reports", {LogicalType::VARCHAR}, ReportsFunction, ReportsBind, ReportsInit);
+	sf_compat::set_param_name(fn, 0, "catalog");
+	return fn;
 }
 
 TableFunction GetSalesforceReportFunction() {
-	return TableFunction("salesforce_report", {LogicalType::VARCHAR, LogicalType::VARCHAR}, ReportFunction, ReportBind,
-	                     ReportInit);
+	TableFunction fn = TableFunction("salesforce_report", {LogicalType::VARCHAR, LogicalType::VARCHAR}, ReportFunction,
+	                                 ReportBind, ReportInit);
+	sf_compat::set_param_name(fn, 0, "catalog");
+	sf_compat::set_param_name(fn, 1, "report_id");
+	return fn;
 }
 
 TableFunction GetSalesforceReportSoqlFunction() {
-	return TableFunction("salesforce_report_soql", {LogicalType::VARCHAR, LogicalType::VARCHAR}, ReportSoqlFunction,
-	                     ReportSoqlBind, ReportSoqlInit);
+	TableFunction fn = TableFunction("salesforce_report_soql", {LogicalType::VARCHAR, LogicalType::VARCHAR},
+	                                 ReportSoqlFunction, ReportSoqlBind, ReportSoqlInit);
+	sf_compat::set_param_name(fn, 0, "catalog");
+	sf_compat::set_param_name(fn, 1, "report_id");
+	return fn;
 }
 
 } // namespace duckdb

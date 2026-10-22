@@ -8,6 +8,19 @@ set(TARGET_NAME salesforce)
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
+# Dual-line support (1.5.x + 2.0): flag the API generation so the sources can
+# gate version-divergent call sites. DUCKDB_VERSION comes from the DuckDB
+# build itself (e.g. "v1.5.6" / "v2.0.0").
+# SF_DUCKDB_HAS_IDENTIFIER: duckdb::Identifier + GetIdentifierName exist on
+# 2.0 and on the 1.5-variegata line from v1.5.6 on — but NOT on v1.5.4/v1.5.5.
+if(DEFINED DUCKDB_VERSION)
+    if(DUCKDB_VERSION MATCHES "^v?2\\.")
+        add_compile_definitions(SF_DUCKDB_V2=1 SF_DUCKDB_HAS_IDENTIFIER=1)
+    elseif(DUCKDB_VERSION MATCHES "^v?1\\.5\\.[6-9]")
+        add_compile_definitions(SF_DUCKDB_HAS_IDENTIFIER=1)
+    endif()
+endif()
+
 project(${TARGET_NAME} CXX)
 
 set(CMAKE_CXX_STANDARD 17)

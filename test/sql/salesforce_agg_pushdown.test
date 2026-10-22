@@ -296,5 +296,10 @@ SELECT count_pushdown = false FROM salesforce_query_cost();
 ----
 true
 
+# restore the kill-switch: the unified runner shares settings across test
+# files, and later files (e.g. transport_auto) assume the pushdown is on.
+statement ok
+SET sf_aggregate_pushdown = true;
+
 statement ok
 DETACH sf;

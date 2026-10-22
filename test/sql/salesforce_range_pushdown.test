@@ -163,10 +163,13 @@ statement ok
 SET sf_query_mode = 'query';
 
 # --- unsupported: function on the range column stays residual (correct) -------
-# year(CreatedDate) BETWEEN 2024 AND 2025 — cast/function bounds are NOT a plain
-# column range, must NOT be pushed.
+# upper(Name) = 'ACME' — a scalar function over the column is NOT a plain range,
+# must NOT be pushed. (2.0 note: year(CreatedDate) >= lo AND < hi is rewritten
+# by the engine's own optimizer into a CreatedDate range and then pushes - that
+# rewrite is upstream semantics, not our translation, so this guard uses a
+# string function no engine range-rewrites.)
 statement ok
-SELECT Id FROM sf.Account WHERE year(CreatedDate) >= 2024 AND year(CreatedDate) < 2025;
+SELECT Id FROM sf.Account WHERE upper(Name) = 'ACME';
 
 query I
 SELECT salesforce_last_soql.soql NOT LIKE '%WHERE%' AND residual_filters >= 1

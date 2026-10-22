@@ -9,6 +9,7 @@
 #include "salesforce_http.hpp"
 #include "salesforce_session.hpp"
 #include "salesforce_url.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -41,7 +42,7 @@ struct QueryGlobalState : public GlobalTableFunctionState {
 
 static string NamedParam(TableFunctionBindInput &input, const char *key) {
 	for (auto &kv : input.named_parameters) {
-		if (StringUtil::CIEquals(kv.first, key)) {
+		if (StringUtil::CIEquals(sf_compat::name_of(kv.first), key)) {
 			return kv.second.ToString();
 		}
 	}
@@ -49,7 +50,7 @@ static string NamedParam(TableFunctionBindInput &input, const char *key) {
 }
 
 static unique_ptr<FunctionData> QueryBind(ClientContext &context, TableFunctionBindInput &input,
-                                          vector<LogicalType> &return_types, vector<string> &names) {
+                                          vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	if (input.inputs.empty()) {
 		throw BinderException("salesforce_query(soql) requires the SOQL string as the first argument");
 	}
@@ -98,8 +99,9 @@ static void QueryFunction(ClientContext &, TableFunctionInput &data, DataChunk &
 	idx_t row = 0;
 	while (row < STANDARD_VECTOR_SIZE && gstate.cursor < records.size()) {
 		idx_t idx = gstate.cursor;
-		FlatVector::GetData<int64_t>(output.data[0])[row] = static_cast<int64_t>(idx);
-		FlatVector::GetData<string_t>(output.data[1])[row] = StringVector::AddString(output.data[1], records[idx]);
+		sf_compat::flat_data_mutable<int64_t>(output.data[0])[row] = static_cast<int64_t>(idx);
+		sf_compat::flat_data_mutable<string_t>(output.data[1])[row] =
+		    StringVector::AddString(output.data[1], records[idx]);
 		gstate.cursor++;
 		row++;
 	}
@@ -115,16 +117,20 @@ static void UrlEncodeScalar(DataChunk &args, ExpressionState &, Vector &result) 
 }
 
 ScalarFunction GetSalesforceUrlEncodeFunction() {
-	return ScalarFunction("sf_url_encode", {LogicalType::VARCHAR}, LogicalType::VARCHAR, UrlEncodeScalar);
+	ScalarFunction fn = ScalarFunction("sf_url_encode", {LogicalType::VARCHAR}, LogicalType::VARCHAR, UrlEncodeScalar);
+	sf_compat::set_param_name(fn, 0, "text");
+	return fn;
 }
 
 TableFunction GetSalesforceQueryFunction() {
 	TableFunction fn("salesforce_query", {LogicalType::VARCHAR}, QueryFunction, QueryBind, QueryInitGlobal);
-	fn.named_parameters["client_id"] = LogicalType::VARCHAR;
-	fn.named_parameters["client_secret"] = LogicalType::VARCHAR;
-	fn.named_parameters["refresh_token"] = LogicalType::VARCHAR;
-	fn.named_parameters["login_url"] = LogicalType::VARCHAR;
-	fn.named_parameters["api_version"] = LogicalType::VARCHAR;
+	sf_compat::set_param_name(fn, 0, "soql");
+
+	sf_compat::set_named_params(fn, {{"client_id", LogicalType::VARCHAR},
+	                                 {"client_secret", LogicalType::VARCHAR},
+	                                 {"refresh_token", LogicalType::VARCHAR},
+	                                 {"login_url", LogicalType::VARCHAR},
+	                                 {"api_version", LogicalType::VARCHAR}});
 	return fn;
 }
 

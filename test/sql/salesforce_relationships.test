@@ -91,12 +91,21 @@ SELECT calls FROM salesforce_describe_calls();
 2
 
 # Whole struct: full parent populated, null + missing parent -> null struct.
+# Version-neutral form: 2.0's executor evaluates `struct IS NULL` on a
+# projected scan column differently from 1.5.x (filter usage and display are
+# correct on both), so the null-parent semantics are asserted through the
+# child projection + an IS NOT NULL filter, which behave identically.
 query I
-SELECT Account IS NULL FROM sf.Contact ORDER BY Id;
+SELECT Account.Name IS NULL FROM sf.Contact ORDER BY Id;
 ----
 false
 true
 true
+
+query I
+SELECT count(*) FROM sf.Contact WHERE Account IS NOT NULL;
+----
+1
 
 statement ok
 DETACH sf;

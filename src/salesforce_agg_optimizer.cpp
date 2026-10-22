@@ -39,6 +39,7 @@
 
 #include "salesforce_agg_optimizer.hpp"
 #include "salesforce_scan.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/config.hpp"
@@ -253,7 +254,9 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 	// across the supported matrix (v1.5.4-v1.5.6; there is no dedicated
 	// `aggregates` member).
 	for (auto &expr : agg.expressions) {
-		if (ExprType(*expr) != ExpressionType::BOUND_AGGREGATE) {
+		// GetExpressionClass (not GetExpressionType): on 2.0 the type enum no
+		// longer doubles as the class marker for bound expressions.
+		if (expr->GetExpressionClass() != ExpressionClass::BOUND_AGGREGATE) {
 			return false;
 		}
 		auto &bag = expr->Cast<BoundAggregateExpression>();
@@ -364,11 +367,138 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 	return true;
 }
 
+// v2 (cyanoptera) plans COUNT(DISTINCT x) as outer AGG(COUNT(*)) over inner
+// AGG(GROUP BY x) over GET - the engine dedups via grouping. Recognize that
+// shape and push ONE server-side COUNT_DISTINCT(x) instead. 1.5.x keeps the
+// single-AGG shape handled by TryRewriteCountAggregate above.
+bool TryRewriteV2CountDistinct(ClientContext &context, LogicalAggregate &outer, LogicalAggregate &inner,
+                               vector<unique_ptr<Expression>> &out_colrefs) {
+	// outer: no groups, exactly one plain COUNT(*) aggregate.
+	if (!outer.groups.empty() || !outer.grouping_sets.empty() || !outer.grouping_functions.empty()) {
+		return false;
+	}
+	if (outer.expressions.size() != 1 || outer.children.size() != 1) {
+		return false;
+	}
+	if (outer.expressions[0]->GetExpressionClass() != ExpressionClass::BOUND_AGGREGATE) {
+		return false;
+	}
+	auto &cnt = outer.expressions[0]->Cast<BoundAggregateExpression>();
+	if (cnt.IsDistinct() || AggHasFilterOrOrderBys(cnt) || StringUtil::Lower(AggFunctionName(cnt)) != "count") {
+		return false;
+	}
+	// inner: pure GROUP BY of exactly one column, no aggregates.
+	if (!inner.expressions.empty() || inner.groups.size() != 1 || !inner.grouping_functions.empty() ||
+	    inner.grouping_sets.size() > 1) {
+		return false;
+	}
+	if (inner.groups[0]->GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
+		return false;
+	}
+	if (inner.children.size() != 1 || inner.children[0]->type != LogicalOperatorType::LOGICAL_GET) {
+		return false;
+	}
+	auto &get = inner.children[0]->Cast<LogicalGet>();
+	if (GetScanFunctionName(get) != "salesforce_scan" || !get.bind_data) {
+		return false;
+	}
+	SalesforceScanBindData *bind = nullptr;
+	try {
+		bind = &get.bind_data->Cast<SalesforceScanBindData>();
+	} catch (...) {
+		return false;
+	}
+	if (bind->residual_filter_count != 0 || !bind->pushed_aggregates.empty()) {
+		return false;
+	}
+	if (!TableFilterSetEmpty(get.table_filters)) {
+		return false;
+	}
+	Value sw;
+	if (context.TryGetCurrentSetting("sf_aggregate_pushdown", sw)) {
+		if (sw.type().id() == LogicalTypeId::BOOLEAN && !sw.GetValue<bool>()) {
+			return false;
+		}
+	}
+
+	// Resolve the grouped column to a pushable field (same guards as the core).
+	auto &ref = inner.groups[0]->Cast<BoundColumnRefExpression>();
+	if (ColRefBinding(ref).table_index != get.table_index) {
+		return false;
+	}
+	auto binding_idx = ColRefBinding(ref).column_index;
+	if (binding_idx >= get.GetColumnIds().size()) {
+		return false;
+	}
+	auto original_idx = get.GetColumnIds()[binding_idx].GetPrimaryIndex();
+	if (original_idx >= bind->fields.size()) {
+		return false;
+	}
+	const auto &field = bind->fields[original_idx];
+	if (field.is_relationship || !field.children.empty() || field.name.find('.') != string::npos) {
+		return false;
+	}
+	if (StringUtil::Lower(field.sf_type) == "base64") {
+		return false;
+	}
+
+	SalesforceScanBindData::SalesforcePushedAggregate pa;
+	pa.func = "COUNT_DISTINCT";
+	pa.emit.duckdb_type = LogicalType::BIGINT;
+	pa.field = field.name;
+	pa.out_name = "count(DISTINCT " + field.name + ")";
+	pa.emit.name = "a0";
+	pa.emit.sf_type = field.sf_type;
+	vector<SalesforceScanBindData::SalesforcePushedAggregate> pushed;
+	pushed.push_back(std::move(pa));
+
+	// Commit: identical to the core tail (bind annotations + schema rebuild).
+	get.SetColumnIds(vector<ColumnIndex>());
+	auto &col_ids = get.GetMutableColumnIds();
+	for (idx_t i = 0; i < pushed.size(); i++) {
+		col_ids.push_back(ColumnIndex(i));
+	}
+	auto out_bindings = get.GetColumnBindings();
+	vector<string> out_names;
+	for (idx_t i = 0; i < pushed.size(); i++) {
+		out_names.push_back(pushed[i].out_name);
+		out_colrefs.push_back(make_uniq<BoundColumnRefExpression>(pushed[i].emit.duckdb_type, out_bindings[i]));
+	}
+	get.projection_ids.clear();
+
+	vector<LogicalType> types;
+	for (const auto &p : pushed) {
+		types.push_back(p.emit.duckdb_type);
+	}
+	get.returned_types = std::move(types);
+	get.names.clear();
+	for (const auto &n : out_names) {
+		get.names.push_back(decltype(get.names)::value_type(n));
+	}
+	bind->pushed_aggregates = std::move(pushed);
+	return true;
+}
+
 void Walk(ClientContext &context, unique_ptr<LogicalOperator> &op) {
 	if (op->type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
 		auto &agg = op->Cast<LogicalAggregate>();
 		vector<unique_ptr<Expression>> colrefs;
-		if (TryRewriteCountAggregate(context, agg, colrefs)) {
+		bool rewrote = TryRewriteCountAggregate(context, agg, colrefs);
+		if (!rewrote && agg.children.size() == 1 &&
+		    agg.children[0]->type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
+			// v2 shape: COUNT(DISTINCT x) = AGG(COUNT(*)) -> AGG(GROUP BY x) -> GET
+			auto &inner = agg.children[0]->Cast<LogicalAggregate>();
+			rewrote = TryRewriteV2CountDistinct(context, agg, inner, colrefs);
+			if (rewrote) {
+				// Drop BOTH aggregate nodes: the inner GROUP BY expects the GET's
+				// pre-rewrite schema (the grouped column), which no longer exists.
+				auto proj = make_uniq<LogicalProjection>(agg.aggregate_index, std::move(colrefs));
+				proj->children.push_back(std::move(inner.children[0]));
+				op = std::move(proj);
+				return;
+			}
+		}
+		if (rewrote) {
 			auto proj = make_uniq<LogicalProjection>(agg.aggregate_index, std::move(colrefs));
 			proj->children.push_back(std::move(agg.children[0]));
 			op = std::move(proj);

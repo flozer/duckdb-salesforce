@@ -9,6 +9,7 @@
 #include "salesforce_soql.hpp"
 #include <cstdio>
 #include "salesforce_describe.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/planner/expression.hpp"
@@ -141,7 +142,7 @@ static bool FieldFor(const Expression &expr, const vector<SalesforceField> &fiel
 		return false;
 	}
 	auto &col = expr.Cast<BoundColumnRefExpression>();
-	idx_t proj = col.binding.column_index;
+	idx_t proj = sf_compat::colref_binding(col).column_index;
 	if (proj >= projection_to_field.size()) {
 		return false;
 	}
@@ -215,14 +216,23 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
 		auto klass = expr.GetExpressionClass();
 		auto etype = expr.GetExpressionType();
 
-		// column <cmp> constant (exact).
+		// column <cmp> constant (exact). Comparisons are their own bound class
+		// on 1.5.x and BoundFunctionExpression + static helpers on 2.0.
+#ifdef SF_DUCKDB_V2
+		if (klass == ExpressionClass::BOUND_FUNCTION && BoundComparisonExpression::IsComparison(expr)) {
+			auto &cmp_expr = expr.Cast<BoundFunctionExpression>();
+			const Expression &l = BoundComparisonExpression::Left(cmp_expr);
+			const Expression &r = BoundComparisonExpression::Right(cmp_expr);
+			const Expression *constant = nullptr;
+#else
 		if (klass == ExpressionClass::BOUND_COMPARISON) {
 			auto &cmp_expr = expr.Cast<BoundComparisonExpression>();
 			const Expression &l = *cmp_expr.left;
 			const Expression &r = *cmp_expr.right;
+			const Expression *constant = nullptr;
+#endif
 			string field;
 			ExpressionType cmp = etype;
-			const Expression *constant = nullptr;
 			if (FieldFor(l, fields, projection_to_field, field) &&
 			    r.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT) {
 				constant = &r;
@@ -240,57 +250,82 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
 				return false;
 			}
 			if (cmp == ExpressionType::COMPARE_EQUAL || cmp == ExpressionType::COMPARE_NOTEQUAL) {
-				auto &v = constant->Cast<BoundConstantExpression>().value;
+				auto &v = sf_compat::const_value(*constant);
 				CheckIdLiterals(fields, field, {&v});
 			}
-			out = field + " " + op + " " + SoqlLiteral(constant->Cast<BoundConstantExpression>().value);
+			out = field + " " + op + " " + SoqlLiteral(sf_compat::const_value(*constant));
 			return true;
 		}
 
 		// column BETWEEN lower AND upper (exact). DuckDB's FilterCombiner
 		// rewrites `field >= lo AND field < hi` (and the >/<= operand/inclusivity
 		// variants, including reversed `const <op> field`) on ONE column into a
-		// single BoundBetweenExpression before it reaches pushdown. Without this
-		// case the whole range fell back to residual (full remote scan). Emit the
-		// two half-ranges with inclusivity-correct operators; exact because both
+		// single between call before it reaches pushdown. Without this case the
+		// whole range fell back to residual (full remote scan). Emit the two
+		// half-ranges with inclusivity-correct operators; exact because both
 		// bounds are plain column-vs-constant comparisons matching SOQL.
+		// 1.5.x: BoundBetweenExpression with input/lower/upper members. 2.0:
+		// between is a BoundFunctionExpression ("__between") + static helpers.
+#ifdef SF_DUCKDB_V2
+		if (klass == ExpressionClass::BOUND_FUNCTION) {
+			auto &fe = expr.Cast<BoundFunctionExpression>();
+			const string fname = sf_compat::function_name(fe);
+			if ((fname == "between" || fname == "__between") && BoundBetweenExpression::HasValidBindData(fe)) {
+				const Expression &input = BoundBetweenExpression::Input(fe);
+				const Expression &lower = BoundBetweenExpression::LowerBound(fe);
+				const Expression &upper = BoundBetweenExpression::UpperBound(fe);
+				const bool lo_inc = BoundBetweenExpression::LowerInclusive(fe);
+				const bool hi_inc = BoundBetweenExpression::UpperInclusive(fe);
+#else
 		if (klass == ExpressionClass::BOUND_BETWEEN) {
-			auto &bw = expr.Cast<BoundBetweenExpression>();
-			string field;
-			if (!FieldFor(*bw.input, fields, projection_to_field, field)) {
-				return false;
+			auto &fe = expr.Cast<BoundBetweenExpression>();
+			{
+				const Expression &input = *fe.input;
+				const Expression &lower = *fe.lower;
+				const Expression &upper = *fe.upper;
+				const bool lo_inc = fe.lower_inclusive;
+				const bool hi_inc = fe.upper_inclusive;
+#endif
+				string field;
+				if (!FieldFor(input, fields, projection_to_field, field)) {
+					return false;
+				}
+				if (lower.GetExpressionClass() != ExpressionClass::BOUND_CONSTANT ||
+				    upper.GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+					return false; // function/cast/non-literal bound -> residual
+				}
+				const Value &lo_val = sf_compat::const_value(lower);
+				const Value &hi_val = sf_compat::const_value(upper);
+				if (lo_val.IsNull() || hi_val.IsNull()) {
+					// Degenerate range (`field >= null`): SoqlLiteral would emit the
+					// SOQL `null` keyword, which is only valid for = / != null. Leave
+					// residual; DuckDB handles the NULL-bound semantics correctly.
+					return false;
+				}
+				string lo_op, hi_op;
+				if (!ComparisonOp(lo_inc ? ExpressionType::COMPARE_GREATERTHANOREQUALTO
+				                         : ExpressionType::COMPARE_GREATERTHAN,
+				                  lo_op) ||
+				    !ComparisonOp(hi_inc ? ExpressionType::COMPARE_LESSTHANOREQUALTO : ExpressionType::COMPARE_LESSTHAN,
+				                  hi_op)) {
+					return false;
+				}
+				string lo = SoqlLiteral(lo_val);
+				string hi = SoqlLiteral(hi_val);
+				out = "(" + field + " " + lo_op + " " + lo + " AND " + field + " " + hi_op + " " + hi + ")";
+				return true;
 			}
-			if (bw.lower->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT ||
-			    bw.upper->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
-				return false; // function/cast/non-literal bound -> residual
-			}
-			const Value &lo_val = bw.lower->Cast<BoundConstantExpression>().value;
-			const Value &hi_val = bw.upper->Cast<BoundConstantExpression>().value;
-			if (lo_val.IsNull() || hi_val.IsNull()) {
-				// Degenerate range (`field >= null`): SoqlLiteral would emit the
-				// SOQL `null` keyword, which is only valid for = / != null. Leave
-				// residual; DuckDB handles the NULL-bound semantics correctly.
-				return false;
-			}
-			string lo_op, hi_op;
-			if (!ComparisonOp(bw.LowerComparisonType(), lo_op) || !ComparisonOp(bw.UpperComparisonType(), hi_op)) {
-				return false;
-			}
-			string lo = SoqlLiteral(lo_val);
-			string hi = SoqlLiteral(hi_val);
-			out = "(" + field + " " + lo_op + " " + lo + " AND " + field + " " + hi_op + " " + hi + ")";
-			return true;
 		}
 
 		// IS NULL / IS NOT NULL (exact).
 		if (klass == ExpressionClass::BOUND_OPERATOR &&
 		    (etype == ExpressionType::OPERATOR_IS_NULL || etype == ExpressionType::OPERATOR_IS_NOT_NULL)) {
 			auto &oe = expr.Cast<BoundOperatorExpression>();
-			if (oe.children.size() != 1) {
+			if (sf_compat::children_of(oe).size() != 1) {
 				return false;
 			}
 			string field;
-			if (!FieldFor(*oe.children[0], fields, projection_to_field, field)) {
+			if (!FieldFor(*sf_compat::children_of(oe)[0], fields, projection_to_field, field)) {
 				return false;
 			}
 			out = field + (etype == ExpressionType::OPERATOR_IS_NULL ? " = null" : " != null");
@@ -300,27 +335,27 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
 		// col IN (c1, c2, ...) — SUPERSET prefilter, keep residual.
 		if (klass == ExpressionClass::BOUND_OPERATOR && etype == ExpressionType::COMPARE_IN) {
 			auto &oe = expr.Cast<BoundOperatorExpression>();
-			if (oe.children.size() < 2) {
+			if (sf_compat::children_of(oe).size() < 2) {
 				return false;
 			}
 			string field;
-			if (!FieldFor(*oe.children[0], fields, projection_to_field, field)) {
+			if (!FieldFor(*sf_compat::children_of(oe)[0], fields, projection_to_field, field)) {
 				return false;
 			}
-			if (oe.children.size() - 1 > kMaxInItems) {
+			if (sf_compat::children_of(oe).size() - 1 > kMaxInItems) {
 				return false; // huge IN -> residual
 			}
 			string list;
 			vector<const Value *> in_values;
-			for (idx_t k = 1; k < oe.children.size(); k++) {
-				if (oe.children[k]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+			for (idx_t k = 1; k < sf_compat::children_of(oe).size(); k++) {
+				if (sf_compat::children_of(oe)[k]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
 					return false;
 				}
-				in_values.push_back(&oe.children[k]->Cast<BoundConstantExpression>().value);
+				in_values.push_back(&sf_compat::const_value(*sf_compat::children_of(oe)[k]));
 				if (k > 1) {
 					list += ", ";
 				}
-				list += SoqlLiteral(oe.children[k]->Cast<BoundConstantExpression>().value);
+				list += SoqlLiteral(sf_compat::const_value(*sf_compat::children_of(oe)[k]));
 			}
 			CheckIdLiterals(fields, field, in_values);
 			out = field + " IN (" + list + ")";
@@ -336,19 +371,19 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
 		// case-insensitive (another superset). Keep residual.
 		if (klass == ExpressionClass::BOUND_FUNCTION) {
 			auto &fe = expr.Cast<BoundFunctionExpression>();
-			const string &fn = fe.function.name;
+			const string fn = sf_compat::function_name(fe);
 			bool like = (fn == "~~"), pre = (fn == "prefix"), suf = (fn == "suffix"), con = (fn == "contains");
-			if (!(like || pre || suf || con) || fe.children.size() != 2) {
+			if (!(like || pre || suf || con) || sf_compat::children_of(fe).size() != 2) {
 				return false;
 			}
 			string field;
-			if (!FieldFor(*fe.children[0], fields, projection_to_field, field)) {
+			if (!FieldFor(*sf_compat::children_of(fe)[0], fields, projection_to_field, field)) {
 				return false;
 			}
-			if (fe.children[1]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+			if (sf_compat::children_of(fe)[1]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
 				return false;
 			}
-			const Value &v = fe.children[1]->Cast<BoundConstantExpression>().value;
+			const Value &v = sf_compat::const_value(*sf_compat::children_of(fe)[1]);
 			if (v.IsNull() || v.type().id() != LogicalTypeId::VARCHAR) {
 				return false;
 			}
@@ -366,10 +401,10 @@ static bool TranslateExpr(const Expression &expr, const vector<SalesforceField> 
 			auto &cj = expr.Cast<BoundConjunctionExpression>();
 			bool all_exact = true;
 			string combined;
-			for (idx_t k = 0; k < cj.children.size(); k++) {
+			for (idx_t k = 0; k < sf_compat::children_of(cj).size(); k++) {
 				string cout;
 				bool cexact = true;
-				if (!TranslateExpr(*cj.children[k], fields, projection_to_field, cout, cexact)) {
+				if (!TranslateExpr(*sf_compat::children_of(cj)[k], fields, projection_to_field, cout, cexact)) {
 					return false; // any untranslatable child -> whole conjunction residual
 				}
 				all_exact = all_exact && cexact;
@@ -484,7 +519,7 @@ struct LastSoqlGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> LastSoqlBind(ClientContext &, TableFunctionBindInput &,
-                                             vector<LogicalType> &return_types, vector<string> &names) {
+                                             vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	names = {"soql"};
 	return_types = {LogicalType::VARCHAR};
 	return nullptr;
@@ -505,7 +540,7 @@ static void LastSoqlFunction(ClientContext &, TableFunctionInput &data, DataChun
 		std::lock_guard<std::mutex> g(g_soql_lock);
 		soql = g_last_soql;
 	}
-	FlatVector::GetData<string_t>(output.data[0])[0] = StringVector::AddString(output.data[0], soql);
+	sf_compat::flat_data_mutable<string_t>(output.data[0])[0] = StringVector::AddString(output.data[0], soql);
 	gstate.emitted = true;
 	output.SetCardinality(1);
 }
@@ -536,7 +571,7 @@ struct LastPagesGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> LastPagesBind(ClientContext &, TableFunctionBindInput &,
-                                              vector<LogicalType> &return_types, vector<string> &names) {
+                                              vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	names = {"pages"};
 	return_types = {LogicalType::BIGINT};
 	return nullptr;
@@ -557,7 +592,7 @@ static void LastPagesFunction(ClientContext &, TableFunctionInput &data, DataChu
 		std::lock_guard<std::mutex> g(g_pages_lock);
 		pages = g_last_scan_pages;
 	}
-	FlatVector::GetData<int64_t>(output.data[0])[0] = pages;
+	sf_compat::flat_data_mutable<int64_t>(output.data[0])[0] = pages;
 	gstate.emitted = true;
 	output.SetCardinality(1);
 }
@@ -598,7 +633,7 @@ struct LastBulkBodyGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> LastBulkBodyBind(ClientContext &, TableFunctionBindInput &,
-                                                 vector<LogicalType> &return_types, vector<string> &names) {
+                                                 vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	names = {"body"};
 	return_types = {LogicalType::VARCHAR};
 	return nullptr;
@@ -619,7 +654,7 @@ static void LastBulkBodyFunction(ClientContext &, TableFunctionInput &data, Data
 		std::lock_guard<std::mutex> g(g_bulk_body_lock);
 		body = g_last_bulk_create_body;
 	}
-	FlatVector::GetData<string_t>(output.data[0])[0] = StringVector::AddString(output.data[0], body);
+	sf_compat::flat_data_mutable<string_t>(output.data[0])[0] = StringVector::AddString(output.data[0], body);
 	gstate.emitted = true;
 	output.SetCardinality(1);
 }
@@ -655,7 +690,7 @@ struct LastTransportGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> LastTransportBind(ClientContext &, TableFunctionBindInput &,
-                                                  vector<LogicalType> &return_types, vector<string> &names) {
+                                                  vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	names = {"transport", "est_rows", "reason"};
 	return_types = {LogicalType::VARCHAR, LogicalType::BIGINT, LogicalType::VARCHAR};
 	return nullptr;
@@ -679,13 +714,13 @@ static void LastTransportFunction(ClientContext &, TableFunctionInput &data, Dat
 		est = g_last_est_rows;
 		reason = g_last_transport_reason;
 	}
-	FlatVector::GetData<string_t>(output.data[0])[0] = StringVector::AddString(output.data[0], transport);
+	sf_compat::flat_data_mutable<string_t>(output.data[0])[0] = StringVector::AddString(output.data[0], transport);
 	if (est < 0) {
 		FlatVector::SetNull(output.data[1], 0, true);
 	} else {
-		FlatVector::GetData<int64_t>(output.data[1])[0] = est;
+		sf_compat::flat_data_mutable<int64_t>(output.data[1])[0] = est;
 	}
-	FlatVector::GetData<string_t>(output.data[2])[0] = StringVector::AddString(output.data[2], reason);
+	sf_compat::flat_data_mutable<string_t>(output.data[2])[0] = StringVector::AddString(output.data[2], reason);
 	gstate.emitted = true;
 	output.SetCardinality(1);
 }
@@ -721,7 +756,7 @@ struct DescribeCallsGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> DescribeCallsBind(ClientContext &, TableFunctionBindInput &,
-                                                  vector<LogicalType> &return_types, vector<string> &names) {
+                                                  vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	names = {"calls"};
 	return_types = {LogicalType::BIGINT};
 	return nullptr;
@@ -742,7 +777,7 @@ static void DescribeCallsFunction(ClientContext &, TableFunctionInput &data, Dat
 		std::lock_guard<std::mutex> g(g_describe_lock);
 		calls = g_describe_calls;
 	}
-	FlatVector::GetData<int64_t>(output.data[0])[0] = calls;
+	sf_compat::flat_data_mutable<int64_t>(output.data[0])[0] = calls;
 	gstate.emitted = true;
 	output.SetCardinality(1);
 }
@@ -778,7 +813,7 @@ struct ToolingCallsGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> ToolingCallsBind(ClientContext &, TableFunctionBindInput &,
-                                                 vector<LogicalType> &return_types, vector<string> &names) {
+                                                 vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	names = {"calls"};
 	return_types = {LogicalType::BIGINT};
 	return nullptr;
@@ -799,7 +834,7 @@ static void ToolingCallsFunction(ClientContext &, TableFunctionInput &data, Data
 		std::lock_guard<std::mutex> g(g_tooling_lock);
 		calls = g_tooling_calls;
 	}
-	FlatVector::GetData<int64_t>(output.data[0])[0] = calls;
+	sf_compat::flat_data_mutable<int64_t>(output.data[0])[0] = calls;
 	gstate.emitted = true;
 	output.SetCardinality(1);
 }
@@ -835,7 +870,7 @@ struct GlobalCallsGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> GlobalCallsBind(ClientContext &, TableFunctionBindInput &,
-                                                vector<LogicalType> &return_types, vector<string> &names) {
+                                                vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	names = {"calls"};
 	return_types = {LogicalType::BIGINT};
 	return nullptr;
@@ -856,7 +891,7 @@ static void GlobalCallsFunction(ClientContext &, TableFunctionInput &data, DataC
 		std::lock_guard<std::mutex> g(g_global_lock);
 		calls = g_global_describe_calls;
 	}
-	FlatVector::GetData<int64_t>(output.data[0])[0] = calls;
+	sf_compat::flat_data_mutable<int64_t>(output.data[0])[0] = calls;
 	gstate.emitted = true;
 	output.SetCardinality(1);
 }

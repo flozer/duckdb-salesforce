@@ -14,6 +14,7 @@
 #include "salesforce_soql.hpp"
 #include "salesforce_config.hpp"
 #include "salesforce_auth.hpp"
+#include "salesforce_duckdb_compat.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -166,7 +167,7 @@ struct AggGlobalState : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> AggBind(ClientContext &context, TableFunctionBindInput &input,
-                                 vector<LogicalType> &return_types, vector<string> &names) {
+                                 vector<LogicalType> &return_types, sf_compat::names_t &names) {
 	auto &args = input.inputs;
 	if (args.size() < 3 || args.size() > 5) {
 		throw BinderException("salesforce_aggregate(catalog, object, aggregates [, filter [, "
@@ -216,14 +217,14 @@ unique_ptr<FunctionData> AggBind(ClientContext &context, TableFunctionBindInput 
 		AggColumn col;
 		col.name = field;
 		col.key = field;
-		names.push_back(col.name);
+		sf_compat::add_name(names, col.name);
 		return_types.push_back(LogicalType::VARCHAR);
 		bind->columns.push_back(std::move(col));
 	}
 	idx_t unaliased = 0;
 	for (auto &term : SplitTopLevelCommas(aggregates)) {
 		AggColumn col = ParseTerm(term, unaliased);
-		names.push_back(col.name);
+		sf_compat::add_name(names, col.name);
 		return_types.push_back(LogicalType::VARCHAR);
 		bind->columns.push_back(std::move(col));
 	}
@@ -287,7 +288,8 @@ void AggFunction(ClientContext &context, TableFunctionInput &data, DataChunk &ou
 			if (!found || is_null) {
 				FlatVector::SetNull(output.data[c], produced, true);
 			} else {
-				FlatVector::GetData<string_t>(output.data[c])[produced] = StringVector::AddString(output.data[c], val);
+				sf_compat::flat_data_mutable<string_t>(output.data[c])[produced] =
+				    StringVector::AddString(output.data[c], val);
 			}
 		}
 		gs.cursor++;
@@ -301,7 +303,11 @@ void AggFunction(ClientContext &context, TableFunctionInput &data, DataChunk &ou
 TableFunction GetSalesforceAggregateFunction() {
 	TableFunction fn("salesforce_aggregate", {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
 	                 AggFunction, AggBind, AggInit);
-	fn.varargs = LogicalType::VARCHAR; // optional 4th arg: filter
+	sf_compat::set_param_name(fn, 0, "catalog");
+	sf_compat::set_param_name(fn, 1, "object");
+	sf_compat::set_param_name(fn, 2, "aggregates");
+
+	sf_compat::set_varargs(fn, "filter", LogicalType::VARCHAR); // optional 4th arg: filter
 	return fn;
 }
 

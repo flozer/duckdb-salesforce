@@ -15,7 +15,7 @@ artifact as described below. Community updates remain human-gated; see
 ## Supported DuckDB versions
 
 Extensions are **version-locked** to the DuckDB they were built against. This
-extension is built + tested against **DuckDB v1.5.4, v1.5.5 and v1.5.6**, per
+extension is built + tested against **DuckDB v1.5.4, v1.5.5, v1.5.6 and v2.0.0** (dual-line: one source tree, version selected at build time), per
 the official `MainDistributionPipeline.yml` matrix (all three pass on Linux
 x64, Windows x64, and macOS arm64).
 
