@@ -227,7 +227,7 @@ static unique_ptr<FunctionData> ReportBind(ClientContext &context, TableFunction
 			name = base + "_" + std::to_string(n++);
 		}
 		used.insert(name);
-		names.push_back(Identifier(name));
+		sf_compat::add_name(names, name);
 		return_types.push_back(LogicalType::VARCHAR);
 	}
 	bind->data_cols = detail_cols.size();

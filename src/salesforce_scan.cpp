@@ -1042,7 +1042,7 @@ static unique_ptr<FunctionData> ScanUserBind(ClientContext &context, TableFuncti
 	return_types = bind_data->column_types;
 	names.clear();
 	for (auto &n : bind_data->column_names) {
-		names.push_back(Identifier(n));
+		sf_compat::add_name(names, n);
 	}
 	return std::move(bind_data);
 }

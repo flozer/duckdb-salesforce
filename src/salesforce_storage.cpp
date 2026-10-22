@@ -280,7 +280,7 @@ private:
 			if (!IsQueryableField(f)) {
 				continue;
 			}
-			info.columns.AddColumn(ColumnDefinition(Identifier(f.name), f.duckdb_type));
+			info.columns.AddColumn(sf_compat::column_def(f.name, f.duckdb_type));
 			if (!f.nillable) {
 				info.constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(queryable.size())));
 			}
@@ -748,7 +748,7 @@ void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias
                                      SalesforceTokenSet &token) {
 	Catalog *catalog = nullptr;
 	try {
-		catalog = &Catalog::GetCatalog(context, Identifier(alias));
+		catalog = &sf_compat::get_catalog(context, alias);
 	} catch (...) {
 		catalog = nullptr;
 	}
@@ -768,7 +768,7 @@ void GetSalesforceCatalogCredentials(ClientContext &context, const string &alias
 SalesforceMetadataEngine &GetSalesforceCatalogMetadataEngine(ClientContext &context, const string &alias) {
 	Catalog *catalog = nullptr;
 	try {
-		catalog = &Catalog::GetCatalog(context, Identifier(alias));
+		catalog = &sf_compat::get_catalog(context, alias);
 	} catch (...) {
 		catalog = nullptr;
 	}
@@ -793,7 +793,7 @@ SalesforceMetadataEngine &GetSalesforceCatalogMetadataEngine(ClientContext &cont
 void RefreshSalesforceCatalogMetadata(ClientContext &context, const string &alias, const string &object) {
 	Catalog *catalog = nullptr;
 	try {
-		catalog = &Catalog::GetCatalog(context, Identifier(alias));
+		catalog = &sf_compat::get_catalog(context, alias);
 	} catch (...) {
 		catalog = nullptr;
 	}
@@ -814,7 +814,7 @@ void RefreshSalesforceCatalogMetadata(ClientContext &context, const string &alia
 string GetSalesforceObjectDescribeJson(ClientContext &context, const string &alias, const string &object) {
 	Catalog *catalog = nullptr;
 	try {
-		catalog = &Catalog::GetCatalog(context, Identifier(alias));
+		catalog = &sf_compat::get_catalog(context, alias);
 	} catch (...) {
 		catalog = nullptr;
 	}

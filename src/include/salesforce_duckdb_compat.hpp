@@ -143,6 +143,33 @@ children_of(const duckdb::BoundFunctionExpression &expr) {
 #endif
 }
 
+// Append a runtime string to a bind names vector.
+inline void add_name(names_t &names, const std::string &n) {
+#ifdef SF_DUCKDB_V2
+	names.push_back(duckdb::Identifier(n));
+#else
+	names.push_back(n);
+#endif
+}
+
+#if defined(SF_DUCKDB_V2)
+#include "duckdb/parser/column_definition.hpp"
+#include "duckdb/catalog/catalog.hpp"
+inline duckdb::ColumnDefinition column_def(const std::string &name, const duckdb::LogicalType &type) {
+	return duckdb::ColumnDefinition(duckdb::Identifier(name), type);
+}
+inline duckdb::Catalog &get_catalog(duckdb::ClientContext &context, const std::string &name) {
+	return duckdb::Catalog::GetCatalog(context, duckdb::Identifier(name));
+}
+#else
+inline duckdb::ColumnDefinition column_def(const std::string &name, const duckdb::LogicalType &type) {
+	return duckdb::ColumnDefinition(name, type);
+}
+inline duckdb::Catalog &get_catalog(duckdb::ClientContext &context, const std::string &name) {
+	return duckdb::Catalog::GetCatalog(context, name);
+}
+#endif
+
 // Bound function name as std::string.
 inline std::string function_name(const duckdb::BoundFunctionExpression &expr) {
 #ifdef SF_DUCKDB_V2

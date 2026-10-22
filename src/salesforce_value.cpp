@@ -241,7 +241,7 @@ static unique_ptr<FunctionData> DecodeBind(ClientContext &, TableFunctionBindInp
 		throw BinderException("salesforce_decode: fields_json described no fields");
 	}
 	for (auto &f : bind->fields) {
-		names.push_back(Identifier(f.name));
+		sf_compat::add_name(names, f.name);
 		return_types.push_back(f.duckdb_type);
 	}
 	return std::move(bind);

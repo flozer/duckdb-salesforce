@@ -114,7 +114,7 @@ unique_ptr<FunctionData> BulkResumeBind(ClientContext &context, TableFunctionBin
 	return_types = data->column_types;
 	names.clear();
 	for (auto &n : data->column_names) {
-		names.push_back(Identifier(n));
+		sf_compat::add_name(names, n);
 	}
 	return std::move(data);
 }

@@ -217,14 +217,14 @@ unique_ptr<FunctionData> AggBind(ClientContext &context, TableFunctionBindInput 
 		AggColumn col;
 		col.name = field;
 		col.key = field;
-		names.push_back(Identifier(col.name));
+		sf_compat::add_name(names, col.name);
 		return_types.push_back(LogicalType::VARCHAR);
 		bind->columns.push_back(std::move(col));
 	}
 	idx_t unaliased = 0;
 	for (auto &term : SplitTopLevelCommas(aggregates)) {
 		AggColumn col = ParseTerm(term, unaliased);
-		names.push_back(Identifier(col.name));
+		sf_compat::add_name(names, col.name);
 		return_types.push_back(LogicalType::VARCHAR);
 		bind->columns.push_back(std::move(col));
 	}
