@@ -73,6 +73,11 @@ v0.15.0 (baseline change) was a minor; compat-only additions were patches.
 | v1.5.6 | Pass | Pass | Pass |
 | v2.0.0 | 58/59 suite* | Pass | Pass |
 
+Post-merge `main` run
+[39819337009](https://github.com/flozer/duckdb-salesforce/actions/runs/39819337009)
+(2026-10-22): identical result — 11/12, same single diagnostic delta on
+v2.0.0/linux_amd64; every other job green on both runs.
+
 \* **v2.0.0 / linux_amd64, one diagnostic assertion under investigation**:
 `salesforce_transport_auto` reads the `salesforce_last_transport()`
 diagnostic snapshot right after a forced-rest scan; on 2.0/GCC the
