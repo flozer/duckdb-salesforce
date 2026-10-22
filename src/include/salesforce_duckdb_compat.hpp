@@ -154,23 +154,25 @@ inline void add_name(names_t &names, const std::string &n) {
 #endif
 }
 
-#if defined(SF_DUCKDB_V2)
 #include "duckdb/parser/column_definition.hpp"
-#include "duckdb/catalog/catalog.hpp"
+// column_def: callers include the catalog/column headers they need.
 inline duckdb::ColumnDefinition column_def(const std::string &name, const duckdb::LogicalType &type) {
+#ifdef SF_DUCKDB_V2
 	return duckdb::ColumnDefinition(duckdb::Identifier(name), type);
-}
-inline duckdb::Catalog &get_catalog(duckdb::ClientContext &context, const std::string &name) {
-	return duckdb::Catalog::GetCatalog(context, duckdb::Identifier(name));
-}
 #else
-inline duckdb::ColumnDefinition column_def(const std::string &name, const duckdb::LogicalType &type) {
 	return duckdb::ColumnDefinition(name, type);
-}
-inline duckdb::Catalog &get_catalog(duckdb::ClientContext &context, const std::string &name) {
-	return duckdb::Catalog::GetCatalog(context, name);
-}
 #endif
+}
+// get_catalog as a template: the Catalog type comes from the caller's TU
+// (including duckdb/catalog/catalog.hpp here breaks include order on 2.0/GCC).
+template <typename Ctx>
+inline auto &get_catalog(Ctx &context, const std::string &name) {
+#ifdef SF_DUCKDB_V2
+	return duckdb::Catalog::GetCatalog(context, duckdb::Identifier(name));
+#else
+	return duckdb::Catalog::GetCatalog(context, name);
+#endif
+}
 
 // Bound function name as std::string.
 inline std::string function_name(const duckdb::BoundFunctionExpression &expr) {
