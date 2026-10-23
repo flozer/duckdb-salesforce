@@ -28,7 +28,7 @@ is the most common build failure on Windows. The HTTP client
 ([httplib](https://github.com/yhirose/cpp-httplib)) is vendored as a header-only
 dependency, so there is nothing extra to install for it.
 
-The extension is built and tested against DuckDB **v1.5.4 and v1.5.5 only**,
+The extension is built and tested against DuckDB **v1.5.4, v1.5.5, v1.5.6 and v2.0.0** (dual-line; one source tree, version selected at build time),
 and is version-locked to those releases. No GNU `make` is required on
 Windows.
 
@@ -137,7 +137,7 @@ with `duckdb -unsigned`, or run `SET allow_unsigned_extensions=true;` before the
 `LOAD`. Or skip `LOAD` entirely and use `build\release\duckdb`.
 
 ### `LOAD` fails with a version mismatch
-The extension is version-locked to DuckDB v1.5.4 / v1.5.5. If
+The extension tracks the DuckDB lines it declares support for (v1.5.4/v1.5.5/v1.5.6 and v2.0.0). If
 your stock CLI is a different version, the ABI won't match and `LOAD` errors
 out. Match the CLI to
 the version the extension was built against, or use the bundled
