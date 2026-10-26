@@ -185,6 +185,15 @@ inline auto &get_catalog(Ctx &context, const std::string &name) {
 	return sf_get_catalog_impl<duckdb::Catalog>(context, name);
 }
 
+// Keep logical chunk cardinality and child vector sizes in sync on DuckDB 2.0.
+inline void set_cardinality(duckdb::DataChunk &chunk, duckdb::idx_t count) {
+#ifdef SF_DUCKDB_V2
+	chunk.SetChildCardinality(count);
+#else
+	chunk.SetCardinality(count);
+#endif
+}
+
 // Bound function name as std::string.
 inline std::string function_name(const duckdb::BoundFunctionExpression &expr) {
 #ifdef SF_DUCKDB_V2

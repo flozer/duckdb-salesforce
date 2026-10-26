@@ -122,11 +122,10 @@ SELECT Name FROM sf.Account;
 ----
 RestRow
 
-query I
-SELECT transport = 'rest' AND est_rows IS NULL AND reason = 'forced'
-FROM salesforce_last_transport();
+query TIT
+SELECT transport, est_rows, reason FROM salesforce_last_transport();
 ----
-true
+rest	NULL	forced
 
 statement ok
 SET sf_force_transport = 'bulk';
@@ -136,11 +135,10 @@ SELECT Name FROM sf.Account;
 ----
 BulkRow
 
-query I
-SELECT transport = 'bulk' AND est_rows IS NULL AND reason = 'forced'
-FROM salesforce_last_transport();
+query TIT
+SELECT transport, est_rows, reason FROM salesforce_last_transport();
 ----
-true
+bulk	NULL	forced
 
 # --- auto + aggregate-only (COUNT(*)) -> REST, no probe ---------------------
 # COUNT(*) takes the count-pushdown path (#v0.5 §5): the result comes from the

@@ -770,6 +770,8 @@ static void AppendBulkStruct(Vector &vec, idx_t row, const SalesforceField &fiel
 	}
 	if (!any) {
 		FlatVector::SetNull(vec, row, true); // whole parent absent -> null struct
+	} else {
+		FlatVector::SetNull(vec, row, false);
 	}
 }
 
@@ -783,14 +785,14 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
 	// pass through for MIN/MAX, COUNT nulls were validated at init), then stop.
 	if (gstate.agg_only) {
 		if (gstate.agg_sent) {
-			output.SetCardinality(0);
+			sf_compat::set_cardinality(output, 0);
 			return;
 		}
 		gstate.agg_sent = true;
 		for (idx_t j = 0; j < gstate.agg_emit_fields.size() && j < STANDARD_VECTOR_SIZE; j++) {
 			AppendJsonValue(output.data[j], 0, gstate.agg_emit_fields[j], gstate.agg_record);
 		}
-		output.SetCardinality(1);
+		sf_compat::set_cardinality(output, 1);
 		DiagAddRowsEmitted(1);
 		return;
 	}
@@ -806,7 +808,7 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
 			gstate.count_cursor++;
 			row++;
 		}
-		output.SetCardinality(row);
+		sf_compat::set_cardinality(output, row);
 		DiagAddRowsEmitted(static_cast<int64_t>(row));
 		return;
 	}
@@ -831,7 +833,7 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
 				if (!lstate.has_chunk) {
 					idx_t idx = gstate.next_chunk.fetch_add(1);
 					if (idx >= gstate.bulk_chunk_soqls.size()) {
-						output.SetCardinality(0);
+						sf_compat::set_cardinality(output, 0);
 						return; // no more chunks for this thread
 					}
 					// Start this chunk's Bulk job — quota-gated PER job (#9).
@@ -883,7 +885,7 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
 			lstate.cursor++;
 			row++;
 		}
-		output.SetCardinality(row);
+		sf_compat::set_cardinality(output, row);
 		DiagAddRowsEmitted(static_cast<int64_t>(row)); // rows delivered to DuckDB
 		return;
 	}
@@ -894,7 +896,7 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
 	// triggers the next-page fetch.
 	if (gstate.cursor >= gstate.page.size()) {
 		if (!ScanAdvancePage(gstate)) {
-			output.SetCardinality(0);
+			sf_compat::set_cardinality(output, 0);
 			return;
 		}
 	}
@@ -915,7 +917,7 @@ static void ScanFunction(ClientContext &context, TableFunctionInput &data, DataC
 		gstate.cursor++;
 		row++;
 	}
-	output.SetCardinality(row);
+	sf_compat::set_cardinality(output, row);
 	DiagAddRowsEmitted(static_cast<int64_t>(row)); // rows delivered to DuckDB
 }
 

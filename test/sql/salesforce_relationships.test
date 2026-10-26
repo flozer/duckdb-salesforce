@@ -91,10 +91,14 @@ SELECT calls FROM salesforce_describe_calls();
 2
 
 # Whole struct: full parent populated, null + missing parent -> null struct.
-# Version-neutral form: 2.0's executor evaluates `struct IS NULL` on a
-# projected scan column differently from 1.5.x (filter usage and display are
-# correct on both), so the null-parent semantics are asserted through the
-# child projection + an IS NOT NULL filter, which behave identically.
+# Direct IS NULL covers parent validity through projection and ORDER BY.
+query I
+SELECT Account IS NULL FROM sf.Contact ORDER BY Id;
+----
+false
+true
+true
+
 query I
 SELECT Account.Name IS NULL FROM sf.Contact ORDER BY Id;
 ----
@@ -109,6 +113,38 @@ SELECT count(*) FROM sf.Contact WHERE Account IS NOT NULL;
 
 statement ok
 DETACH sf;
+
+# Bulk CSV uses a separate STRUCT decoder; assert identical parent nullability.
+statement ok
+SET sf_force_transport = 'bulk';
+
+statement ok
+SET sf_mock_bulk_create_body = '{"id":"JOB1","state":"UploadComplete"}';
+
+statement ok
+SET sf_mock_bulk_status_body = '{"state":"JobComplete"}';
+
+statement ok
+SET sf_mock_bulk_results_body = 'Id,Account.Id,Account.Name,Account.AnnualRevenue
+c1,a1,Acme,100.00
+c2,,
+c3,,';
+
+statement ok
+ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
+
+query I
+SELECT Account IS NULL FROM sf.Contact ORDER BY Id;
+----
+false
+true
+true
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_force_transport = 'rest';
 
 statement ok
 SET sf_relationships = 'off';

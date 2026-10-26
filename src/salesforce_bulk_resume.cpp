@@ -155,12 +155,12 @@ void BulkResumeFunction(ClientContext &context, TableFunctionInput &data, DataCh
 				gstate.cursor++;
 				row++;
 			}
-			output.SetCardinality(row);
+			sf_compat::set_cardinality(output, row);
 			return;
 		}
 		// Page exhausted: follow the locator, or stop.
 		if (gstate.page.next_locator.empty()) {
-			output.SetCardinality(0);
+			sf_compat::set_cardinality(output, 0);
 			return;
 		}
 		gstate.page = gstate.session->BulkFetchResultPage(gstate.results_base + "/" + gstate.page.next_locator);

@@ -875,7 +875,7 @@ void RefreshMetadataFunction(ClientContext &context, TableFunctionInput &data, D
 	auto &bd = data.bind_data->Cast<RefreshMetadataBindData>();
 	auto &gs = data.global_state->Cast<RefreshMetadataGlobalState>();
 	if (gs.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 	RefreshSalesforceCatalogMetadata(context, bd.alias, bd.object);
@@ -887,7 +887,7 @@ void RefreshMetadataFunction(ClientContext &context, TableFunctionInput &data, D
 		output.data[2].SetValue(0, Value(bd.object));
 	}
 	gs.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace

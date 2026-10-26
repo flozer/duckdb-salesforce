@@ -118,7 +118,7 @@ void IntOrNull(DataChunk &out, idx_t col, int64_t v) {
 void QueryCostFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<QueryCostGlobalState>();
 	if (gstate.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 	ScanCost c;
@@ -152,7 +152,7 @@ void QueryCostFunction(ClientContext &, TableFunctionInput &data, DataChunk &out
 	Str(output, 18, BuildGuidance(c));
 	IntOrNull(output, 19, c.bulk_polls);
 	gstate.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace

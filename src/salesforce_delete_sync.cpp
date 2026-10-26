@@ -350,7 +350,7 @@ void DeletedIdsFunction(ClientContext &context, TableFunctionInput &data, DataCh
 		g.cursor++;
 		row++;
 	}
-	output.SetCardinality(row);
+	sf_compat::set_cardinality(output, row);
 }
 
 } // namespace

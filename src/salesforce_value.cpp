@@ -104,6 +104,9 @@ static void AppendRelationshipStruct(Vector &vec, idx_t row, const SalesforceFie
 		FlatVector::SetNull(vec, row, true); // parent null/missing -> null struct
 		return;
 	}
+	// A populated parent is valid independently of its children's validity.
+	// DuckDB 2.0 does not infer parent validity when struct children are written.
+	FlatVector::SetNull(vec, row, false);
 	for (idx_t c = 0; c < field.children.size(); c++) {
 		AppendJsonValue(entry(c), row, field.children[c], nested);
 	}
@@ -264,7 +267,7 @@ static void DecodeFunction(ClientContext &, TableFunctionInput &data, DataChunk 
 		gstate.cursor++;
 		row++;
 	}
-	output.SetCardinality(row);
+	sf_compat::set_cardinality(output, row);
 }
 
 } // namespace

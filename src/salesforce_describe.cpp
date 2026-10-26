@@ -169,7 +169,7 @@ static void DescribeFunction(ClientContext &, TableFunctionInput &data, DataChun
 		sf_compat::flat_data_mutable<bool>(output.data[9])[row] = f.unknown_type;
 		row++;
 	}
-	output.SetCardinality(row);
+	sf_compat::set_cardinality(output, row);
 }
 
 } // namespace

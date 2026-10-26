@@ -334,7 +334,7 @@ function Invoke-OfflineTests([string]$buildDir, [string]$logsDir) {
                     $passed++; $asserts += [int]$Matches[1]
                     $summaryLines += "PASS  $testName  ($($Matches[1]) assertions)"
                 }
-                elseif ($out -match 'Skipped tests') {
+                elseif ($out -match 'Skipped tests|All tests were skipped') {
                     $skipped++
                     $summaryLines += "SKIP  $testName"
                     $out | Out-File (Join-Path $logsDir "skipped_$testName.log")

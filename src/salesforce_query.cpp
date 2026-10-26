@@ -105,7 +105,7 @@ static void QueryFunction(ClientContext &, TableFunctionInput &data, DataChunk &
 		gstate.cursor++;
 		row++;
 	}
-	output.SetCardinality(row);
+	sf_compat::set_cardinality(output, row);
 }
 
 } // namespace

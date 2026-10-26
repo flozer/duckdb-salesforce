@@ -138,7 +138,7 @@ void MetaFunction(ClientContext &context, TableFunctionInput &data, DataChunk &o
 		gs.cursor++;
 		produced++;
 	}
-	output.SetCardinality(produced);
+	sf_compat::set_cardinality(output, produced);
 }
 
 } // namespace

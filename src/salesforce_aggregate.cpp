@@ -295,7 +295,7 @@ void AggFunction(ClientContext &context, TableFunctionInput &data, DataChunk &ou
 		gs.cursor++;
 		produced++;
 	}
-	output.SetCardinality(produced);
+	sf_compat::set_cardinality(output, produced);
 }
 
 } // namespace

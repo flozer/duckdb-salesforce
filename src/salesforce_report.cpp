@@ -126,7 +126,7 @@ static void ReportsFunction(ClientContext &context, TableFunctionInput &data, Da
 		gs.cursor++;
 		produced++;
 	}
-	output.SetCardinality(produced);
+	sf_compat::set_cardinality(output, produced);
 }
 
 // --- salesforce_report(alias, report_id): tabular sample (Phase C) -----------
@@ -291,7 +291,7 @@ static void ReportFunction(ClientContext &, TableFunctionInput &data, DataChunk 
 		gs.cursor++;
 		produced++;
 	}
-	output.SetCardinality(produced);
+	sf_compat::set_cardinality(output, produced);
 }
 
 // --- salesforce_report_soql(alias, report_id): candidate SOQL (Phase D) ------
@@ -1072,7 +1072,7 @@ static void ReportSoqlFunction(ClientContext &, TableFunctionInput &data, DataCh
 	auto &bd = data.bind_data->Cast<ReportSoqlBindData>();
 	auto &gs = data.global_state->Cast<ReportSoqlGlobalState>();
 	if (gs.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 
@@ -1148,7 +1148,7 @@ static void ReportSoqlFunction(ClientContext &, TableFunctionInput &data, DataCh
 	sf_compat::flat_data_mutable<double>(output.data[14])[0] = bd.translatable ? 1.0 : 0.0;
 
 	gs.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace

@@ -532,7 +532,7 @@ static unique_ptr<GlobalTableFunctionState> LastSoqlInit(ClientContext &, TableF
 static void LastSoqlFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<LastSoqlGlobalState>();
 	if (gstate.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 	string soql;
@@ -542,7 +542,7 @@ static void LastSoqlFunction(ClientContext &, TableFunctionInput &data, DataChun
 	}
 	sf_compat::flat_data_mutable<string_t>(output.data[0])[0] = StringVector::AddString(output.data[0], soql);
 	gstate.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace
@@ -584,7 +584,7 @@ static unique_ptr<GlobalTableFunctionState> LastPagesInit(ClientContext &, Table
 static void LastPagesFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<LastPagesGlobalState>();
 	if (gstate.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 	int64_t pages;
@@ -594,7 +594,7 @@ static void LastPagesFunction(ClientContext &, TableFunctionInput &data, DataChu
 	}
 	sf_compat::flat_data_mutable<int64_t>(output.data[0])[0] = pages;
 	gstate.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace
@@ -646,7 +646,7 @@ static unique_ptr<GlobalTableFunctionState> LastBulkBodyInit(ClientContext &, Ta
 static void LastBulkBodyFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<LastBulkBodyGlobalState>();
 	if (gstate.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 	string body;
@@ -656,7 +656,7 @@ static void LastBulkBodyFunction(ClientContext &, TableFunctionInput &data, Data
 	}
 	sf_compat::flat_data_mutable<string_t>(output.data[0])[0] = StringVector::AddString(output.data[0], body);
 	gstate.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace
@@ -703,7 +703,7 @@ static unique_ptr<GlobalTableFunctionState> LastTransportInit(ClientContext &, T
 static void LastTransportFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<LastTransportGlobalState>();
 	if (gstate.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 	string transport, reason;
@@ -722,7 +722,7 @@ static void LastTransportFunction(ClientContext &, TableFunctionInput &data, Dat
 	}
 	sf_compat::flat_data_mutable<string_t>(output.data[2])[0] = StringVector::AddString(output.data[2], reason);
 	gstate.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace
@@ -769,7 +769,7 @@ static unique_ptr<GlobalTableFunctionState> DescribeCallsInit(ClientContext &, T
 static void DescribeCallsFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<DescribeCallsGlobalState>();
 	if (gstate.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 	int64_t calls;
@@ -779,7 +779,7 @@ static void DescribeCallsFunction(ClientContext &, TableFunctionInput &data, Dat
 	}
 	sf_compat::flat_data_mutable<int64_t>(output.data[0])[0] = calls;
 	gstate.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace
@@ -826,7 +826,7 @@ static unique_ptr<GlobalTableFunctionState> ToolingCallsInit(ClientContext &, Ta
 static void ToolingCallsFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<ToolingCallsGlobalState>();
 	if (gstate.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 	int64_t calls;
@@ -836,7 +836,7 @@ static void ToolingCallsFunction(ClientContext &, TableFunctionInput &data, Data
 	}
 	sf_compat::flat_data_mutable<int64_t>(output.data[0])[0] = calls;
 	gstate.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace
@@ -883,7 +883,7 @@ static unique_ptr<GlobalTableFunctionState> GlobalCallsInit(ClientContext &, Tab
 static void GlobalCallsFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<GlobalCallsGlobalState>();
 	if (gstate.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 	int64_t calls;
@@ -893,7 +893,7 @@ static void GlobalCallsFunction(ClientContext &, TableFunctionInput &data, DataC
 	}
 	sf_compat::flat_data_mutable<int64_t>(output.data[0])[0] = calls;
 	gstate.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace

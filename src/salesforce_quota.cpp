@@ -93,7 +93,7 @@ void EmitInt(Vector &vec, int64_t v) {
 void LastQuotaFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<LastQuotaGlobalState>();
 	if (gstate.emitted) {
-		output.SetCardinality(0);
+		sf_compat::set_cardinality(output, 0);
 		return;
 	}
 	string name, reason;
@@ -115,7 +115,7 @@ void LastQuotaFunction(ClientContext &, TableFunctionInput &data, DataChunk &out
 	sf_compat::flat_data_mutable<bool>(output.data[4])[0] = allowed;
 	sf_compat::flat_data_mutable<string_t>(output.data[5])[0] = StringVector::AddString(output.data[5], reason);
 	gstate.emitted = true;
-	output.SetCardinality(1);
+	sf_compat::set_cardinality(output, 1);
 }
 
 } // namespace

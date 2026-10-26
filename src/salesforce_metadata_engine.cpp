@@ -300,7 +300,7 @@ void MetaFieldsFunction(ClientContext &, TableFunctionInput &data, DataChunk &ou
 	fill_list(6, &MetaFieldRow::reference_to);
 	fill_list(7, &MetaFieldRow::picklist_values);
 
-	output.SetCardinality(row);
+	sf_compat::set_cardinality(output, row);
 }
 
 // --- salesforce_metadata_objects(catalog) ------------------------------------
@@ -358,7 +358,7 @@ void MetaObjectsFunction(ClientContext &, TableFunctionInput &data, DataChunk &o
 		gs.cursor++;
 		row++;
 	}
-	output.SetCardinality(row);
+	sf_compat::set_cardinality(output, row);
 }
 
 // --- salesforce_query_explain() ----------------------------------------------
@@ -668,7 +668,7 @@ void ExplainFunction(ClientContext &, TableFunctionInput &data, DataChunk &outpu
 		ListVector::SetListSize(lvec, off);
 	}
 
-	output.SetCardinality(row);
+	sf_compat::set_cardinality(output, row);
 }
 
 // --- salesforce_relationship_graph(catalog, object [, max_depth]) ------------
@@ -1021,7 +1021,7 @@ void RelGraphFunction(ClientContext &, TableFunctionInput &data, DataChunk &outp
 		}
 		ListVector::SetListSize(lvec, off);
 	}
-	output.SetCardinality(row);
+	sf_compat::set_cardinality(output, row);
 }
 
 } // namespace

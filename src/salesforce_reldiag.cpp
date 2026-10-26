@@ -168,7 +168,7 @@ void RelationshipsFunction(ClientContext &, TableFunctionInput &data, DataChunk 
 		gstate.row_idx++;
 		produced++;
 	}
-	output.SetCardinality(produced);
+	sf_compat::set_cardinality(output, produced);
 }
 
 } // namespace
