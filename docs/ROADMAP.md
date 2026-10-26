@@ -1,6 +1,6 @@
 # duckdb-salesforce Roadmap
 
-Status: post-`v0.19.0` roadmap. Own-repo release `v0.19.0` is live (GitHub Release with Linux/Windows assets; official CI 9/9 green across DuckDB v1.5.4/v1.5.5/v1.5.6 on `linux_amd64`, `windows_amd64`, and `osx_arm64`), and the DuckDB community catalog is in sync at `v0.19.0` (update merged via [`duckdb/community-extensions#2948`](https://github.com/duckdb/community-extensions/pull/2948), 2026-10-08; lineage #2850 → #2875 → #2948). This file records the strategic direction after the connector reached feature maturity, cross-platform CI, public documentation, and community publication.
+Status: post-`v0.20.1` roadmap. The own-repo line supports DuckDB v1.5.4-v1.5.6 and v2.0.0 from one source tree. The DuckDB community catalog serves `v0.19.2`; later updates remain subject to the explicit maintainer submission gate. This file records strategic direction after feature maturity, dual-line compatibility, cross-platform CI, public documentation, and community publication.
 
 The core mission is to provide the best bridge between Salesforce and DuckDB for
 analytics. The extension should expose Salesforce data safely, efficiently, and
@@ -24,14 +24,14 @@ transformations, Parquet export, and analytical workflows.
 
 ## Post-Community Release Discipline
 
-`v0.14.1` is the approved community baseline. Treat it as a product release, not as a development checkpoint. Future community updates require a new tag, aligned descriptor, smoke evidence, and explicit maintainer GO.
+`v0.19.2` is the approved community baseline. Treat it as a product release, not as a development checkpoint. Future community updates require a new tag, aligned descriptor, smoke evidence, and explicit maintainer GO.
 
 - Keep `main` stable and releasable.
 - Do roadmap/planning work in a dedicated planning branch.
 - Do implementation work in short-lived feature branches, one risk area at a
   time.
-- Do not reuse or move an already published release tag. `v0.14.1` is immutable;
-  fixes after that baseline need a new tag/version.
+- Do not reuse or move an already published release tag. Every published tag is
+  immutable; fixes after publication need a new tag/version.
 - Prefer additive, opt-in surfaces for new behavior. Keep existing scan,
   authentication, transport selection, and descriptor behavior unchanged unless
   the roadmap explicitly calls for a breaking or compatibility-sensitive change.
@@ -67,8 +67,7 @@ The connector already provides:
   residual-safe behavior.
 - `COUNT(*)` pushdown for safe zero-column scans.
 - Cross-platform CI on `linux_amd64`, `windows_amd64`, and `osx_arm64` for
-  the supported DuckDB versions (`v1.5.4`/`v1.5.5`; `v1.5.6` additionally
-  validated locally ahead of official support).
+  every supported DuckDB version: `v1.5.4`, `v1.5.5`, `v1.5.6`, and `v2.0.0`.
 - `queryAll` opt-in read mode (archived + soft-deleted records).
 - Explicit server-side `salesforce_aggregate()` with optional filter and
   `GROUP BY`.
@@ -88,34 +87,22 @@ The connector already provides:
 
 ## Current priorities
 
-Ordered working queue (2026-09-29; operational detail lives in the
+Ordered working queue (2026-10-26; operational detail lives in the
 maintainer's working notes, not here):
 
-1. **Transparent analytical pushdown — investigation first.** `COUNT(field)`
-   and transparent `MIN`/`MAX` (optionally `SUM`/`AVG`) pushdown all require
-   a DuckDB `OptimizerExtension` (an `Aggregate→Scan` plan rewrite) —
-   machinery the table-function API does not offer today, which is why these
-   two items are deferred. The next step is a feasibility spike with an
-   explicit GO/NO-GO before any implementation. The explicit opt-in
-   `salesforce_aggregate()` already covers the server-side path today, and
-   normal scans keep these aggregates correct through DuckDB.
-2. **Smaller and evidence-gated items.** macOS live TLS validation (or a
+1. **Smaller and evidence-gated items.** macOS live TLS validation (or a
    trust-store path); Report Bridge follow-ups gated on real org fixtures
    (new report-type→object pairs, `reportTypeMetadata` resolution, real
    ADDRESS/PHONE token entries); relationship-graph extensions (deep child
    graphs, cardinality/junction typing, feeding the Report Bridge once
    proven safe); factual corrections to the main body of
    `docs/ARCHITECTURE.md`.
-3. **Compatibility tracking.** The single future-compatibility item kept on
-   this roadmap is **DuckDB 2.0**: the informational canary against
-   `v2.0-cyanoptera` runs on demand, the remaining 2.0 migration surface is
-   mapped (bind signatures `vector<Identifier>`, `string_t`/`DataChunk::data`
-   const-qualification, `ListVector`, `named_parameters`, `Catalog::GetCatalog`,
-   `list_entry_t` — see the maintainer working notes), and the dedicated
-   migration cycle happens when 2.0 approaches general availability. DuckDB
-   v1.5.4/v1.5.5/v1.5.6 are the officially supported line.
-
-4. **Transparent `SUM`/`AVG` pushdown: closed by live evidence (2026-09-30).**
+2. **Compatibility tracking and maintenance.** Dual-line DuckDB support is
+   delivered through `v0.20.1`: one source tree covers v1.5.4-v1.5.6 and
+   v2.0.0, with vector/cardinality behavior validated on all supported refs.
+   Future DuckDB versions remain subject to build-matrix validation before
+   support is claimed.
+3. **Transparent `SUM`/`AVG` pushdown: closed by live evidence (2026-09-30).**
    On a 3.1M-row window of a real org, Salesforce's server-side SUM diverged
    from DuckDB's exact DECIMAL result by ~1,160 (floating-point summation) —
    a transparent pushdown would silently change results, so it is rejected.

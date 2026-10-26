@@ -12,6 +12,21 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.20.1](docs/RELEASE_NOTES_v0.20.1.md) — 2026-10-26
+
+- **DuckDB 2.0 vector cardinality fix** — table functions now synchronize
+  logical chunk cardinality and child vector sizes. This fixes projected
+  `STRUCT IS NULL` results and preserves the existing 1.5.x behavior.
+- **Relationship nullability regression coverage** — direct parent
+  `IS NULL` assertions now cover populated, null, and missing parents through
+  both REST and Bulk decoding.
+- **Validation tooling** — exact forced-transport diagnostic assertions and
+  DuckDB 2.0 skip-output recognition in the local build matrix.
+- Local Windows Release matrix: v1.5.4/v1.5.5/v1.5.6/v2.0.0, each with
+  59 passed files, 0 failures, 1 expected skip, and 1676 assertions.
+- Official CI run 40385778925: 12/12 platform jobs passed across Linux,
+  Windows, and macOS on all four supported DuckDB versions.
+
 ## [v0.20.0](docs/RELEASE_NOTES_v0.20.0.md) — 2026-10-21
 
 - **DuckDB v2.0.0 support, dual-line** — the same source tree now builds,

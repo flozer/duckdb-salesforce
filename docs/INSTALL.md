@@ -28,10 +28,10 @@ historical evidence, not reproduced here. The pinned DuckDB +
 `extension-ci-tools` commits live in the git submodules; use the matching
 DuckDB build/CLI for the artifact you produce.
 
-DuckDB v2.0 readiness (ahead of any stable v2.0 release) is tracked separately
-in [docs/superpowers/specs/2026-08-27-duckdb-v2-c-api-readiness.md](superpowers/specs/2026-08-27-duckdb-v2-c-api-readiness.md);
-no v2.0 support is claimed until a stable v2.0 tag exists and passes this same
-local matrix.
+DuckDB v2.0.0 support shipped in `v0.20.0`; `v0.20.1` completes the
+vector-cardinality and projected `STRUCT IS NULL` compatibility fix. The
+[original readiness investigation](superpowers/specs/2026-08-27-duckdb-v2-c-api-readiness.md)
+is retained as historical design context.
 
 ## Prerequisites
 

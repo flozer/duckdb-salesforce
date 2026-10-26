@@ -8,7 +8,7 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.20.0"><img alt="release v0.20.0" src="https://img.shields.io/badge/release-v0.20.0-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.20.1"><img alt="release v0.20.1" src="https://img.shields.io/badge/release-v0.20.1-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
     <a href="https://github.com/duckdb/community-extensions/pull/3064"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-v0.19.2%20merged-brightgreen.svg"></a>
     <a href="https://duckdb.org/community_extensions/download_metrics"><img alt="DuckDB Community total downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fflozer%2Fduckdb-salesforce%2Fmain%2F.github%2Fbadges%2Fdownloads.json"></a>
@@ -252,11 +252,11 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.20.0** (dual-line: DuckDB **v1.5.4-v1.5.6 and v2.0.0**;
+Own-repo release: **v0.20.1** (dual-line: DuckDB **v1.5.4-v1.5.6 and v2.0.0**;
 v1.5.2/v1.5.3 dropped). Release assets are built against v1.5.6 — production
 1.5.x environments are unaffected; v2.0.0 users build from source until the
 community registry migrates its baseline.
-Community baseline: **v0.19.2** (own-repo is ahead; the v0.20.0 community
+Community baseline: **v0.19.2** (own-repo is ahead; the v0.20.1 community
 update is pending the maintainer submission gate), last merged via
 [`duckdb/community-extensions#3064`](https://github.com/duckdb/community-extensions/pull/3064)
 (lineage #2850 → #2875 → #2948 → #3015 → #3064; updates follow the project's
@@ -297,7 +297,7 @@ resolves a report's base object from the official `reportTypeMetadata`.
 | Delete sync (`salesforce_deleted_ids`: getDeleted any window + paginated queryAll sweep) | Done |
 | Bulk job resume (`salesforce_bulk_resume(catalog, job_id)`) | Done |
 | User-callable `salesforce_scan(catalog, object [, filter])` with per-call overrides | Done |
-| DuckDB 2.0 support | Future: tracked for when 2.0 ships GA (pass already dual-compiles; migration surface mapped) |
+| DuckDB 2.0 projected `STRUCT IS NULL` | Done (v0.20.1; direct REST and Bulk regression coverage) |
 | Salesforce writes / Metadata API deploy | Out of scope |
 
 ## Build
@@ -311,11 +311,11 @@ make test_release
 Windows MSVC and RTOOLS/MinGW local validation are documented in
 [docs/INSTALL.md](docs/INSTALL.md).
 
-**Supported: DuckDB v1.5.4, v1.5.5 and v1.5.6.** v1.5.2/v1.5.3 support was
+**Supported: DuckDB v1.5.4, v1.5.5, v1.5.6 and v2.0.0.** v1.5.2/v1.5.3 support was
 dropped 2026-09-14 (maintainer decision) — see "Dropped versions" below.
 
-Validated matrix (official, from `MainDistributionPipeline.yml` — v0.20.0
-release-prep run, see `docs/RELEASE_NOTES_v0.20.0.md` for the run record):
+Validated matrix (official, from `MainDistributionPipeline.yml` — v0.20.1
+release-prep run, see `docs/RELEASE_NOTES_v0.20.1.md` for the run record):
 
 | Platform | DuckDB v1.5.4 | DuckDB v1.5.5 | DuckDB v1.5.6 | DuckDB v2.0.0 |
 |---|---:|---:|---:|---:|
