@@ -63,6 +63,7 @@ on `main` at `b360c39` completed successfully: **12/12 platform jobs passed**.
   `salesforce-0.20.2` (commit `094573e`) changed only
   `extensions/salesforce/description.yml`.
   [duckdb/community-extensions#3418](https://github.com/duckdb/community-extensions/pull/3418)
-  was opened on 2026-10-27 with the reviewed title and body. Community CI and
-  maintainer review are pending; the live community descriptor remains v0.19.2
-  until merge.
+  was opened on 2026-10-27 with the reviewed title and body. Community CI is
+  green (Linux and Windows builds passed; prepare/forward passed; standard
+  non-applicable jobs skipped). Maintainer review/merge is pending; the live
+  community descriptor remains v0.19.2 until merge.

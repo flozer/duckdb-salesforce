@@ -258,7 +258,7 @@ v1.5.2/v1.5.3 dropped). Release assets are built against v1.5.6 — production
 community registry migrates its baseline.
 Community baseline: **v0.19.2** (own-repo is ahead; the v0.20.2 update is
 submitted via [`duckdb/community-extensions#3418`](https://github.com/duckdb/community-extensions/pull/3418),
-pending community CI/review/merge), last merged via
+community CI green; pending maintainer review/merge), last merged via
 [`duckdb/community-extensions#3064`](https://github.com/duckdb/community-extensions/pull/3064)
 (lineage #2850 → #2875 → #2948 → #3015 → #3064; updates follow the project's
 explicit-submission gate). Every
