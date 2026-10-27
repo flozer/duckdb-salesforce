@@ -1,6 +1,6 @@
 # duckdb-salesforce Roadmap
 
-Status: post-`v0.20.1` roadmap. The own-repo line supports DuckDB v1.5.4-v1.5.6 and v2.0.0 from one source tree. The DuckDB community catalog serves `v0.19.2`; later updates remain subject to the explicit maintainer submission gate. This file records strategic direction after feature maturity, dual-line compatibility, cross-platform CI, public documentation, and community publication.
+Status: post-`v0.20.2` roadmap. The own-repo line supports DuckDB v1.5.4-v1.5.6 and v2.0.0 from one source tree. The DuckDB community catalog serves `v0.19.2`; later updates remain subject to the explicit maintainer submission gate. This file records strategic direction after feature maturity, dual-line compatibility, cross-platform CI, public documentation, and community publication.
 
 The core mission is to provide the best bridge between Salesforce and DuckDB for
 analytics. The extension should expose Salesforce data safely, efficiently, and
@@ -98,7 +98,7 @@ maintainer's working notes, not here):
    proven safe); factual corrections to the main body of
    `docs/ARCHITECTURE.md`.
 2. **Compatibility tracking and maintenance.** Dual-line DuckDB support is
-   delivered through `v0.20.1`: one source tree covers v1.5.4-v1.5.6 and
+   delivered through `v0.20.2`: one source tree covers v1.5.4-v1.5.6 and
    v2.0.0, with vector/cardinality behavior validated on all supported refs.
    Future DuckDB versions remain subject to build-matrix validation before
    support is claimed.

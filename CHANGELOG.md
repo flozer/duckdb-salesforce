@@ -12,6 +12,17 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.20.2](docs/RELEASE_NOTES_v0.20.2.md) — 2026-10-27
+
+- **Provenance/version-metadata fix** — `vcpkg.json` now declares
+  `version-string: 0.20.2`, aligning the manifest with the release tag.
+- No runtime or SQL-surface change from v0.20.1; published v0.20.0/v0.20.1
+  tags remain immutable.
+- Local Windows Release matrix: v1.5.4/v1.5.5/v1.5.6/v2.0.0, each with
+  59 passed files, 0 failures, 1 expected skip, and 1676 assertions.
+- Official CI run 40505098920: 12/12 platform jobs passed across Linux,
+  Windows, and macOS on all four supported DuckDB versions.
+
 ## [v0.20.1](docs/RELEASE_NOTES_v0.20.1.md) — 2026-10-26
 
 - **DuckDB 2.0 vector cardinality fix** — table functions now synchronize
