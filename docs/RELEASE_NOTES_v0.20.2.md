@@ -59,11 +59,18 @@ on `main` at `b360c39` completed successfully: **12/12 platform jobs passed**.
 
 ## Gates
 
-- Community update: **SUBMITTED AFTER EXPLICIT GO**. Fork branch
+- Community update: **MERGED AFTER EXPLICIT GO**. Fork branch
   `salesforce-0.20.2` (commit `094573e`) changed only
   `extensions/salesforce/description.yml`.
   [duckdb/community-extensions#3418](https://github.com/duckdb/community-extensions/pull/3418)
-  was opened on 2026-10-27 with the reviewed title and body. Community CI is
+  was opened on 2026-10-27 with the reviewed title and body and merged on
+  2026-10-29 as `1721cde76bc5235f1b3fd1327160b200168d70d4`. Community CI is
   green (Linux and Windows builds passed; prepare/forward passed; standard
-  non-applicable jobs skipped). Maintainer review/merge is pending; the live
-  community descriptor remains v0.19.2 until merge.
+  non-applicable jobs skipped). The live community descriptor now serves
+  v0.20.2 from own-repo commit `0c9c2620d7e0479cf9d499674187cd82bcb030d4`.
+- Post-merge smoke: an isolated `INSTALL salesforce FROM community; LOAD
+  salesforce;` succeeded. DuckDB reports `installed_from = community` and all
+  28 functions are documented (27 `salesforce_*` table functions plus the
+  `sf_url_encode` scalar). The binary's `extension_version` is `79b7a50`,
+  matching the unchanged v0.20.1 runtime code also reported by the local
+  v0.20.2 build; v0.20.2 changed no C++ source.

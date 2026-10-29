@@ -10,7 +10,7 @@
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.20.2"><img alt="release v0.20.2" src="https://img.shields.io/badge/release-v0.20.2-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
-    <a href="https://github.com/duckdb/community-extensions/pull/3064"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-v0.19.2%20merged-brightgreen.svg"></a>
+    <a href="https://github.com/duckdb/community-extensions/pull/3418"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-v0.20.2%20merged-brightgreen.svg"></a>
     <a href="https://duckdb.org/community_extensions/download_metrics"><img alt="DuckDB Community total downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fflozer%2Fduckdb-salesforce%2Fmain%2F.github%2Fbadges%2Fdownloads.json"></a>
   </p>
   <p>
@@ -38,7 +38,7 @@ exports, lakehouse-style snapshots, and cross-source joins.
 `duckdb-salesforce` is the first Salesforce extension published in the DuckDB
 Community Extensions registry, added via
 [duckdb/community-extensions#2037](https://github.com/duckdb/community-extensions/pull/2037)
-and now serving **`v0.19.2`** (update lineage #2850 → #2875 → #2948 → #3015 → #3064).
+and now serving **`v0.20.2`** (update lineage #2850 → #2875 → #2948 → #3015 → #3064 → #3418).
 
 The extension is a bridge, not an ETL platform: Salesforce access, transport,
 authentication, metadata, and safe pushdown live here; joins, aggregations,
@@ -60,7 +60,7 @@ materialization, files, and downstream analytics stay in DuckDB.
   auth URL, or JWT key files; tokens, keys, JWTs, and org data are never logged.
 - **Published in DuckDB Community Extensions** - added through
   [`duckdb/community-extensions#2037`](https://github.com/duckdb/community-extensions/pull/2037),
-  now serving **`v0.19.2`** (lineage #2850 → #2875 → #2948 → #3015 → #3064); every
+  now serving **`v0.20.2`** (lineage #2850 → #2875 → #2948 → #3015 → #3064 → #3418); every
   pinned ref is public-clone validated and CI green.
 
 ## Features
@@ -256,12 +256,11 @@ Own-repo release: **v0.20.2** (dual-line: DuckDB **v1.5.4-v1.5.6 and v2.0.0**;
 v1.5.2/v1.5.3 dropped). Release assets are built against v1.5.6 — production
 1.5.x environments are unaffected; v2.0.0 users build from source until the
 community registry migrates its baseline.
-Community baseline: **v0.19.2** (own-repo is ahead; the v0.20.2 update is
-submitted via [`duckdb/community-extensions#3418`](https://github.com/duckdb/community-extensions/pull/3418),
-community CI green; pending maintainer review/merge), last merged via
-[`duckdb/community-extensions#3064`](https://github.com/duckdb/community-extensions/pull/3064)
-(lineage #2850 → #2875 → #2948 → #3015 → #3064; updates follow the project's
-explicit-submission gate). Every
+Community baseline: **v0.20.2**, merged via
+[`duckdb/community-extensions#3418`](https://github.com/duckdb/community-extensions/pull/3418)
+on 2026-10-29 with green community CI and a successful isolated install/load
+smoke (lineage #2850 → #2875 → #2948 → #3015 → #3064 → #3418; updates follow
+the project's explicit-submission gate). Every
 extension function documents itself through `duckdb_functions()`
 (description, example, parameter names), and no-group `COUNT`,
 `COUNT(DISTINCT)`, `MIN` and `MAX` queries push down transparently

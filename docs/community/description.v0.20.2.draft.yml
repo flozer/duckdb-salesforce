@@ -1,9 +1,9 @@
 # Submission file for https://github.com/duckdb/community-extensions
 #
-# SUBMITTED after explicit maintainer GO: duckdb/community-extensions#3418,
-# opened 2026-10-27 from flozer:salesforce-0.20.2 (commit 094573e). NOT live;
-# the real mirror stays at docs/community/description.yml (v0.19.2) until the
-# update PR is merged.
+# MERGED after explicit maintainer GO: duckdb/community-extensions#3418,
+# opened 2026-10-27 from flozer:salesforce-0.20.2 (commit 094573e) and merged
+# 2026-10-29 (merge commit 1721cde76bc5235f1b3fd1327160b200168d70d4).
+# The live mirror at docs/community/description.yml now records v0.20.2.
 #
 # repo.ref is pinned to the ACTUAL v0.20.2 tag commit
 # (`git rev-parse v0.20.2^{commit}`), not the annotated tag object.

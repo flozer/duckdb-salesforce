@@ -1,6 +1,6 @@
 # duckdb-salesforce Roadmap
 
-Status: post-`v0.20.2` roadmap. The own-repo line supports DuckDB v1.5.4-v1.5.6 and v2.0.0 from one source tree. The DuckDB community catalog serves `v0.19.2`; later updates remain subject to the explicit maintainer submission gate. This file records strategic direction after feature maturity, dual-line compatibility, cross-platform CI, public documentation, and community publication.
+Status: post-`v0.20.2` roadmap. The own-repo line supports DuckDB v1.5.4-v1.5.6 and v2.0.0 from one source tree. The DuckDB community catalog serves `v0.20.2`; later updates remain subject to the explicit maintainer submission gate. This file records strategic direction after feature maturity, dual-line compatibility, cross-platform CI, public documentation, and community publication.
 
 The core mission is to provide the best bridge between Salesforce and DuckDB for
 analytics. The extension should expose Salesforce data safely, efficiently, and
@@ -24,7 +24,7 @@ transformations, Parquet export, and analytical workflows.
 
 ## Post-Community Release Discipline
 
-`v0.19.2` is the approved community baseline. Treat it as a product release, not as a development checkpoint. Future community updates require a new tag, aligned descriptor, smoke evidence, and explicit maintainer GO.
+`v0.20.2` is the approved community baseline. Treat it as a product release, not as a development checkpoint. Future community updates require a new tag, aligned descriptor, smoke evidence, and explicit maintainer GO.
 
 - Keep `main` stable and releasable.
 - Do roadmap/planning work in a dedicated planning branch.
