@@ -25,8 +25,12 @@
   never-created files (`salesforce_transport_selector`, `observability`,
   `dbt_sources`, `remote_connector_base`) as `NOT SHIPPED` inline, so the tree
   is not misread despite the existing correction note.
-- No C++ source, test logic, function, setting, supported transport, or write
-  capability changed. The v0.21.0 runtime is byte-identical to v0.20.2.
+- No C++ source, function, setting, supported transport, or write capability
+  changed. The only test change is a harness-correctness fix to
+  `salesforce_quota_concurrency.test` (session-scope mocks switched to
+  `SET GLOBAL` so `concurrentloop` worker threads inherit them; no coverage
+  change). The v0.21.0 runtime binary is byte-identical to v0.20.2 - test
+  files are not compiled into the loadable extension.
 
 ## Packaging notes
 
@@ -45,19 +49,15 @@ runtime code is unchanged from v0.20.2.
 
 ## Validation
 
-The v0.21.0 runtime is byte-identical to v0.20.2: no file under `src/`,
-`test/`, or `CMakeLists.txt` changed between the two tags. Only the
-supported-version set, the CI matrix, the build scripts, the `vcpkg.json`
-version string, and documentation differ. The authoritative build/test gate
-for v0.21.0 is therefore the official CI run recorded below, which rebuilds
-the identical binary against both supported DuckDB refs.
-
-For reference, the identical v0.20.2 binary passed the full offline SQL suite
-locally against both refs during its own cycle (isolated per-ref Windows/MSVC
-Release builds): 59/59 files, 1676 assertions per ref, with
-`salesforce_quota_concurrency.test` skipped by the runner's mock/HTTP skip
-rule (not a failure). No C++ files changed in this release, so clang-format
-was not applicable.
+The v0.21.0 runtime binary is byte-identical to v0.20.2: no `src/` or
+`CMakeLists.txt` file changed between the two tags, and the only `test/` change
+is the harness-correctness fix noted above, which is not compiled into the
+loadable extension. The remaining changes are the supported-version set, the CI
+matrix, the build scripts, the `vcpkg.json` version string, and documentation.
+The authoritative build/test gate for v0.21.0 is the official CI run recorded
+below, which rebuilds the identical binary and runs the full offline SQL suite
+against both supported DuckDB refs on all three platforms. No C++ files changed,
+so clang-format was not applicable.
 
 ### Official CI run record
 
