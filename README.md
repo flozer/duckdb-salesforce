@@ -8,7 +8,7 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.20.2"><img alt="release v0.20.2" src="https://img.shields.io/badge/release-v0.20.2-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.21.0"><img alt="release v0.21.0" src="https://img.shields.io/badge/release-v0.21.0-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
     <a href="https://github.com/duckdb/community-extensions/pull/3418"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-v0.20.2%20merged-brightgreen.svg"></a>
     <a href="https://duckdb.org/community_extensions/download_metrics"><img alt="DuckDB Community total downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fflozer%2Fduckdb-salesforce%2Fmain%2F.github%2Fbadges%2Fdownloads.json"></a>
@@ -252,7 +252,7 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.20.2** (dual-line: DuckDB **v1.5.6 and v2.0.0**;
+Own-repo release: **v0.21.0** (dual-line: DuckDB **v1.5.6 and v2.0.0**;
 v1.5.2-v1.5.5 dropped). Release assets are built against v1.5.6 — production
 1.5.x environments are unaffected; v2.0.0 users build from source until the
 community registry migrates its baseline.

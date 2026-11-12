@@ -12,6 +12,19 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.21.0](docs/RELEASE_NOTES_v0.21.0.md) — 2026-11-12
+
+- **Supported DuckDB baseline reduced to v1.5.6 + v2.0.0** (minor; drop of a
+  supported version is a minor per project policy). v1.5.4 and v1.5.5 dropped
+  2026-11-12 (scope reduction) now that v2.0.0 is a shipped LTS line and the
+  production line is v1.5.6; v1.5.2/v1.5.3 were dropped earlier (2026-09-14).
+- No C++ source, SQL surface, function, setting, or write capability changed
+  from v0.20.2 — the binary is identical; only the supported-version set,
+  CI matrix, and documentation changed.
+- CI matrix reduced from 4 to 2 DuckDB refs (`MainDistributionPipeline.yml`).
+- `docs/ARCHITECTURE.md` section 13 file tree: never-created files marked
+  `NOT SHIPPED` inline.
+
 ## [v0.20.2](docs/RELEASE_NOTES_v0.20.2.md) — 2026-10-27
 
 - **Provenance/version-metadata fix** — `vcpkg.json` now declares
