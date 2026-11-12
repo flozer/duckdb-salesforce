@@ -17,25 +17,32 @@
 
 require salesforce
 
+# Mocks and transport/cache settings MUST be GLOBAL here: `concurrentloop`
+# below gives each iteration its own `Connection` on its own OS thread, and an
+# extension option set with session scope (plain SET) is stored per
+# ClientContext, so a worker thread's fresh connection would NOT inherit it and
+# would fall through to the live transport ("Could not establish connection").
+# SET GLOBAL writes to the shared DBConfig, which every connection reads via
+# TryGetCurrentSetting's global fallback, so all 8 threads see the mocks.
 statement ok
-SET sf_mock_token_status = 200;
+SET GLOBAL sf_mock_token_status = 200;
 
 statement ok
-SET sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
+SET GLOBAL sf_mock_token_body = '{"access_token":"AT","instance_url":"https://x.my.salesforce.com"}';
 
 statement ok
-SET sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
+SET GLOBAL sf_mock_describe_body = '{"name":"X","fields":[{"name":"Id","type":"id","filterable":true},{"name":"Name","type":"string","filterable":true}]}';
 
 statement ok
-SET sf_mock_bulk_results_body = 'Id,Name
+SET GLOBAL sf_mock_bulk_results_body = 'Id,Name
 b1,BulkRow';
 
 statement ok
-SET sf_mock_limits_body = '{"DailyApiRequests":{"Max":100000,"Remaining":99000}}';
+SET GLOBAL sf_mock_limits_body = '{"DailyApiRequests":{"Max":100000,"Remaining":99000}}';
 
 # Governor only gates Bulk -- force Bulk so every concurrent scan is checked.
 statement ok
-SET sf_force_transport = 'bulk';
+SET GLOBAL sf_force_transport = 'bulk';
 
 # Non-zero TTL: the first wave of concurrent calls races on an EMPTY cache
 # (miss -> QueryLimits() -> write into g_cache), and once populated,
@@ -43,7 +50,7 @@ SET sf_force_transport = 'bulk';
 # the read side of g_cache_lock get real concurrent pressure this way, not
 # just one or the other.
 statement ok
-SET sf_quota_cache_seconds = 30;
+SET GLOBAL sf_quota_cache_seconds = 30;
 
 statement ok
 ATTACH 'salesforce://org' AS sf (TYPE salesforce, client_id 'c', client_secret 's', refresh_token 'r');
