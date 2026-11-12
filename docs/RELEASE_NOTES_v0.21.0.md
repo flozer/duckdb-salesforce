@@ -61,16 +61,20 @@ was not applicable.
 
 ### Official CI run record
 
-<!-- FILL: MainDistributionPipeline.yml run id + result (6/6) before tag -->
-
-`MainDistributionPipeline.yml` run [TBD](https://github.com/flozer/duckdb-salesforce/actions/runs/TBD)
-on `main` at `TBD` completed successfully: **6/6 platform jobs passed**.
+`MainDistributionPipeline.yml` run
+[43268185610](https://github.com/flozer/duckdb-salesforce/actions/runs/43268185610)
+on `main` at commit `53950ac`, completed 2026-11-12: **6/6 platform jobs
+passed** (both "Generate matrix" setup jobs also green).
 
 | Platform | DuckDB v1.5.6 | DuckDB v2.0.0 |
 |---|---:|---:|
-| `linux_amd64` | TBD | TBD |
-| `windows_amd64` | TBD | TBD |
-| `osx_arm64` | TBD | TBD |
+| `linux_amd64` | pass | pass |
+| `windows_amd64` | pass | pass |
+| `osx_arm64` | pass | pass |
+
+The commit under test (`53950ac`) adds the quota-concurrency test-harness fix
+(session-scope mocks switched to `SET GLOBAL` so `concurrentloop` worker
+threads inherit them); the runtime binary is unchanged from v0.20.2.
 
 ## Gates
 
