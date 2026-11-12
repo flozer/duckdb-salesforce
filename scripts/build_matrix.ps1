@@ -35,10 +35,10 @@
 #
 # Usage:
 #   pwsh -File scripts/build_matrix.ps1
-#   pwsh -File scripts/build_matrix.ps1 -Tags v1.5.4,v1.5.5 -Baseline v1.5.4
-#   pwsh -File scripts/build_matrix.ps1 -Tags v1.5.5 -Configuration Both
-#   pwsh -File scripts/build_matrix.ps1 -Tags v1.5.5 -Baseline v1.5.5 -CanaryRefs <mainSHA> -Clean
-#     (v1.5.5 is built/tested as the gating baseline; <mainSHA> is built/
+#   pwsh -File scripts/build_matrix.ps1 -Tags v1.5.6,v2.0.0 -Baseline v1.5.6
+#   pwsh -File scripts/build_matrix.ps1 -Tags v1.5.6 -Configuration Both
+#   pwsh -File scripts/build_matrix.ps1 -Tags v1.5.6 -Baseline v1.5.6 -CanaryRefs <mainSHA> -Clean
+#     (v1.5.6 is built/tested as the gating baseline; <mainSHA> is built/
 #      tested in the SAME run as a non-gating canary; -Clean wipes only the
 #      canary's own exact build directory first, so it's an independent
 #      from-scratch attempt, not a reuse of a stale directory.)
@@ -50,8 +50,8 @@
 
 [CmdletBinding()]
 param(
-    [string[]]$Tags = @('v1.5.4', 'v1.5.5'),
-    [string]$Baseline = 'v1.5.4',
+    [string[]]$Tags = @('v1.5.6', 'v2.0.0'),
+    [string]$Baseline = 'v1.5.6',
     [string[]]$CanaryRefs = @(),
     [ValidateSet('Release', 'Debug', 'Both')]
     [string]$Configuration = 'Release',

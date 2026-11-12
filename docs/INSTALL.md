@@ -15,12 +15,14 @@ artifact as described below. Community updates remain human-gated; see
 ## Supported DuckDB versions
 
 Extensions are **version-locked** to the DuckDB they were built against. This
-extension is built + tested against **DuckDB v1.5.4, v1.5.5, v1.5.6 and v2.0.0** (dual-line: one source tree, version selected at build time), per
+extension is built + tested against **DuckDB v1.5.6 and v2.0.0** (dual-line: one source tree, version selected at build time), per
 the official `MainDistributionPipeline.yml` matrix (all three pass on Linux
 x64, Windows x64, and macOS arm64).
 
-v1.5.2 and v1.5.3 support was **dropped 2026-09-14** (maintainer decision,
-scope reduction — not a code fix). They previously failed to compile on
+v1.5.4 and v1.5.5 support was **dropped 2026-11-12** (maintainer decision,
+scope reduction) now that v2.0.0 is a shipped LTS line and production runs
+v1.5.6. v1.5.2 and v1.5.3 were **dropped earlier, 2026-09-14** (also scope
+reduction, not a code fix); they previously failed to compile on
 Windows x64 (DuckDB's vendored `fmt` header against the current GitHub
 Windows toolchain; root cause never isolated) while still passing on Linux
 x64 and macOS arm64 — see README.md's "Dropped versions" section for the
@@ -63,8 +65,8 @@ Common: `git`, CMake ≥ 3.5, a C++17 compiler, OpenSSL.
   suggestion in the error message.
 
 CI validates build + the offline (mock) test suite on **linux_amd64,
-windows_amd64, and osx_arm64** across DuckDB **v1.5.4, v1.5.5 and v1.5.6** —
-all three pass on all three platforms. v1.5.2/v1.5.3 are no longer part of
+windows_amd64, and osx_arm64** across DuckDB **v1.5.6 and v2.0.0** —
+both pass on all three platforms. v1.5.2-v1.5.5 are no longer part of
 the matrix — see "Supported DuckDB versions" above.
 
 ## Build

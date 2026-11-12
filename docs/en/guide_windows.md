@@ -28,17 +28,16 @@ is the most common build failure on Windows. The HTTP client
 ([httplib](https://github.com/yhirose/cpp-httplib)) is vendored as a header-only
 dependency, so there is nothing extra to install for it.
 
-The extension is built and tested against DuckDB **v1.5.4, v1.5.5, v1.5.6 and v2.0.0** (dual-line; one source tree, version selected at build time),
+The extension is built and tested against DuckDB **v1.5.6 and v2.0.0** (dual-line; one source tree, version selected at build time),
 and is version-locked to those releases. No GNU `make` is required on
 Windows.
 
-**Current official CI status on Windows** (run
-[34879771640](https://github.com/flozer/duckdb-salesforce/actions/runs/34879771640),
-2026-09-14): v1.5.4 and v1.5.5 build and test cleanly. v1.5.2 and v1.5.3
-support was dropped 2026-09-14 (maintainer decision, scope reduction) after
-they previously failed to compile DuckDB's vendored `fmt` header against the
-current GitHub Windows toolchain — root cause was never isolated, and rather
-than continue chasing it the project stopped supporting those two versions.
+**Current official CI status on Windows**: v1.5.6 and v2.0.0 build and test
+cleanly on `windows_amd64`. v1.5.4/v1.5.5 were dropped 2026-11-12 and
+v1.5.2/v1.5.3 on 2026-09-14 (maintainer decisions, scope reduction); the
+v1.5.2/v1.5.3 pair had also failed to compile DuckDB's vendored `fmt` header
+against the current GitHub Windows toolchain — root cause was never isolated,
+and rather than continue chasing it the project stopped supporting them.
 See README.md "Dropped versions" for the historical evidence.
 
 ## Step 1 — Clone and pin
@@ -137,7 +136,7 @@ with `duckdb -unsigned`, or run `SET allow_unsigned_extensions=true;` before the
 `LOAD`. Or skip `LOAD` entirely and use `build\release\duckdb`.
 
 ### `LOAD` fails with a version mismatch
-The extension tracks the DuckDB lines it declares support for (v1.5.4/v1.5.5/v1.5.6 and v2.0.0). If
+The extension tracks the DuckDB lines it declares support for (v1.5.6 and v2.0.0). If
 your stock CLI is a different version, the ABI won't match and `LOAD` errors
 out. Match the CLI to
 the version the extension was built against, or use the bundled

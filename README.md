@@ -252,8 +252,8 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.20.2** (dual-line: DuckDB **v1.5.4-v1.5.6 and v2.0.0**;
-v1.5.2/v1.5.3 dropped). Release assets are built against v1.5.6 — production
+Own-repo release: **v0.20.2** (dual-line: DuckDB **v1.5.6 and v2.0.0**;
+v1.5.2-v1.5.5 dropped). Release assets are built against v1.5.6 — production
 1.5.x environments are unaffected; v2.0.0 users build from source until the
 community registry migrates its baseline.
 Community baseline: **v0.20.2**, merged via
@@ -291,7 +291,7 @@ resolves a report's base object from the official `reportTypeMetadata`.
 | Transparent `COUNT(field)` pushdown (`sf_aggregate_pushdown`) | Done |
 | Transparent `COUNT(DISTINCT)` / `MIN` / `MAX` pushdown | Done (sortable numeric/temporal/boolean fields; strings stay local) |
 | Transparent `SUM` / `AVG` pushdown | Rejected by live evidence: Salesforce SUM is floating point and diverged ~1,160 on a 3.1M-row window; `salesforce_aggregate()` is the explicit opt-in |
-| Official DuckDB v1.5.6 + v2.0.0 support (dual-line) | Done (CI matrix v1.5.4/v1.5.5/v1.5.6/v2.0.0 × 3 platforms; release assets build against v1.5.6) |
+| Official DuckDB v1.5.6 + v2.0.0 support (dual-line) | Done (CI matrix v1.5.6/v2.0.0 × 3 platforms; release assets build against v1.5.6) |
 | Relationship-graph child recursion (`max_depth`) | Done (P2.3) |
 | Report Bridge base object via `reportTypeMetadata` (cut 2) | Done (P2.2) |
 | Delete sync (`salesforce_deleted_ids`: getDeleted any window + paginated queryAll sweep) | Done |
@@ -311,19 +311,22 @@ make test_release
 Windows MSVC and RTOOLS/MinGW local validation are documented in
 [docs/INSTALL.md](docs/INSTALL.md).
 
-**Supported: DuckDB v1.5.4, v1.5.5, v1.5.6 and v2.0.0.** v1.5.2/v1.5.3 support was
-dropped 2026-09-14 (maintainer decision) — see "Dropped versions" below.
+**Supported: DuckDB v1.5.6 and v2.0.0.** v1.5.2-v1.5.5 support was dropped
+(v1.5.2/v1.5.3 on 2026-09-14; v1.5.4/v1.5.5 on 2026-11-12, scope reduction now
+that v2.0.0 is a shipped LTS line and the production line is v1.5.6) — see
+"Dropped versions" below.
 
-Validated matrix (official, from `MainDistributionPipeline.yml` — v0.20.2
-release-prep run, see `docs/RELEASE_NOTES_v0.20.2.md` for the run record):
+Going-forward CI matrix (official, from `MainDistributionPipeline.yml`). The
+last release validated across all of v1.5.4-v1.5.6 + v2.0.0 was v0.20.2 (see
+`docs/RELEASE_NOTES_v0.20.2.md` for that run record):
 
-| Platform | DuckDB v1.5.4 | DuckDB v1.5.5 | DuckDB v1.5.6 | DuckDB v2.0.0 |
-|---|---:|---:|---:|---:|
-| Linux x64 | Pass | Pass | Pass | Pass |
-| Windows x64 | Pass | Pass | Pass | Pass |
-| macOS arm64 | Pass | Pass | Pass | Pass |
+| Platform | DuckDB v1.5.6 | DuckDB v2.0.0 |
+|---|---:|---:|
+| Linux x64 | Pass | Pass |
+| Windows x64 | Pass | Pass |
+| macOS arm64 | Pass | Pass |
 
-### Dropped versions (v1.5.2, v1.5.3)
+### Dropped versions (v1.5.2-v1.5.5)
 
 No longer supported, tested, or built by this project as of 2026-09-14. They
 previously failed on Windows in official CI (DuckDB's vendored `fmt` header
@@ -335,6 +338,12 @@ Windows passes for these versions remains in git history (see the
 `docs/RELEASE_NOTES_*.md` for the releases that covered them, and CI run
 [33175570085](https://github.com/flozer/duckdb-salesforce/actions/runs/33175570085)
 from 2026-08-28) — not reproduced or re-explained here.
+
+**v1.5.4 and v1.5.5** were dropped **2026-11-12** (maintainer decision, scope
+reduction — both passed cleanly through v0.20.2). With DuckDB v2.0.0 now a
+shipped LTS line and the production environment on v1.5.6, the project tracks
+only **v1.5.6 + v2.0.0** going forward; v1.5.4/v1.5.5 evidence remains in git
+history and in the `docs/RELEASE_NOTES_*.md` through v0.20.2.
 
 DuckDB extensions are version-locked to the DuckDB release used at build time.
 

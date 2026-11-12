@@ -628,10 +628,10 @@ src/
   salesforce_metadata.cpp            # SOAP Metadata fallback (NEW)
   salesforce_quota.cpp               # /limits governor + backoff (NEW)
   salesforce_cache.cpp               # metadata + query-plan cache (NEW)
-  salesforce_transport_selector.cpp  # REST/Bulk/GraphQL policy (NEW)
-  salesforce_observability.cpp       # pushed/residual/quota surfacing (← firebird)
-  salesforce_dbt_sources.cpp         # dbt source YAML emit (← firebird)
-  remote_connector_base.cpp          # shared pool + partition heuristics (NEW, §22)
+  salesforce_transport_selector.cpp  # NOT SHIPPED - planned name, never created (see note above)
+  salesforce_observability.cpp       # NOT SHIPPED (see note above)
+  salesforce_dbt_sources.cpp         # NOT SHIPPED (see note above)
+  remote_connector_base.cpp          # NOT SHIPPED (see note above)
 
   include/
     salesforce_scanner.hpp           # SalesforceBindData/Global/LocalState, PrimaryKeyInfo, ExtraPredicate
@@ -646,8 +646,8 @@ src/
     salesforce_metadata.hpp
     salesforce_quota.hpp
     salesforce_cache.hpp
-    salesforce_transport_selector.hpp
-    remote_connector_base.hpp        # RemoteConnection/Statement/QueryBuilder/TypeMapper/Prober/Partitioner
+    salesforce_transport_selector.hpp  # NOT SHIPPED (see note above)
+    remote_connector_base.hpp        # NOT SHIPPED (see note above)
 ```
 
 ---

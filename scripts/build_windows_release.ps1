@@ -18,9 +18,10 @@ $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $buildPath = Join-Path $root $BuildDir
 
 if (-not $DuckDBVersion) {
-    # v1.5.4 is the floor of currently supported DuckDB versions (v1.5.2/
-    # v1.5.3 dropped 2026-09-14 -- see README.md "Dropped versions").
-    $DuckDBVersion = 'v1.5.4'
+    # v1.5.6 is the floor of currently supported DuckDB versions (v1.5.2/
+    # v1.5.3 dropped 2026-09-14; v1.5.4/v1.5.5 dropped 2026-11-12 -- see
+    # README.md "Dropped versions").
+    $DuckDBVersion = 'v1.5.6'
 }
 
 $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
