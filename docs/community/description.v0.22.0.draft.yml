@@ -9,7 +9,7 @@
 # 'Since v0.22.0' (v2.0.1 added) and 'Since v0.21.0' (set reduced) notes.
 # Function count unchanged (28, all self-documented). Registry builds against
 # DuckDB v1.5.6, which this source supports (floor = v1.5.6).
-# Submitted via fork branch flozer:salesforce-0.22.0 (PR TBD).
+# Submitted via fork branch flozer:salesforce-0.22.0 (PR duckdb/community-extensions#3743).
 #
 
 extension:
