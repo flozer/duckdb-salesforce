@@ -60,16 +60,17 @@ v1.5.6 and v2.0.0 are unchanged from the v0.21.0 cycle (CI run 43268185610,
 
 ### Official CI run record
 
-<!-- FILL: MainDistributionPipeline.yml run id + result (9/9) before tag -->
-
-`MainDistributionPipeline.yml` run [TBD](https://github.com/flozer/duckdb-salesforce/actions/runs/TBD)
-on `main` at `TBD` completed successfully: **9/9 platform jobs passed**.
+`MainDistributionPipeline.yml` run [45174818027](https://github.com/flozer/duckdb-salesforce/actions/runs/45174818027)
+on `main` at `4ac5f08` completed successfully: **9/9 platform jobs passed** (3
+DuckDB refs x 3 platforms). The 3 per-ref `Generate matrix` jobs also passed;
+the 3 `matrix.duckdb_arch` jobs are expected template placeholders and are
+skipped.
 
 | Platform | DuckDB v1.5.6 | DuckDB v2.0.0 | DuckDB v2.0.1 |
 |---|---:|---:|---:|
-| `linux_amd64` | TBD | TBD | TBD |
-| `windows_amd64` | TBD | TBD | TBD |
-| `osx_arm64` | TBD | TBD | TBD |
+| `linux_amd64` | pass | pass | pass |
+| `windows_amd64` | pass | pass | pass |
+| `osx_arm64` | pass | pass | pass |
 
 ## Gates
 
