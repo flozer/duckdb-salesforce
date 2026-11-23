@@ -50,7 +50,7 @@
 
 [CmdletBinding()]
 param(
-    [string[]]$Tags = @('v1.5.6', 'v2.0.0'),
+    [string[]]$Tags = @('v1.5.6', 'v2.0.0', 'v2.0.1'),
     [string]$Baseline = 'v1.5.6',
     [string[]]$CanaryRefs = @(),
     [ValidateSet('Release', 'Debug', 'Both')]
@@ -252,6 +252,11 @@ function Invoke-MatrixBuild([string]$Ref, [string]$Sha, [string]$Config, [bool]$
         "-DUNITTEST_ROOT_DIRECTORY=$Root",
         '-DENABLE_EXTENSION_AUTOLOADING=1',
         '-DENABLE_EXTENSION_AUTOINSTALL=1',
+        # Disable upstream DuckDB's own C++ API unit tests (tools/cpp). They
+        # fail to compile on the v2.x line under MSVC (test_cpp_api_catalog.cpp
+        # C2248), are not our extension's tests, and are not what this matrix
+        # validates. The official CI build disables them too.
+        '-DENABLE_UNITTEST_CPP_TESTS=OFF',
         "-DCMAKE_BUILD_TYPE=$Config",
         '-S', "$Root/duckdb",
         '-B', $buildDir

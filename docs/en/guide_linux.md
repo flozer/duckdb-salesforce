@@ -30,13 +30,13 @@ the system OpenSSL. The HTTP client itself ([httplib](https://github.com/yhirose
 is vendored as a header-only dependency, so there is nothing extra to install
 for it.
 
-The extension is built and tested on Linux against DuckDB **v1.5.6 and v2.0.0**
-(dual-line; one source tree, version selected at build time) — both pass on
+The extension is built and tested on Linux against DuckDB **v1.5.6, v2.0.0, and v2.0.1**
+(dual-line; one source tree, version selected at build time) — all pass on
 `linux_amd64` in the official CI matrix. v1.5.2-v1.5.5 support was dropped
 (v1.5.2/v1.5.3 on 2026-09-14; v1.5.4/v1.5.5 on 2026-11-12), maintainer decision
 and scope reduction — see README.md "Dropped versions", not anything
 Linux-specific. The extension is version-locked to the DuckDB release it was
-built against, per the supported matrix (v1.5.6/v2.0.0).
+built against, per the supported matrix (v1.5.6/v2.0.0/v2.0.1).
 
 ## Step 1 — Clone and pin
 
@@ -132,7 +132,7 @@ with `duckdb -unsigned`, or run `SET allow_unsigned_extensions=true;` before the
 `LOAD`. Or skip `LOAD` entirely and use `build/release/duckdb`.
 
 ### `LOAD` fails with a version mismatch
-The extension tracks the DuckDB lines it declares support for (v1.5.6 and v2.0.0). If
+The extension tracks the DuckDB lines it declares support for (v1.5.6, v2.0.0, and v2.0.1). If
 your stock CLI is a different version, the ABI won't match and `LOAD` errors
 out. Match the CLI to
 the version the extension was built against, or use the bundled

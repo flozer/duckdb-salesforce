@@ -12,6 +12,20 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.22.0](docs/RELEASE_NOTES_v0.22.0.md) — 2026-11-23
+
+- **DuckDB v2.0.1 added to the supported matrix** (minor; a change to the
+  supported-version set is a minor per project policy). Supported set is now
+  **{v1.5.6, v2.0.0, v2.0.1}**. v2.0.1 is a bugfix patch on the v2.0 LTS line
+  (2026-11-20); the existing dual-line v2.x source path covered it with no C++
+  change.
+- CI matrix grown from 2 to 3 DuckDB refs (`MainDistributionPipeline.yml`:
+  v1.5.6, v2.0.0, v2.0.1 × 3 platforms = 9 jobs); `scripts/build_matrix.ps1`
+  default refs and `-DENABLE_UNITTEST_CPP_TESTS=OFF` added (the latter unblocks
+  isolated v2.x local builds under MSVC).
+- No C++ source, SQL surface, function, setting, or write capability changed.
+  Release assets remain built against v1.5.6.
+
 ## [v0.21.0](docs/RELEASE_NOTES_v0.21.0.md) — 2026-11-12
 
 - **Supported DuckDB baseline reduced to v1.5.6 + v2.0.0** (minor; drop of a

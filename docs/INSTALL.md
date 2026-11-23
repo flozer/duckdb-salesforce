@@ -15,8 +15,8 @@ artifact as described below. Community updates remain human-gated; see
 ## Supported DuckDB versions
 
 Extensions are **version-locked** to the DuckDB they were built against. This
-extension is built + tested against **DuckDB v1.5.6 and v2.0.0** (dual-line: one source tree, version selected at build time), per
-the official `MainDistributionPipeline.yml` matrix (all three pass on Linux
+extension is built + tested against **DuckDB v1.5.6, v2.0.0, and v2.0.1** (dual-line: one source tree, version selected at build time), per
+the official `MainDistributionPipeline.yml` matrix (each passes on Linux
 x64, Windows x64, and macOS arm64).
 
 v1.5.4 and v1.5.5 support was **dropped 2026-11-12** (maintainer decision,
@@ -32,6 +32,8 @@ DuckDB build/CLI for the artifact you produce.
 
 DuckDB v2.0.0 support shipped in `v0.20.0`; `v0.20.1` completes the
 vector-cardinality and projected `STRUCT IS NULL` compatibility fix. The
+v2.0.1 bugfix patch was added to the supported matrix in `v0.22.0`
+(2026-11-23; no source change - the dual-line v2.x path already covered it). The
 [original readiness investigation](superpowers/specs/2026-08-27-duckdb-v2-c-api-readiness.md)
 is retained as historical design context.
 
@@ -65,8 +67,8 @@ Common: `git`, CMake ≥ 3.5, a C++17 compiler, OpenSSL.
   suggestion in the error message.
 
 CI validates build + the offline (mock) test suite on **linux_amd64,
-windows_amd64, and osx_arm64** across DuckDB **v1.5.6 and v2.0.0** —
-both pass on all three platforms. v1.5.2-v1.5.5 are no longer part of
+windows_amd64, and osx_arm64** across DuckDB **v1.5.6, v2.0.0, and v2.0.1** —
+all pass on all three platforms. v1.5.2-v1.5.5 are no longer part of
 the matrix — see "Supported DuckDB versions" above.
 
 ## Build

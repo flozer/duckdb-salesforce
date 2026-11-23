@@ -8,7 +8,7 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.21.0"><img alt="release v0.21.0" src="https://img.shields.io/badge/release-v0.21.0-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.22.0"><img alt="release v0.22.0" src="https://img.shields.io/badge/release-v0.22.0-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
     <a href="https://github.com/duckdb/community-extensions/pull/3418"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-v0.20.2%20merged-brightgreen.svg"></a>
     <a href="https://duckdb.org/community_extensions/download_metrics"><img alt="DuckDB Community total downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fflozer%2Fduckdb-salesforce%2Fmain%2F.github%2Fbadges%2Fdownloads.json"></a>
@@ -252,10 +252,10 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.21.0** (dual-line: DuckDB **v1.5.6 and v2.0.0**;
-v1.5.2-v1.5.5 dropped). Release assets are built against v1.5.6 — production
-1.5.x environments are unaffected; v2.0.0 users build from source until the
-community registry migrates its baseline.
+Own-repo release: **v0.22.0** (dual-line: DuckDB **v1.5.6, v2.0.0, and
+v2.0.1**; v1.5.2-v1.5.5 dropped). Release assets are built against v1.5.6 —
+production 1.5.x environments are unaffected; v2.0.x users build from source
+until the community registry migrates its baseline.
 Community baseline: **v0.20.2**, merged via
 [`duckdb/community-extensions#3418`](https://github.com/duckdb/community-extensions/pull/3418)
 on 2026-10-29 with green community CI and a successful isolated install/load
@@ -291,7 +291,7 @@ resolves a report's base object from the official `reportTypeMetadata`.
 | Transparent `COUNT(field)` pushdown (`sf_aggregate_pushdown`) | Done |
 | Transparent `COUNT(DISTINCT)` / `MIN` / `MAX` pushdown | Done (sortable numeric/temporal/boolean fields; strings stay local) |
 | Transparent `SUM` / `AVG` pushdown | Rejected by live evidence: Salesforce SUM is floating point and diverged ~1,160 on a 3.1M-row window; `salesforce_aggregate()` is the explicit opt-in |
-| Official DuckDB v1.5.6 + v2.0.0 support (dual-line) | Done (CI matrix v1.5.6/v2.0.0 × 3 platforms; release assets build against v1.5.6) |
+| Official DuckDB v1.5.6 + v2.0.0 + v2.0.1 support (dual-line) | Done (CI matrix v1.5.6/v2.0.0/v2.0.1 × 3 platforms; release assets build against v1.5.6) |
 | Relationship-graph child recursion (`max_depth`) | Done (P2.3) |
 | Report Bridge base object via `reportTypeMetadata` (cut 2) | Done (P2.2) |
 | Delete sync (`salesforce_deleted_ids`: getDeleted any window + paginated queryAll sweep) | Done |
@@ -311,20 +311,19 @@ make test_release
 Windows MSVC and RTOOLS/MinGW local validation are documented in
 [docs/INSTALL.md](docs/INSTALL.md).
 
-**Supported: DuckDB v1.5.6 and v2.0.0.** v1.5.2-v1.5.5 support was dropped
+**Supported: DuckDB v1.5.6, v2.0.0, and v2.0.1.** v2.0.1 (bugfix on the v2.0
+LTS line) was added **2026-11-23**. v1.5.2-v1.5.5 support was dropped
 (v1.5.2/v1.5.3 on 2026-09-14; v1.5.4/v1.5.5 on 2026-11-12, scope reduction now
 that v2.0.0 is a shipped LTS line and the production line is v1.5.6) — see
 "Dropped versions" below.
 
-Going-forward CI matrix (official, from `MainDistributionPipeline.yml`). The
-last release validated across all of v1.5.4-v1.5.6 + v2.0.0 was v0.20.2 (see
-`docs/RELEASE_NOTES_v0.20.2.md` for that run record):
+Going-forward CI matrix (official, from `MainDistributionPipeline.yml`):
 
-| Platform | DuckDB v1.5.6 | DuckDB v2.0.0 |
-|---|---:|---:|
-| Linux x64 | Pass | Pass |
-| Windows x64 | Pass | Pass |
-| macOS arm64 | Pass | Pass |
+| Platform | DuckDB v1.5.6 | DuckDB v2.0.0 | DuckDB v2.0.1 |
+|---|---:|---:|---:|
+| Linux x64 | Pass | Pass | Pass |
+| Windows x64 | Pass | Pass | Pass |
+| macOS arm64 | Pass | Pass | Pass |
 
 ### Dropped versions (v1.5.2-v1.5.5)
 
