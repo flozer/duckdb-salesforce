@@ -9,7 +9,8 @@
 # 'Since v0.22.0' (v2.0.1 added) and 'Since v0.21.0' (set reduced) notes.
 # Function count unchanged (28, all self-documented). Registry builds against
 # DuckDB v1.5.6, which this source supports (floor = v1.5.6).
-# Submitted via fork branch flozer:salesforce-0.22.0 (PR duckdb/community-extensions#3743).
+# MERGED: duckdb/community-extensions#3743, 2026-11-24 (merge commit
+# d47fb0b6db7ac490b949cecf8393af4ec2f6e158). Live mirror description.yml now v0.22.0.
 #
 
 extension:
