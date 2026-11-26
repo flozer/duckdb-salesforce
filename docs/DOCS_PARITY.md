@@ -29,8 +29,8 @@ optional unless a note becomes public onboarding material.
 
 ## Project-management records
 
-`docs/ROADMAP.md`, `docs/RESEARCH_AND_IMPROVEMENTS.md`,
-`docs/PRE_COMMUNITY_CHECKLIST.md`, and `docs/community/description.yml`
+`docs/ROADMAP.md`, `docs/PRE_COMMUNITY_CHECKLIST.md`, and
+`docs/community/description.yml`
 are maintainer/PM records, not user manuals. English-only is acceptable.
 
 ## Required review before closing a doc task
