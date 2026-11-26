@@ -183,7 +183,7 @@ Como alternativa, use a URL SFDX da CLI do Salesforce e `auth_source
 'sfdx_url'`:
 
 ```bash
-export SF_SFDX_AUTH_URL=$(sf org display --verbose --json | jq -r .result.sfdxAuthUrl)
+export SF_SFDX_AUTH_URL=$(sf org auth show-sfdx-auth-url --json | jq -r .result.sfdxAuthUrl)
 duckdb
 ```
 
