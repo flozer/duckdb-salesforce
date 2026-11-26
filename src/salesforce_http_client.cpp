@@ -242,6 +242,12 @@ public:
 		if (request.url.find("/jobs/query") != string::npos) {
 			r.status = bulk_.create_status; // Bulk job create
 			r.body = bulk_.create_body;
+		} else if (request.body.find("&client_secret=&") != string::npos ||
+		           StringUtil::EndsWith(request.body, "&client_secret=")) {
+			// Mirrors Salesforce error handling. An empty client_secret parameter is
+			// rejected even for public clients, omitted values are accepted.
+			r.status = 400;
+			r.body = R"({"error":"invalid_client","error_description":"invalid client credentials"})";
 		} else {
 			r.status = token_status_; // OAuth token exchange / refresh
 			r.body = token_body_;
