@@ -42,7 +42,9 @@ static string DecodeBase64(const string &in) {
 		if (d == T_INIT) {
 			throw InvalidInputException("invalid base64");
 		}
-		val = (val << 6) + d;
+		// Keep only the low 24 bits: at most 14 pending bits are ever read back,
+		// and an unmasked accumulator overflows a signed int (UB) after ~5 chars.
+		val = ((val << 6) | d) & 0xFFFFFF;
 		bits += 6;
 		if (bits >= 0) {
 			out.push_back(static_cast<char>((val >> bits) & 0xFF));
