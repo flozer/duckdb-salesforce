@@ -41,6 +41,7 @@ exists to validate a build before tagging `v0.1.0`.
 | `SF_LIVE_CLIENT_SECRET` | yes | Connected App consumer secret |
 | `SF_LIVE_REFRESH_TOKEN` | yes | OAuth refresh token for the org |
 | `SF_LIVE_LOGIN_URL` | no | `https://login.salesforce.com` (default / Dev/scratch) or `https://test.salesforce.com` (sandbox) |
+| `SF_SFDX_AUTH_URL` | no | Public connected app (no secret): output of `sf org auth show-sfdx-auth-url`. Runs only `salesforce_sfdx_live.test` |
 
 PowerShell:
 
@@ -65,7 +66,8 @@ To clear them afterwards: `Remove-Item Env:SF_LIVE_*` (PowerShell) /
 
 ## 3. Run the gated live tests
 
-The `*_live.test` files are skipped unless the three required env vars are set.
+The `*_live.test` files are skipped unless the three required env vars are set
+(`salesforce_sfdx_live.test` needs only `SF_SFDX_AUTH_URL`).
 They currently ATTACH with the **default** login host (`login.salesforce.com`);
 for a sandbox that needs `test.salesforce.com`, use the ad-hoc run in §4 instead
 (or run these against a Dev/scratch org).
@@ -75,6 +77,7 @@ build/release/test/unittest "test/sql/salesforce_oauth_live.test"
 build/release/test/unittest "test/sql/salesforce_describe_live.test"
 build/release/test/unittest "test/sql/salesforce_query_live.test"
 build/release/test/unittest "test/sql/salesforce_scan_live.test"
+build/release/test/unittest "test/sql/salesforce_sfdx_live.test"   # needs SF_SFDX_AUTH_URL
 ```
 
 Expected: each prints `All tests passed` (or `Skipped` if env not set — which

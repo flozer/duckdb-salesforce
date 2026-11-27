@@ -1,0 +1,23 @@
+# name: test/sql/salesforce_sfdx_live.test
+# description: GATED manual test - public connected app (no client secret) via
+#              an SFDX auth URL. Skipped in normal CI (requires SF_SFDX_AUTH_URL).
+#              Never set it in CI.
+# group: [salesforce]
+
+require salesforce
+
+require-env SF_SFDX_AUTH_URL
+
+# The Salesforce CLI URL (sf org auth show-sfdx-auth-url) carries an empty
+# secret: force://PlatformCLI::<refresh_token>@<host>. The token exchange must
+# omit client_secret, or Salesforce rejects it with invalid_client (#95).
+statement ok
+ATTACH 'salesforce://live' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+
+query I
+SELECT COUNT(*) >= 0 FROM (SELECT Id, Name FROM sf.Account LIMIT 5);
+----
+true
+
+statement ok
+DETACH sf;
