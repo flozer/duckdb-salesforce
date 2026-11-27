@@ -201,7 +201,7 @@ ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
 Or, using a Salesforce CLI auth URL captured from an authorized org:
 
 ```bash
-export SF_SFDX_AUTH_URL=$(sf org display --verbose --json | jq -r .result.sfdxAuthUrl)
+export SF_SFDX_AUTH_URL=$(sf org auth show-sfdx-auth-url --json | jq -r .result.sfdxAuthUrl)
 
 duckdb
 ```

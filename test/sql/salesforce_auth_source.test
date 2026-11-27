@@ -72,6 +72,23 @@ Acme
 statement ok
 DETACH sf;
 
+# === sfdx_url with an EMPTY client secret (Salesforce CLI default app) ======
+# The client_secret parameter must be omitted, not sent empty: the mock, like
+# live Salesforce, rejects an empty client_secret= with invalid_client.
+statement ok
+SET sf_mock_env = 'SF_SFDX_AUTH_URL=force://PlatformCLI::rt@mydom.my.salesforce.com';
+
+statement ok
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'sfdx_url');
+
+query I
+SELECT Name FROM sf.Account;
+----
+Acme
+
+statement ok
+DETACH sf;
+
 # === env missing var -> clear error naming ONLY the variable ================
 statement ok
 SET sf_mock_env = 'SF_CLIENT_ID=ci';

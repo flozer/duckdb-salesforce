@@ -98,9 +98,13 @@ SalesforceTokenSet SalesforceAuth::ExchangeRefreshToken(const SalesforceConfig &
 	req.url = TrimTrailingSlash(config.login_url) + "/services/oauth2/token";
 	req.headers = {{"Content-Type", "application/x-www-form-urlencoded"}, {"Accept", "application/json"}};
 	// Body carries the secrets — never logged anywhere.
-	req.body = "grant_type=refresh_token" + string("&client_id=") + FormEncode(config.client_id) +
-	           "&client_secret=" + FormEncode(config.client_secret) +
-	           "&refresh_token=" + FormEncode(config.refresh_token);
+	req.body = "grant_type=refresh_token" + string("&client_id=") + FormEncode(config.client_id);
+	// Salesforce rejects an empty client_secret= with invalid_client
+	// but accepts the request when the parameter is omitted.
+	if (!config.client_secret.empty()) {
+		req.body += "&client_secret=" + FormEncode(config.client_secret);
+	}
+	req.body += "&refresh_token=" + FormEncode(config.refresh_token);
 
 	HttpResponse resp = client.Post(req);
 	return HandleTokenResponse(resp, req.url);
