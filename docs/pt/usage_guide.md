@@ -136,10 +136,11 @@ elas vêm, o que é útil para não deixar segredos no texto SQL. Os quatro
 modos são:
 
 - **`'options'`** (padrão) — credenciais nas opções do `ATTACH`:
-  `client_id`, `client_secret` e `refresh_token` (obrigatórios), mais os
-  opcionais `login_url` e `api_version`.
-- **`'env'`** — credenciais nas variáveis de ambiente `SF_CLIENT_ID`,
-  `SF_CLIENT_SECRET` e `SF_REFRESH_TOKEN` (obrigatórias), mais a opcional
+  `client_id` e `refresh_token` (obrigatórios), mais os opcionais
+  `client_secret` (omita-o em connected apps públicos, como o do Salesforce
+  CLI, que não têm secret), `login_url` e `api_version`.
+- **`'env'`** — credenciais nas variáveis de ambiente `SF_CLIENT_ID` e
+  `SF_REFRESH_TOKEN` (obrigatórias), mais as opcionais `SF_CLIENT_SECRET` e
   `SF_LOGIN_URL`.
 - **`'sfdx_url'`** — credenciais na variável `SF_SFDX_AUTH_URL`, no formato
   `force://<clientId>:<clientSecret>:<refreshToken>@<host-da-instancia>` (o

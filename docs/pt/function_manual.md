@@ -88,7 +88,7 @@ Parâmetros do `ATTACH`:
 |---|---|---|---|
 | `TYPE salesforce` | sim | — | Seleciona esta extensão de armazenamento |
 | `client_id` | sim | — | Consumer key do Connected App |
-| `client_secret` | sim | — | Consumer secret do Connected App |
+| `client_secret` | não | — | Consumer secret do Connected App (omita em connected apps públicos, sem secret) |
 | `refresh_token` | sim | — | Refresh token OAuth do usuário de leitura |
 | `login_url` | não | `https://login.salesforce.com` | Host OAuth; use o host de My Domain / sandbox quando aplicável |
 | `api_version` | não | padrão da extensão | Versão da API do Salesforce, ex. `60.0` |
@@ -109,12 +109,12 @@ A opção `auth_source` decide **de onde** o `ATTACH` lê as credenciais OAuth.
 Ela aceita quatro valores:
 
 - **`'options'`** (padrão, inalterado) — as credenciais vêm das próprias
-  opções do `ATTACH`: `client_id`, `client_secret` e `refresh_token`
-  (obrigatórios), mais os opcionais `login_url` e `api_version`. É o
+  opções do `ATTACH`: `client_id` e `refresh_token` (obrigatórios), mais
+  os opcionais `client_secret`, `login_url` e `api_version`. É o
   comportamento descrito na tabela acima.
 - **`'env'`** — as credenciais vêm de variáveis de ambiente. A extensão lê
-  `SF_CLIENT_ID`, `SF_CLIENT_SECRET` e `SF_REFRESH_TOKEN` (obrigatórias),
-  mais a opcional `SF_LOGIN_URL`. As opções de credencial do `ATTACH` não
+  `SF_CLIENT_ID` e `SF_REFRESH_TOKEN` (obrigatórias), mais as opcionais
+  `SF_CLIENT_SECRET` e `SF_LOGIN_URL`. As opções de credencial do `ATTACH` não
   são necessárias neste modo.
 - **`'sfdx_url'`** — as credenciais vêm da variável `SF_SFDX_AUTH_URL`, no
   formato `force://<clientId>:<clientSecret>:<refreshToken>@<host-da-instancia>`
@@ -1767,7 +1767,7 @@ Argumentos:
 |---|---|---|
 | `object` | sim | Nome de API do sObject a descrever (posicional) |
 | `client_id :=` | sim | Consumer key do Connected App |
-| `client_secret :=` | sim | Consumer secret do Connected App |
+| `client_secret :=` | não | Consumer secret do Connected App (omita em connected apps públicos) |
 | `refresh_token :=` | sim | Refresh token OAuth |
 | `login_url :=` | não | Host OAuth (padrão `https://login.salesforce.com`) |
 | `api_version :=` | não | Versão da API do Salesforce |

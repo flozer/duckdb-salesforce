@@ -38,11 +38,10 @@ using names_t = duckdb::vector<duckdb::Identifier>;
 using names_t = duckdb::vector<std::string>;
 #endif
 
-#if SF_DUCKDB_HAS_IDENTIFIER
+// duckdb::Identifier exists on every supported ref (floor v1.5.6).
 inline std::string name_of(const duckdb::Identifier &id) {
 	return id.GetIdentifierName();
 }
-#endif
 inline std::string name_of(const std::string &s) {
 	return s;
 }

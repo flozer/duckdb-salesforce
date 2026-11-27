@@ -86,8 +86,8 @@ static string RequireOption(const case_insensitive_map_t<string> &opts, const ch
 	auto it = opts.find(key);
 	if (it == opts.end() || Trimmed(it->second).empty()) {
 		throw BinderException("salesforce ATTACH: missing required option '%s'. Expected: "
-		                      "ATTACH 'salesforce://<org>' (client_id '...', client_secret '...', "
-		                      "refresh_token '...').",
+		                      "ATTACH 'salesforce://<org>' (client_id '...', refresh_token '...' "
+		                      "[, client_secret '...']).",
 		                      key);
 	}
 	return it->second;
@@ -249,7 +249,12 @@ SalesforceConfig SalesforceConfig::ParseAndValidate(const string &path, AttachIn
 
 	if (auth_source == "options") {
 		cfg.client_id = RequireOption(opts, "client_id");
-		cfg.client_secret = RequireOption(opts, "client_secret");
+		// Optional: public connected apps (e.g. the Salesforce CLI) have no secret;
+		// ExchangeRefreshToken then omits the parameter (#95).
+		auto secret_it = opts.find("client_secret");
+		if (secret_it != opts.end()) {
+			cfg.client_secret = Trimmed(secret_it->second);
+		}
 		cfg.refresh_token = RequireOption(opts, "refresh_token");
 		auto login_it = opts.find("login_url");
 		if (login_it != opts.end() && !Trimmed(login_it->second).empty()) {
@@ -259,9 +264,9 @@ SalesforceConfig SalesforceConfig::ParseAndValidate(const string &path, AttachIn
 			cfg.login_url = kDefaultLoginUrl;
 		}
 	} else if (auth_source == "env") {
-		// SF_CLIENT_ID / SF_CLIENT_SECRET / SF_REFRESH_TOKEN [+ SF_LOGIN_URL].
+		// SF_CLIENT_ID / SF_REFRESH_TOKEN [+ SF_CLIENT_SECRET, SF_LOGIN_URL].
 		cfg.client_id = RequireEnv(context, "SF_CLIENT_ID");
-		cfg.client_secret = RequireEnv(context, "SF_CLIENT_SECRET");
+		EnvLookup(context, "SF_CLIENT_SECRET", cfg.client_secret); // optional (public clients, #95)
 		cfg.refresh_token = RequireEnv(context, "SF_REFRESH_TOKEN");
 		string login;
 		if (EnvLookup(context, "SF_LOGIN_URL", login)) {

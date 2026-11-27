@@ -133,12 +133,13 @@ from. The OAuth refresh-token flow is unchanged — only the source differs.
 There are four modes:
 
 - **`options`** (default): credentials are read from the inline `ATTACH`
-  options `client_id`, `client_secret`, and `refresh_token` (all required),
-  plus optional `login_url` and `api_version`. This is exactly the behavior
+  options `client_id` and `refresh_token` (required), plus optional
+  `client_secret` (omit it for public connected apps such as the Salesforce
+  CLI's, which have no secret), `login_url`, and `api_version`. This is exactly the behavior
   shown above; you can omit `auth_source` entirely.
 - **`env`**: credentials are read from environment variables. The required
-  ones are `SF_CLIENT_ID`, `SF_CLIENT_SECRET`, and `SF_REFRESH_TOKEN`;
-  `SF_LOGIN_URL` is optional. You do not pass the credential options in SQL.
+  ones are `SF_CLIENT_ID` and `SF_REFRESH_TOKEN`; `SF_CLIENT_SECRET` and
+  `SF_LOGIN_URL` are optional. You do not pass the credential options in SQL.
 
   ```sql
   ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');

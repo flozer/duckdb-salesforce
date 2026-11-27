@@ -26,11 +26,6 @@ ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_secret 's', refr
 missing required option 'client_id'
 
 statement error
-ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', refresh_token 'r');
-----
-missing required option 'client_secret'
-
-statement error
 ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'c', client_secret 's');
 ----
 missing required option 'refresh_token'

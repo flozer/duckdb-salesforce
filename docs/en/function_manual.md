@@ -96,7 +96,7 @@ Parameters:
 | `TYPE salesforce` | yes | — | Selects this storage extension |
 | `auth_source` | no | `'options'` | Where credentials come from: `'options'`, `'env'`, `'sfdx_url'`, or `'jwt'` |
 | `client_id` | with `'options'` | — | Connected App consumer key |
-| `client_secret` | with `'options'` | — | Connected App consumer secret |
+| `client_secret` | no | — | Connected App consumer secret (omit for public connected apps without a secret) |
 | `refresh_token` | with `'options'` | — | OAuth refresh token for the read user |
 | `login_url` | no | `https://login.salesforce.com` | OAuth host; use the My Domain / sandbox host where applicable |
 | `api_version` | no | extension default | Salesforce API version, e.g. `60.0` |
@@ -113,12 +113,12 @@ sourced from. The default is `'options'`, which is the inline behavior
 described above.
 
 - **`'options'`** (default): credentials are read from the inline `ATTACH`
-  options `client_id`, `client_secret`, and `refresh_token` (all required),
-  plus the optional `login_url` and `api_version`.
+  options `client_id` and `refresh_token` (required), plus the optional
+  `client_secret`, `login_url`, and `api_version`.
 
 - **`'env'`**: credentials are read from environment variables instead of the
-  SQL text. The required variables are `SF_CLIENT_ID`, `SF_CLIENT_SECRET`, and
-  `SF_REFRESH_TOKEN`; `SF_LOGIN_URL` is optional. The inline credential
+  SQL text. The required variables are `SF_CLIENT_ID` and `SF_REFRESH_TOKEN`;
+  `SF_CLIENT_SECRET` and `SF_LOGIN_URL` are optional. The inline credential
   options are not needed (the environment source wins).
 
   ```sql
@@ -1524,7 +1524,7 @@ Arguments:
 |---|---|---|
 | `object` | yes | sObject API name to describe (positional) |
 | `client_id :=` | yes | Connected App consumer key |
-| `client_secret :=` | yes | Connected App consumer secret |
+| `client_secret :=` | no | Connected App consumer secret (omit for public connected apps) |
 | `refresh_token :=` | yes | OAuth refresh token |
 | `login_url :=` | no | OAuth host (default `https://login.salesforce.com`) |
 | `api_version :=` | no | Salesforce API version |

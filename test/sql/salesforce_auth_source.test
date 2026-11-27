@@ -43,6 +43,44 @@ Acme
 statement ok
 DETACH sf;
 
+# === client_secret is optional (public connected apps, #95) ================
+# The mock rejects an empty client_secret= like live Salesforce, so these pass
+# only when the parameter is omitted from the token exchange.
+statement ok
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, client_id 'PlatformCLI', refresh_token 'r');
+
+query I
+SELECT Name FROM sf.Account;
+----
+Acme
+
+statement ok
+DETACH sf;
+
+statement ok
+SET sf_mock_env = 'SF_CLIENT_ID=PlatformCLI;SF_REFRESH_TOKEN=rt';
+
+statement ok
+ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
+
+query I
+SELECT Name FROM sf.Account;
+----
+Acme
+
+statement ok
+DETACH sf;
+
+query I
+SELECT count(*) FROM salesforce_query('SELECT Name FROM Account', client_id := 'PlatformCLI', refresh_token := 'r');
+----
+1
+
+query I
+SELECT count(*) > 0 FROM salesforce_describe('Account', client_id := 'PlatformCLI', refresh_token := 'r');
+----
+true
+
 # === empty sf_mock_env falls through to the real OS environment =============
 # The setting defaults to "" (non-null). Empty MUST NOT hijack the lookup — it
 # falls through to std::getenv, which is unset in the offline test env, so env
@@ -96,7 +134,7 @@ SET sf_mock_env = 'SF_CLIENT_ID=ci';
 statement error
 ATTACH 'salesforce://production' AS sf (TYPE salesforce, auth_source 'env');
 ----
-missing required environment variable 'SF_CLIENT_SECRET'
+missing required environment variable 'SF_REFRESH_TOKEN'
 
 # === sfdx_url malformed -> clear error, no value echoed =====================
 statement ok

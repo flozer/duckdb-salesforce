@@ -8,7 +8,7 @@
   </p>
   <p>
     <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
-    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.22.0"><img alt="release v0.22.0" src="https://img.shields.io/badge/release-v0.22.0-blue.svg"></a>
+    <a href="https://github.com/flozer/duckdb-salesforce/releases/tag/v0.22.1"><img alt="release v0.22.1" src="https://img.shields.io/badge/release-v0.22.1-blue.svg"></a>
     <a href="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml"><img alt="Build + Test Linux Windows macOS" src="https://github.com/flozer/duckdb-salesforce/actions/workflows/MainDistributionPipeline.yml/badge.svg"></a>
     <a href="https://github.com/duckdb/community-extensions/pull/3418"><img alt="DuckDB community merged" src="https://img.shields.io/badge/DuckDB%20community-v0.20.2%20merged-brightgreen.svg"></a>
     <a href="https://duckdb.org/community_extensions/download_metrics"><img alt="DuckDB Community total downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fflozer%2Fduckdb-salesforce%2Fmain%2F.github%2Fbadges%2Fdownloads.json"></a>
@@ -252,14 +252,14 @@ environment variables, and JWT requirements.
 
 ## Current Status
 
-Own-repo release: **v0.22.0** (dual-line: DuckDB **v1.5.6, v2.0.0, and
+Own-repo release: **v0.22.1** (dual-line: DuckDB **v1.5.6, v2.0.0, and
 v2.0.1**; v1.5.2-v1.5.5 dropped). Release assets are built against v1.5.6 —
 production 1.5.x environments are unaffected; v2.0.x users build from source
 until the community registry migrates its baseline.
-Community baseline: **v0.20.2**, merged via
-[`duckdb/community-extensions#3418`](https://github.com/duckdb/community-extensions/pull/3418)
-on 2026-10-29 with green community CI and a successful isolated install/load
-smoke (lineage #2850 → #2875 → #2948 → #3015 → #3064 → #3418; updates follow
+Community baseline: **v0.22.0**, merged via
+[`duckdb/community-extensions#3743`](https://github.com/duckdb/community-extensions/pull/3743)
+on 2026-11-24 with green community CI and a successful install/load smoke
+(lineage #2850 → #2875 → #2948 → #3015 → #3064 → #3418 → #3743; updates follow
 the project's explicit-submission gate). Every
 extension function documents itself through `duckdb_functions()`
 (description, example, parameter names), and no-group `COUNT`,

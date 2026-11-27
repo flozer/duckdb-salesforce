@@ -251,7 +251,7 @@ bool TryRewriteCountAggregate(ClientContext &context, LogicalAggregate &agg,
 
 	vector<SalesforceScanBindData::SalesforcePushedAggregate> pushed;
 	// Aggregate expressions live in the inherited LogicalOperator::expressions
-	// across the supported matrix (v1.5.4-v1.5.6; there is no dedicated
+	// across the supported matrix (v1.5.6, v2.0.x; there is no dedicated
 	// `aggregates` member).
 	for (auto &expr : agg.expressions) {
 		// GetExpressionClass (not GetExpressionType): on 2.0 the type enum no

@@ -124,7 +124,7 @@ static unique_ptr<FunctionData> DescribeBind(ClientContext &context, TableFuncti
 		}
 	};
 	require(cfg.client_id, "client_id");
-	require(cfg.client_secret, "client_secret");
+	// client_secret is optional: public connected apps have none (#95).
 	require(cfg.refresh_token, "refresh_token");
 
 	// Authenticate + describe at bind time (mock-injectable HTTP client).
