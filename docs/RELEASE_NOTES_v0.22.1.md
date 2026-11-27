@@ -67,7 +67,17 @@ PR #96 was also validated in isolation before merge: offline suite 60/60
 
 ### Official CI run record
 
-TBD.
+`MainDistributionPipeline.yml` run [45933308201](https://github.com/flozer/duckdb-salesforce/actions/runs/45933308201)
+on `main` at `1a26fef` completed successfully: **9/9 platform jobs passed** (3
+DuckDB refs x 3 platforms). The 3 per-ref `Generate matrix` jobs also passed;
+the 3 `matrix.duckdb_arch` jobs are expected template placeholders and are
+skipped.
+
+| Platform | DuckDB v1.5.6 | DuckDB v2.0.0 | DuckDB v2.0.1 |
+|---|---:|---:|---:|
+| `linux_amd64` | pass | pass | pass |
+| `windows_amd64` | pass | pass | pass |
+| `osx_arm64` | pass | pass | pass |
 
 ## Gates
 
