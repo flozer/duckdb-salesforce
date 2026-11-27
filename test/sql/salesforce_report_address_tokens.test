@@ -8,9 +8,9 @@
 # (must exist; filterable for WHERE). No partial translation: an unmapped token,
 # a wrong-object key, or a candidate absent/not-filterable in Describe -> blocked.
 #
-# The real map is EMPTY (entries land only with org fixture evidence). This test
-# drives the mechanism via the test-only injection knob sf_mock_report_token_map
-# ("Object:TOKEN=Field;..."), so we prove the wiring without inventing entries.
+# The mechanism blocks drive the test-only injection knob sf_mock_report_token_map
+# ("Object:TOKEN=Field;..."); when non-empty it REPLACES the real map. The last
+# blocks clear it and pin the real, fixture-backed entries (ContactList/User).
 
 require salesforce
 
@@ -119,6 +119,26 @@ query I
 SELECT translatable AND translation_status = 'full'
    AND contains(soql, 'OtherCity') AND contains(soql, 'OtherStreet') AND contains(soql, 'Name')
    AND len(columns) = 3
+FROM salesforce_report_soql('sf', '00O1');
+----
+true
+
+# === real map (knob cleared): ContactList tokens -> Mailing*/phone fields ====
+statement ok
+SET sf_mock_report_token_map = '';
+
+statement ok
+SET sf_mock_describe_body = '{"name":"Contact","fields":[{"name":"Name","type":"string","filterable":true},{"name":"MailingCity","type":"string","filterable":true},{"name":"MailingState","type":"string","filterable":true},{"name":"MailingCountry","type":"string","filterable":true},{"name":"MailingCountryCode","type":"picklist","filterable":true},{"name":"Phone","type":"phone","filterable":true},{"name":"Fax","type":"phone","filterable":true},{"name":"MobilePhone","type":"phone","filterable":true}]}';
+
+statement ok
+SELECT scope FROM salesforce_refresh_metadata('sf');
+
+statement ok
+SET sf_mock_report_describe_body = '{"reportMetadata":{"reportType":{"type":"ContactList"},"reportFormat":"TABULAR","detailColumns":["ADDRESS2_CITY","ADDRESS2_STATE","ADDRESS2_COUNTRY","ADDRESS2_COUNTRY_CODE","PHONE1","PHONE2","PHONE3","Name"]}}';
+
+query I
+SELECT translatable AND translation_status = 'full' AND base_object = 'Contact'
+   AND soql = 'SELECT MailingCity, MailingState, MailingCountry, MailingCountryCode, Phone, Fax, MobilePhone, Name FROM Contact'
 FROM salesforce_report_soql('sf', '00O1');
 ----
 true
