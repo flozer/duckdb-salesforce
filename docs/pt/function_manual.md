@@ -2063,7 +2063,11 @@ validado contra o sObject Describe; a projeção do SOQL é relativizada para no
 de campo simples. Um campo usado em filtro precisa adicionalmente ser
 **filterable** (um campo não-filtrável faria o SOQL candidato falhar no
 Salesforce). Traversal de relacionamento (`Rel.Field`) e pseudo-colunas não
-resolvem. Qualquer falha — base insegura/interna, objeto inexistente ou não
+resolvem. Tokens de coluna builtin do relatório (`ADDRESS2_CITY`, `PHONE1`, ...)
+só resolvem para pares comprovados numa org real: Contact
+`ADDRESS2_CITY/STATE/COUNTRY/COUNTRY_CODE` → `MailingCity/State/Country/
+CountryCode`, Contact `PHONE1/PHONE2/PHONE3` → `Phone/Fax/MobilePhone`, User
+`CELL` → `MobilePhone`; qualquer outro token continua sem resolver. Qualquer falha — base insegura/interna, objeto inexistente ou não
 queryable, campo ausente no objeto, cross filter, operador não suportado, ou
 lógica `OR`/`NOT`/agrupada — resulta em `translatable = false` com `soql = NULL` e
 um caveat explicativo. SOQL parcial nunca é emitido. Os ingredientes estruturados

@@ -12,6 +12,18 @@ project does not yet follow strict Semantic Versioning (see
 release that was purely a provenance/version-metadata fix, not a semver patch
 in the strict sense).
 
+## [v0.23.0](docs/RELEASE_NOTES_v0.23.0.md) — 2026-11-27
+
+- **Report Bridge: fixture-backed column token map** (R-008). Report builtin
+  tokens now resolve for org-proven pairs: Contact `ADDRESS2_CITY/STATE/
+  COUNTRY/COUNTRY_CODE` → `Mailing*`, Contact `PHONE1/2/3` →
+  `Phone/Fax/MobilePhone`, User `CELL` → `MobilePhone`. Candidates are still
+  validated against the Describe; other tokens stay unresolved.
+- Tests: `salesforce_oauth_live.test` fixed (ATTACH now succeeds); new gated
+  `salesforce_sfdx_live.test` for public connected apps (`SF_SFDX_AUTH_URL`).
+- Docs: `docs/ARCHITECTURE.md` refreshed (auth sources, JWT shipped, milestones
+  through v0.22.1). Supported matrix unchanged: **{v1.5.6, v2.0.0, v2.0.1}**.
+
 ## [v0.22.1](docs/RELEASE_NOTES_v0.22.1.md) — 2026-11-27
 
 - **Fix: refresh-token exchange with an empty `client_secret`** (#95, PR #96 by
