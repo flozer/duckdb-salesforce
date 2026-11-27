@@ -632,51 +632,56 @@ static string DominantColumnPrefix(const vector<string> &columns, const vector<R
 // not sObject field API names. Map a (base_object, token) pair to a CANDIDATE
 // component field API name; the caller then validates the candidate against the
 // Describe via the Metadata Engine (existence + filterability). Object-keyed,
-// never universal. The real map is intentionally EMPTY — entries are added only
-// with real org fixture evidence, in a separate commit. Tests inject controlled
-// mappings via sf_mock_report_token_map. Returns "" when no mapping applies (the
-// caller then leaves the token unresolved → the report blocks; no guessing).
+// never universal. Real entries are added only with org fixture evidence. Tests
+// inject controlled mappings via sf_mock_report_token_map. Returns "" when no
+// mapping applies (the caller then leaves the token unresolved → the report
+// blocks; no guessing).
 static string ResolveReportTokenCandidate(ClientContext &context, const string &base, const string &token) {
-	// 1. Real, fixture-backed, object-keyed map. EMPTY until org evidence lands.
-	//    Add entries ONLY with a captured report proving (object, token, field).
+	// 1. TEST-ONLY injection: sf_mock_report_token_map = "Obj:TOKEN=Field;...".
+	//    When set (non-empty) it REPLACES the real map, so mechanism tests stay
+	//    independent of the fixture-backed entries below.
+	Value v;
+	if (context.TryGetCurrentSetting("sf_mock_report_token_map", v) && !v.IsNull() && !v.ToString().empty()) {
+		for (auto &entry : StringUtil::Split(v.ToString(), ';')) {
+			auto colon = entry.find(':');
+			auto eq = entry.find('=', colon == string::npos ? 0 : colon);
+			if (colon == string::npos || eq == string::npos || eq <= colon + 1) {
+				continue;
+			}
+			string e_obj = entry.substr(0, colon);
+			string e_tok = entry.substr(colon + 1, eq - colon - 1);
+			string e_field = entry.substr(eq + 1);
+			StringUtil::Trim(e_obj);
+			StringUtil::Trim(e_tok);
+			StringUtil::Trim(e_field);
+			if (StringUtil::CIEquals(base, e_obj) && StringUtil::CIEquals(token, e_tok)) {
+				return e_field;
+			}
+		}
+		return "";
+	}
+	// 2. Real, fixture-backed, object-keyed map. Add entries ONLY with a captured
+	//    report proving (object, token, field). Evidence (2026-11-27, metadata
+	//    only): /analytics/reports/{id}/describe detailColumnInfo label + dataType
+	//    of ContactList and User reports, matched against the sObject Describe.
 	struct TokenEntry {
 		const char *object;
 		const char *token;
 		const char *field;
 	};
-	// EMPTY until org evidence lands (a zero-size C array is ill-formed, so use a
-	// vector). Add entries ONLY with a captured report proving (object, token, field).
 	static const vector<TokenEntry> kReal = {
-	    // {"Contact", "ADDRESS2_CITY", "OtherCity"},  // example — needs fixture proof
+	    {"Contact", "ADDRESS2_CITY", "MailingCity"},
+	    {"Contact", "ADDRESS2_STATE", "MailingState"},
+	    {"Contact", "ADDRESS2_COUNTRY", "MailingCountry"},
+	    {"Contact", "ADDRESS2_COUNTRY_CODE", "MailingCountryCode"},
+	    {"Contact", "PHONE1", "Phone"},
+	    {"Contact", "PHONE2", "Fax"},
+	    {"Contact", "PHONE3", "MobilePhone"},
+	    {"User", "CELL", "MobilePhone"},
 	};
 	for (auto &e : kReal) {
 		if (StringUtil::CIEquals(base, e.object) && StringUtil::CIEquals(token, e.token)) {
 			return e.field;
-		}
-	}
-	// 2. TEST-ONLY injection: sf_mock_report_token_map = "Obj:TOKEN=Field;...".
-	Value v;
-	if (!context.TryGetCurrentSetting("sf_mock_report_token_map", v) || v.IsNull()) {
-		return "";
-	}
-	string spec = v.ToString();
-	if (spec.empty()) {
-		return "";
-	}
-	for (auto &entry : StringUtil::Split(spec, ';')) {
-		auto colon = entry.find(':');
-		auto eq = entry.find('=', colon == string::npos ? 0 : colon);
-		if (colon == string::npos || eq == string::npos || eq <= colon + 1) {
-			continue;
-		}
-		string e_obj = entry.substr(0, colon);
-		string e_tok = entry.substr(colon + 1, eq - colon - 1);
-		string e_field = entry.substr(eq + 1);
-		StringUtil::Trim(e_obj);
-		StringUtil::Trim(e_tok);
-		StringUtil::Trim(e_field);
-		if (StringUtil::CIEquals(base, e_obj) && StringUtil::CIEquals(token, e_tok)) {
-			return e_field;
 		}
 	}
 	return "";
