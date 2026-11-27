@@ -256,10 +256,10 @@ Own-repo release: **v0.22.1** (dual-line: DuckDB **v1.5.6, v2.0.0, and
 v2.0.1**; v1.5.2-v1.5.5 dropped). Release assets are built against v1.5.6 —
 production 1.5.x environments are unaffected; v2.0.x users build from source
 until the community registry migrates its baseline.
-Community baseline: **v0.22.0**, merged via
-[`duckdb/community-extensions#3743`](https://github.com/duckdb/community-extensions/pull/3743)
-on 2026-11-24 with green community CI and a successful install/load smoke
-(lineage #2850 → #2875 → #2948 → #3015 → #3064 → #3418 → #3743; updates follow
+Community baseline: **v0.22.1**, merged via
+[`duckdb/community-extensions#3816`](https://github.com/duckdb/community-extensions/pull/3816)
+on 2026-11-27 with green community CI and a successful install/load smoke
+(lineage #2850 → #2875 → #2948 → #3015 → #3064 → #3418 → #3743 → #3816; updates follow
 the project's explicit-submission gate). Every
 extension function documents itself through `duckdb_functions()`
 (description, example, parameter names), and no-group `COUNT`,

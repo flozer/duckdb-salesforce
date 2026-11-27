@@ -6,8 +6,9 @@
 # commit ff658cfef83eb86b23922a4a14001c51734f551c); header comment refreshed;
 # extended_description gains a 'Since v0.22.1' note (optional client_secret,
 # base64 UB fix). Function count unchanged (28). Matrix unchanged.
-# SUBMITTED: duckdb/community-extensions#3816 (2026-11-27, C.5 GO by Fernando;
-# fork branch flozer/community-extensions:salesforce-0.22.1).
+# MERGED: duckdb/community-extensions#3816, 2026-11-27 (merge commit
+# 0b40aa71a1c997f8d0a2e959ec23b06c2407c438; C.5 GO by Fernando; fork branch
+# flozer/community-extensions:salesforce-0.22.1).
 #
 # Submission file for https://github.com/duckdb/community-extensions
 #
