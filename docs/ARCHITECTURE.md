@@ -265,14 +265,16 @@ Salesforce authentication is **OAuth 2.0** and replaces Firebird's `user/passwor
 ATTACH 'salesforce://my-org' AS sf (
     TYPE            salesforce,
     client_id       '<consumer key>',
-    client_secret   '<consumer secret>',
+    client_secret   '<consumer secret>',   -- optional: public apps have none (v0.22.1)
     refresh_token   '<refresh token>',
     login_url       'https://login.salesforce.com',  -- or test.salesforce.com / My Domain
     api_version     '60.0'
 );
 ```
 
-`SalesforceConnectionInfo::ParseOAuth` (replacing `FirebirdConnectionInfo::Parse`) extracts these into the connection info struct. The struct stores **OAuth token state + instance URL** instead of a database file path.
+`salesforce_config.cpp` parses these into `SalesforceConfig` (the analog of `FirebirdConnectionInfo::Parse`). It stores **OAuth token state + instance URL** instead of a database file path.
+
+Since v0.9.0 the `auth_source` option selects where credentials come from: `options` (default, inline as above), `env` (`SF_CLIENT_ID`, `SF_REFRESH_TOKEN`, optional `SF_CLIENT_SECRET`/`SF_LOGIN_URL`), `sfdx_url` (`SF_SFDX_AUTH_URL`, the Salesforce CLI `force://<id>:<secret>:<refresh_token>@<host>` format), and `jwt` (§4.5). The token flow is the same for the first three; see the usage guide for details.
 
 ### 4.2 Token exchange (refresh-token flow)
 
@@ -283,7 +285,7 @@ POST {login_url}/services/oauth2/token
 Content-Type: application/x-www-form-urlencoded
 Body: grant_type=refresh_token
       &client_id=<id>
-      &client_secret=<secret>
+      &client_secret=<secret>      (omitted when empty: Salesforce rejects an empty value)
       &refresh_token=<token>
 ```
 
@@ -303,9 +305,9 @@ Response yields `access_token` and **`instance_url`** (dynamically resolved, e.g
 - **Sandbox vs production mismatch** → refresh tokens are org-specific; validate at ATTACH time by confirming `instance_url` matches the expected environment.
 - **Clock skew** (relevant if JWT Bearer flow is added later) → tolerate 30 s skew, require NTP sync.
 
-### 4.5 JWT Bearer (future, v0.5+)
+### 4.5 JWT Bearer (`auth_source 'jwt'`, shipped v0.9.0)
 
-JWT Bearer (X.509 server-to-server, no user interaction) is a planned alternative. Note: it returns **no refresh token**, so the auth manager must re-assert and re-fetch an access token on each expiry. The abstraction (`SalesforceAuth` interface) is designed so this becomes a second strategy implementation without touching the transport or scanner layers.
+JWT Bearer (X.509 server-to-server, no user interaction) shipped in v0.9.0 as `auth_source 'jwt'` (`SalesforceAuth` RS256-signs the assertion). Note: it returns **no refresh token**, so the auth manager must re-assert and re-fetch an access token on each expiry. The abstraction (`SalesforceAuth` interface) is designed so this becomes a second strategy implementation without touching the transport or scanner layers.
 
 ---
 
@@ -711,6 +713,14 @@ Unlike Firebird's empty dependency list, this declares real deps:
 | **v0.13.0** | Relationship graph, cut 1 | `salesforce_relationship_graph()` — on-demand parent enumerator with explicit per-edge status. |
 | **v0.14.0** | Relationship graph, cut 2 | Opt-in child relationships + `direction` filter on `salesforce_relationship_graph()`. |
 | **v0.14.2** | DuckDB v1.5.5 compatibility | No functional change; DuckDB v1.5.5 build/test validation, a `duckdb/main` canary evidence pass, and (in a later cycle) a reduced own-repo CI matrix (v1.5.2/v1.5.3 dropped, v1.5.4/v1.5.5 only). |
+| **v0.15.0–v0.15.1** | Baseline + discoverability | v1.5.2/v1.5.3 dropped; every registered function carries a `FunctionDescription` visible in `duckdb_functions()`. |
+| **v0.16.0–v0.17.0** | Transparent aggregate pushdown | An `OptimizerExtension` rewrites `Aggregate→Scan` into SOQL: `COUNT(field)`, then `COUNT(DISTINCT)` and `MIN`/`MAX` (kill switch `sf_aggregate_pushdown`). `SUM`/`AVG` stay opt-in via `salesforce_aggregate()` (Salesforce aggregates in floating point). |
+| **v0.17.1** | DuckDB v1.5.6 | Compatibility-only release adding v1.5.6 to the matrix. |
+| **v0.18.0** | Relationship graph, cut 3 | Opt-in child-direction recursion in `salesforce_relationship_graph()`. |
+| **v0.19.0–v0.19.2** | Delete sync + Bulk resume | `salesforce_deleted_ids()` (Replication API `getDeleted()` for short windows, queryAll `IsDeleted` scan for wider ones), `salesforce_bulk_resume()`, per-catalog `ATTACH` overrides, error hints, then fixes. |
+| **v0.20.0–v0.20.2** | DuckDB 2.0, dual-line | One source tree builds on v1.5.x and v2.0.x (`SF_DUCKDB_V2` + `salesforce_duckdb_compat.hpp`); v2.0 cardinality fix. |
+| **v0.21.0–v0.22.0** | Matrix {v1.5.6, v2.0.0, v2.0.1} | Older v1.5.x refs dropped; v2.0.1 added. No runtime change. |
+| **v0.22.1** | Public connected apps | `client_secret` optional on every refresh-token path (empty value omitted from the token request); base64 decoder UB fix. |
 
 **Not pursued:** the original plan's later milestones — a GraphQL pushdown
 path (Appendix A) and "Vault Mode" persisted/offline materialization
@@ -725,11 +735,11 @@ historical/not-implemented) — their body content is otherwise kept
 verbatim as a design-history record.
 
 **Open / planned work** is tracked live in [docs/ROADMAP.md](ROADMAP.md), and
-notably includes: transparent `GROUP BY`/`COUNT(field)` pushdown during scans
-(still deferred — distinct from `salesforce_aggregate()`'s already-delivered
-explicit `GROUP BY`), grandparent-depth SOQL relationship paths pushed into a
-single query, relationship-expansion diagnostics, auth UX improvements, and
-macOS live-TLS trust-store validation.
+notably includes macOS live-TLS trust-store validation and further
+fixture-backed Report Bridge token mappings. Transparent `COUNT(field)`,
+`COUNT(DISTINCT)` and `MIN`/`MAX` pushdown shipped in v0.16.0–v0.17.0;
+transparent `SUM`/`AVG` will not ship (Salesforce aggregates in floating point,
+so results would change) — use `salesforce_aggregate()`.
 
 ---
 
@@ -1006,9 +1016,8 @@ These six are flagged now so v0.1–v0.7 implementations avoid baking in live-on
 ## Appendix C: v0.1 Delivery Track (`v0.1-readonly-rest`)
 
 > **HISTORICAL.** This appendix records the original v0.1 vertical slice and its
-> gates. v0.1 shipped; the project is now at **v0.8** (REST + Bulk + auto, quota
-> governor, COUNT pushdown, parent relationships, Tooling schema, PK chunking,
-> Linux/Windows/macOS-arm64 CI). Items deferred to "v0.2" below landed across
+> gates. v0.1 shipped; see §15 for everything delivered since (current state:
+> the README and CHANGELOG). Items deferred to "v0.2" below landed across
 > v0.2–v0.8. The
 > **security gate (C.4/C.5) remains in force** for every release. Kept verbatim
 > for provenance — not rewritten.
