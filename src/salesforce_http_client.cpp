@@ -244,10 +244,12 @@ public:
 			r.body = bulk_.create_body;
 		} else if (request.body.find("&client_secret=&") != string::npos ||
 		           StringUtil::EndsWith(request.body, "&client_secret=")) {
-			// Mirrors Salesforce error handling. An empty client_secret parameter is
-			// rejected even for public clients, omitted values are accepted.
-			r.status = 400;
-			r.body = R"({"error":"invalid_client","error_description":"invalid client credentials"})";
+			// Live Salesforce rejects an empty client_secret= with HTTP 400
+			// invalid_client. Omitting the parameter is accepted. The mock
+			// deliberately returns 200 without an access_token instead because 
+			// the sqllogictest runner skips tests whose error contains "HTTP".
+			r.status = 200;
+			r.body = R"({"error":"empty_client_secret_sent"})";
 		} else {
 			r.status = token_status_; // OAuth token exchange / refresh
 			r.body = token_body_;
